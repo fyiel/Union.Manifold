@@ -96,11 +96,9 @@ declare global {
     releaseYear?: number | null
     addedAt?: number | null
     updatedAt?: number | null
-    popularity?: number | null
     version?: string
     sizeBytes?: number
     sizeText?: string
-    nsfw?: boolean
     downloadOptions?: SourceDownloadOption[]
   }
   type UnifiedSourceGame = {
@@ -116,23 +114,20 @@ declare global {
     releaseYear?: number | null
     addedAt?: number | null
     updatedAt?: number | null
-    popularity?: number | null
     version?: string
     sizeBytes?: number
     sizeText?: string
-    nsfw?: boolean
     sources: SourceGame[]
     fullyResolved?: boolean
   }
   type SourceCapabilityFlags = {
     search?: boolean
     catalog?: boolean
-    appid?: boolean
     bulkBrowse?: boolean
     tags?: boolean
     releaseDate?: boolean
     size?: boolean
-    sort?: Array<"popular" | "latest" | "updated" | "title">
+    sort?: Array<"latest" | "title">
   }
   type SourceInfo = {
     id: string
@@ -195,15 +190,9 @@ declare global {
   }
   type SourceFacets = {
     tags: Array<{ tag: string; count: number }>
-    years: { min: number | null; max: number | null }
-    size: { min: number | null; max: number | null }
   }
-  type FeatureCoverage = "full" | "partial" | "none"
   type SourceCapabilityReport = {
     perSource: Array<{ id: string; name: string; enabled: boolean } & SourceCapabilityFlags>
-    scope: string[]
-    coverage: Record<string, FeatureCoverage>
-    supports: Record<string, string[]>
   }
   type SourceQueryResult = {
     ok: boolean
@@ -622,15 +611,14 @@ declare global {
       runSteamGame?: (appid: string, steamAppid: number, installPath: string) => Promise<{ ok: boolean; error?: string }>
     }
     ucWand?: {
-      status: () => Promise<{ ok: boolean; supported: boolean; authenticated: boolean }>
       lookup: (title: string, steamAppid?: number) => Promise<WandLookupResult>
       connect: () => Promise<{ ok: boolean; error?: string }>
       disconnect: () => Promise<{ ok: boolean }>
       trainer: (title: string, steamAppid?: number) => Promise<WandTrainerResult>
-      launch: (appid: string, title: string, steamAppid?: number) => Promise<{ ok: boolean; game?: WandGameMatch; needsAuth?: boolean; runtime?: "native" | "proton"; error?: string }>
+      launch: (appid: string, title: string, steamAppid?: number) => Promise<{ ok: boolean; game?: WandGameMatch; needsAuth?: boolean; error?: string }>
       control: (appid: string, name: string, value: number) => Promise<{ ok: boolean; error?: string }>
       stop: (appid: string) => Promise<{ ok: boolean }>
-      onRuntime: (callback: (data: { appid: string; status: "active" | "value" | "error" | "stopped" | "log"; name?: string; value?: number; message?: string }) => void) => () => void
+      onRuntime: (callback: (data: { appid: string; status: "active" | "value" | "error" | "stopped"; name?: string; value?: number; message?: string }) => void) => () => void
       onAuthChanged: (callback: (data: { ok: boolean; error?: string }) => void) => () => void
     }
     ucAchievements?: {

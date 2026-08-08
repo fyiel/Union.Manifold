@@ -3,6 +3,7 @@ use crate::sources::ResolveResult;
 use base64::Engine;
 use once_cell::sync::Lazy;
 use regex::Regex;
+use super::not_resolvable;
 
 static HOST_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)(^|\.)mediafire\.com$").unwrap());
 static DIRECT_RE: Lazy<Regex> =
@@ -11,20 +12,7 @@ static SCRAMBLED_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r#"data-scrambled-url="([^"]+)""#).unwrap());
 
 pub fn matches(url: &str) -> bool {
-    url::Url::parse(url)
-        .ok()
-        .and_then(|u| u.host_str().map(|s| s.to_string()))
-        .map(|h| HOST_RE.is_match(&h))
-        .unwrap_or(false)
-}
-
-fn not_resolvable(url: &str, reason: &str) -> ResolveResult {
-    ResolveResult {
-        resolvable: false,
-        open_url: Some(url.to_string()),
-        reason: Some(reason.to_string()),
-        ..Default::default()
-    }
+    super::host_matches(url, &HOST_RE)
 }
 
 fn unscramble(cap: &str) -> Option<String> {
@@ -42,21 +30,17 @@ fn unscramble(cap: &str) -> Option<String> {
 }
 
 fn file_name_of(direct: &str) -> Option<String> {
-    let u = url::Url::parse(direct).ok()?;
-    u.path_segments()?
-        .rfind(|s| !s.is_empty())
-        .map(|s| s.to_string())
+    super::last_segment(direct)
 }
 
 pub async fn resolve(url: &str) -> ResolveResult {
     let resp = match http::fetch(url, &FetchOpts::default()).await {
         Ok(r) => r,
-        Err(_) => return not_resolvable(url, "mediafire request failed"),
+        Err(_) => return not_resolvable(url, Some("mediafire request failed")),
     };
     if !resp.status().is_success() {
         return not_resolvable(
-            url,
-            &format!("mediafire returned {}", resp.status().as_u16()),
+            url, Some(&format!("mediafire returned {}", resp.status().as_u16())),
         );
     }
     let text = resp.text().await.unwrap_or_default();
@@ -81,6 +65,6 @@ pub async fn resolve(url: &str) -> ResolveResult {
                 ..Default::default()
             }
         }
-        None => not_resolvable(url, "no mediafire download link"),
+        None => not_resolvable(url, Some("no mediafire download link")),
     }
 }

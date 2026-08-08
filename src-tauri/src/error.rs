@@ -20,18 +20,6 @@ impl AppError {
     }
 }
 
-impl From<String> for AppError {
-    fn from(s: String) -> Self {
-        AppError::Msg(s)
-    }
-}
-
-impl From<&str> for AppError {
-    fn from(s: &str) -> Self {
-        AppError::Msg(s.to_string())
-    }
-}
-
 impl Serialize for AppError {
     fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.to_string())

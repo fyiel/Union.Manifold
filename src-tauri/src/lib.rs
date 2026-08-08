@@ -257,6 +257,8 @@ pub fn run() {
                         } else if s.starts_with("wemod://oauth") {
                             show_main_window(&nxm_handle);
                             wand::handle_deep_link(&nxm_handle, &s);
+                        } else {
+                            emit_deep_link(&nxm_handle, &s);
                         }
                     }
                 });
@@ -304,7 +306,6 @@ pub fn run() {
             sources::sources_onlinefix_set_enabled,
             sources::sources_query,
             sources::sources_search,
-            wand::wand_status,
             wand::wand_lookup,
             wand::wand_launch,
             wand::wand_auth_begin,

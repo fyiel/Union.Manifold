@@ -3,7 +3,6 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use once_cell::sync::Lazy;
-use regex::Regex;
 use serde_json::{json, Value};
 
 use crate::http::{self, FetchOpts};
@@ -22,12 +21,7 @@ static DETAIL_CACHE: Lazy<KeyedCache<SourceGame>> =
     Lazy::new(|| KeyedCache::new(Duration::from_secs(60 * 60 * 6)));
 static STEAM_APPID: Lazy<Mutex<HashMap<String, Option<u64>>>> =
     Lazy::new(|| Mutex::new(metacache::load("unioncrax-appids.json")));
-static STORE_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"store\.steampowered\.com/app/(\d+)").unwrap());
 
-fn urlencode(s: &str) -> String {
-    percent_encoding::utf8_percent_encode(s, percent_encoding::NON_ALPHANUMERIC).to_string()
-}
 
 fn opt(s: String) -> Option<String> {
     if s.is_empty() {
@@ -82,11 +76,9 @@ fn epoch_from(v: Option<&Value>) -> Option<i64> {
 }
 
 fn steam_app_id_from_store(store: Option<&Value>) -> Option<u64> {
-    let s = store.and_then(|v| v.as_str()).unwrap_or("");
-    STORE_RE
-        .captures(s)
-        .and_then(|c| c.get(1))
-        .and_then(|m| m.as_str().parse::<u64>().ok())
+    store
+        .and_then(|v| v.as_str())
+        .and_then(crate::sources::parse::find_steam_app_id)
 }
 
 async fn resolve_steam_app_id(internal_id: &str) -> Option<u64> {
@@ -97,7 +89,7 @@ async fn resolve_steam_app_id(internal_id: &str) -> Option<u64> {
     if let Some(v) = STEAM_APPID.lock().unwrap().get(&key).copied() {
         return v;
     }
-    let url = format!("{ORIGIN}/api/protondb/{}", urlencode(&key));
+    let url = format!("{ORIGIN}/api/protondb/{}", crate::mods::urlenc(&key));
     let (ok, json) = request_json(&url, "GET", None).await;
     if !ok {
         return None;
@@ -244,11 +236,9 @@ fn normalize(uc: &Value) -> SourceGame {
         release_date: opt(release_date),
         added_at: epoch_from(uc.get("posted_time")),
         updated_at: epoch_from(updated_src),
-        popularity: None,
         version: opt(version),
         size_bytes,
         size_text: opt(size_text),
-        nsfw: is_truthy(uc.get("nsfw")) || is_truthy(uc.get("hasHv")),
         download_options: vec![DownloadOption {
             label: "UC.Files".to_string(),
             host_type: "ucfiles".to_string(),
@@ -299,7 +289,6 @@ pub fn capabilities() -> Capabilities {
     Capabilities {
         search: true,
         catalog: true,
-        appid: true,
         bulk_browse: true,
         tags: true,
         release_date: true,
@@ -340,7 +329,7 @@ pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
 
     let url = format!(
         "{ORIGIN}/api/games/suggestions?q={}&limit={}&nsfw=true",
-        urlencode(q),
+        crate::mods::urlenc(q),
         limit
     );
     let (ok, json) = request_json(&url, "GET", None).await;
@@ -385,7 +374,7 @@ pub async fn get_detail(slug: &str) -> Option<SourceGame> {
     let key = internal_id.clone();
     DETAIL_CACHE
         .get_or(&key, || async move {
-            let url = format!("{ORIGIN}/api/games/{}", urlencode(&internal_id));
+            let url = format!("{ORIGIN}/api/games/{}", crate::mods::urlenc(&internal_id));
             let (ok, json) = request_json(&url, "GET", None).await;
 
             let mut uc: Option<Value> = None;
@@ -440,7 +429,7 @@ pub async fn resolve_download(option: &DownloadOption) -> ResolveResult {
     }
     let page_url = format!("{ORIGIN}/game/{appid}");
 
-    let tok_url = format!("{ORIGIN}/api/downloads/{}", urlencode(&appid));
+    let tok_url = format!("{ORIGIN}/api/downloads/{}", crate::mods::urlenc(&appid));
     let (tok_ok, tok_json) = request_json(&tok_url, "POST", Some(b"{}".to_vec())).await;
     let token = tok_json
         .as_ref()
@@ -465,8 +454,8 @@ pub async fn resolve_download(option: &DownloadOption) -> ResolveResult {
 
     let link_url = format!(
         "{ORIGIN}/api/downloads/{}?fetchLinks=true&downloadToken={}",
-        urlencode(&appid),
-        urlencode(&token)
+        crate::mods::urlenc(&appid),
+        crate::mods::urlenc(&token)
     );
     let (link_ok, link_json) = request_json(&link_url, "GET", None).await;
     let ucfiles: Vec<Value> = link_json
@@ -547,7 +536,6 @@ pub async fn resolve_download(option: &DownloadOption) -> ResolveResult {
         return ResolveResult {
             resolvable: true,
             url: Some(f.url),
-            file_name: f.file_name,
             size_bytes: f.size_bytes,
             ..Default::default()
         };

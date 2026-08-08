@@ -37,11 +37,45 @@ fn slipgate_host(url: &str) -> Option<&'static str> {
     None
 }
 
-fn not_resolvable(url: &str, reason: &str) -> ResolveResult {
+fn base_label(host: &str) -> &str {
+    host.strip_prefix("www.").unwrap_or(host)
+}
+
+/// Last non-empty path segment of a URL, percent-decoded.
+fn last_segment(url: &str) -> Option<String> {
+    let u = url::Url::parse(url).ok()?;
+    u.path_segments()?
+        .rfind(|s| !s.is_empty())
+        .map(|s| {
+            percent_encoding::percent_decode_str(s)
+                .decode_utf8_lossy()
+                .to_string()
+        })
+}
+
+/// Numeric API field tolerant of JSON number/string encodings.
+fn num(v: Option<&serde_json::Value>) -> Option<u64> {
+    let v = v?;
+    let n = v
+        .as_u64()
+        .or_else(|| v.as_f64().map(|f| f as u64))
+        .or_else(|| v.as_str().and_then(|s| s.parse::<f64>().ok()).map(|f| f as u64))?;
+    (n != 0).then_some(n)
+}
+
+pub(crate) fn host_matches(url: &str, re: &regex::Regex) -> bool {
+    url::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(|s| s.to_string()))
+        .map(|h| re.is_match(&h))
+        .unwrap_or(false)
+}
+
+pub(crate) fn not_resolvable(url: &str, reason: Option<&str>) -> ResolveResult {
     ResolveResult {
         resolvable: false,
         open_url: Some(url.to_string()),
-        reason: Some(reason.to_string()),
+        reason: reason.map(str::to_string),
         ..Default::default()
     }
 }
@@ -169,17 +203,17 @@ pub async fn resolve_url(option: &DownloadOption) -> ResolveResult {
                             ephemeral: true,
                             ..Default::default()
                         },
-                        Err(e) => not_resolvable(url, &format!("Slipgate: {e}")),
+                        Err(e) => not_resolvable(url, Some(&format!("Slipgate: {e}"))),
                     };
                 }
                 None => {
                     return not_resolvable(
                         url,
-                        &format!(
+                        Some(&format!(
                             "{} \u{2014} set a Slipgate URL in Settings to resolve in-app",
                             r.reason.as_deref().unwrap_or("host could not be resolved")
-                        ),
-                    )
+                        )),
+                    );
                 }
             }
         }
@@ -187,7 +221,7 @@ pub async fn resolve_url(option: &DownloadOption) -> ResolveResult {
     }
 
     let host = hostname_of(url);
-    let base = host.strip_prefix("www.").unwrap_or(&host);
+    let base = base_label(&host);
     let reason = if base == "mega.nz" {
         "mega (encrypted transfer \u{2014} browser only)".to_string()
     } else {

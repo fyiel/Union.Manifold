@@ -1,5 +1,22 @@
 use std::path::PathBuf;
 
+pub(crate) fn find_on_path(name: &str) -> Option<PathBuf> {
+    let path = std::env::var("PATH").ok()?;
+    let sep = if cfg!(windows) { ';' } else { ':' };
+    let file = if cfg!(windows) {
+        format!("{name}.exe")
+    } else {
+        name.to_string()
+    };
+    for dir in path.split(sep) {
+        let p = std::path::Path::new(dir).join(&file);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    None
+}
+
 pub fn resolve_sidecar(name: &str) -> Option<PathBuf> {
     let exe = if cfg!(windows) {
         format!("union-manifold-{name}.exe")
@@ -14,14 +31,8 @@ pub fn resolve_sidecar(name: &str) -> Option<PathBuf> {
             }
         }
     }
-    if let Ok(path) = std::env::var("PATH") {
-        let sep = if cfg!(windows) { ';' } else { ':' };
-        for dir in path.split(sep) {
-            let candidate = PathBuf::from(dir).join(&exe);
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
+    if let Some(p) = find_on_path(&exe) {
+        return Some(p);
     }
     let prefix = format!("union-manifold-{name}-");
     let bindir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries");

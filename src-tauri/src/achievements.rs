@@ -2,13 +2,14 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, State};
 
+use crate::downloads::now_ms;
 use crate::state::AppState;
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -357,10 +358,7 @@ fn merge_game(
     next
 }
 
-fn emit_unlock(app: &AppHandle, game: &AchievementGame, mut achievement: LocalAchievement) {
-    if achievement.unlocked_at.is_none() {
-        achievement.unlocked_at = Some(now_ms());
-    }
+fn emit_unlock(app: &AppHandle, game: &AchievementGame, achievement: LocalAchievement) {
     let payload = AchievementUnlock {
         appid: game.appid.clone(),
         steam_app_id: game.steam_app_id,
@@ -379,28 +377,22 @@ fn emit_unlock(app: &AppHandle, game: &AchievementGame, mut achievement: LocalAc
     }
 }
 
+fn toast_fallback(app: &AppHandle, payload: &AchievementUnlock) {
+    crate::notify::send(
+        app,
+        "Achievement unlocked",
+        &format!("{} — {}", payload.game_title, payload.achievement.display_name),
+    );
+}
+
 fn present_toast(app: &AppHandle, payload: &AchievementUnlock) {
     let Some(window) = app.get_webview_window("achievement-toast") else {
-        crate::notify::send(
-            app,
-            "Achievement unlocked",
-            &format!(
-                "{} — {}",
-                payload.game_title, payload.achievement.display_name
-            ),
-        );
+        toast_fallback(app, payload);
         return;
     };
     position_toast(&window);
     if window.show().is_err() {
-        crate::notify::send(
-            app,
-            "Achievement unlocked",
-            &format!(
-                "{} — {}",
-                payload.game_title, payload.achievement.display_name
-            ),
-        );
+        toast_fallback(app, payload);
         return;
     }
     window.set_ignore_cursor_events(true).ok();
@@ -743,30 +735,28 @@ fn push_nested_state_names(states: &mut Vec<PathBuf>, root: &Path) {
     }
 }
 
+const STATE_FILE_NAMES: &[&str] = &[
+    "achievements.json",
+    "achievements.ini",
+    "achiev.ini",
+    "stats.ini",
+    "creamapi.achievements.cfg",
+];
+
 fn push_state_names(states: &mut Vec<PathBuf>, root: &Path) {
-    for name in [
-        "achievements.json",
-        "achievements.ini",
-        "Achievements.ini",
-        "achiev.ini",
-        "stats.ini",
-        "stats/achievements.ini",
-        "stats/CreamAPI.Achievements.cfg",
-    ] {
+    for name in STATE_FILE_NAMES {
         states.push(root.join(name));
     }
+    // Case variant and stats/ subdir candidates beyond the shared leaf list.
+    states.push(root.join("Achievements.ini"));
+    states.push(root.join("stats/achievements.ini"));
+    states.push(root.join("stats/CreamAPI.Achievements.cfg"));
 }
 
 fn is_state_filename(name: &str) -> bool {
-    [
-        "achievements.json",
-        "achievements.ini",
-        "achiev.ini",
-        "stats.ini",
-        "creamapi.achievements.cfg",
-    ]
-    .iter()
-    .any(|candidate| name.eq_ignore_ascii_case(candidate))
+    STATE_FILE_NAMES
+        .iter()
+        .any(|candidate| name.eq_ignore_ascii_case(candidate))
 }
 
 fn dedupe_paths(paths: &mut Vec<PathBuf>) {
@@ -1623,14 +1613,6 @@ fn installed_contexts(state: &AppState) -> Vec<GameContext> {
         .iter()
         .filter_map(|manifest| context_from_manifest(state, manifest))
         .collect()
-}
-
-fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()
-        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
-        .unwrap_or(0)
 }
 
 #[tauri::command]

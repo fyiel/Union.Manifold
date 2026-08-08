@@ -6,6 +6,7 @@ use regex::Regex;
 
 use crate::http::{self, FetchOpts, Jar};
 use crate::sources::ResolveResult;
+use super::not_resolvable;
 
 static HOST_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)(^|\.)filekeeper\.net$").unwrap());
@@ -20,25 +21,9 @@ const MIN_WAIT: u64 = 3;
 const MAX_WAIT: u64 = 30;
 
 pub fn matches(url: &str) -> bool {
-    url::Url::parse(url)
-        .ok()
-        .and_then(|u| u.host_str().map(|s| s.to_string()))
-        .map(|h| HOST_RE.is_match(&h))
-        .unwrap_or(false)
+    super::host_matches(url, &HOST_RE)
 }
 
-fn not_resolvable(url: &str, reason: &str) -> ResolveResult {
-    ResolveResult {
-        resolvable: false,
-        open_url: Some(url.to_string()),
-        reason: Some(reason.to_string()),
-        ..Default::default()
-    }
-}
-
-fn enc(s: &str) -> String {
-    percent_encoding::utf8_percent_encode(s, percent_encoding::NON_ALPHANUMERIC).to_string()
-}
 
 fn form_post(jar: &Jar, referer: &str, pairs: &[(&str, &str)], manual_redirect: bool) -> FetchOpts {
     let mut headers = HashMap::new();
@@ -49,7 +34,7 @@ fn form_post(jar: &Jar, referer: &str, pairs: &[(&str, &str)], manual_redirect: 
     headers.insert("Referer".to_string(), referer.to_string());
     let body = pairs
         .iter()
-        .map(|(k, v)| format!("{k}={}", enc(v)))
+        .map(|(k, v)| format!("{k}={}", crate::mods::urlenc(v)))
         .collect::<Vec<_>>()
         .join("&")
         .into_bytes();
@@ -65,7 +50,7 @@ fn form_post(jar: &Jar, referer: &str, pairs: &[(&str, &str)], manual_redirect: 
 }
 
 pub async fn resolve(url: &str) -> ResolveResult {
-    let jar = Jar::new();
+    let jar = Jar::default();
 
     let first = match http::fetch(
         url,
@@ -79,7 +64,7 @@ pub async fn resolve(url: &str) -> ResolveResult {
     .await
     {
         Ok(r) => r,
-        Err(_) => return not_resolvable(url, "filekeeper request failed"),
+        Err(_) => return not_resolvable(url, Some("filekeeper request failed")),
     };
     let dl_url = first
         .headers()
@@ -101,13 +86,10 @@ pub async fn resolve(url: &str) -> ResolveResult {
     .await
     {
         Ok(r) => r.text().await.unwrap_or_default(),
-        Err(_) => return not_resolvable(url, "filekeeper download page failed"),
+        Err(_) => return not_resolvable(url, Some("filekeeper download page failed")),
     };
     if CAPTCHA_RE.is_match(&page) {
-        return not_resolvable(
-            url,
-            "filekeeper item requires a captcha \u{2014} browser only",
-        );
+        return not_resolvable(url, Some("filekeeper item requires a captcha \u{2014} browser only"));
     }
     let code = match CODE_RE
         .captures(&page)
@@ -115,7 +97,7 @@ pub async fn resolve(url: &str) -> ResolveResult {
         .map(|m| m.as_str().to_string())
     {
         Some(c) if !c.is_empty() => c,
-        _ => return not_resolvable(url, "filekeeper file code not found"),
+        _ => return not_resolvable(url, Some("filekeeper file code not found")),
     };
     let wait = COUNTDOWN_RE
         .captures(&page)
@@ -164,7 +146,7 @@ pub async fn resolve(url: &str) -> ResolveResult {
     .await
     {
         Ok(r) => r,
-        Err(_) => return not_resolvable(url, "filekeeper download2 failed"),
+        Err(_) => return not_resolvable(url, Some("filekeeper download2 failed")),
     };
     if resp.status().is_redirection() {
         if let Some(loc) = resp
@@ -187,7 +169,7 @@ pub async fn resolve(url: &str) -> ResolveResult {
             };
         }
     }
-    not_resolvable(url, "filekeeper returned no direct link")
+    not_resolvable(url, Some("filekeeper returned no direct link"))
 }
 
 #[cfg(test)]

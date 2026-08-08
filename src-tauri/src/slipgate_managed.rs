@@ -35,8 +35,6 @@ struct ManagedConfig {
     key: String,
     #[serde(default)]
     port: u16,
-    slipgate_image: String,
-    flaresolverr_image: String,
 }
 
 impl ManagedConfig {
@@ -46,8 +44,6 @@ impl ManagedConfig {
         Self {
             key: hex::encode(bytes),
             port: 0,
-            slipgate_image: SLIPGATE_IMAGE.to_string(),
-            flaresolverr_image: FLARESOLVERR_IMAGE.to_string(),
         }
     }
 
@@ -59,8 +55,6 @@ impl ManagedConfig {
 struct DockerInfo {
     available: bool,
     compose_available: bool,
-    docker_version: String,
-    compose_version: String,
     error: Option<String>,
 }
 
@@ -79,7 +73,7 @@ fn config_path(paths: &AppPaths) -> PathBuf {
 fn compose_text(config: &ManagedConfig) -> String {
     format!(
         "services:\n  flaresolverr:\n    image: {}\n    restart: unless-stopped\n    environment:\n      LOG_LEVEL: info\n  slipgate:\n    build:\n      context: {}\n    image: {}\n    restart: unless-stopped\n    depends_on:\n      - flaresolverr\n    ports:\n      - \"127.0.0.1::8189\"\n    environment:\n      SLIPGATE_FLARESOLVERR_URL: http://flaresolverr:8191/v1\n      SLIPGATE_LOG_LEVEL: info\n      SLIPGATE_API_KEY: {}\n",
-        config.flaresolverr_image, SLIPGATE_BUILD_CONTEXT, config.slipgate_image, config.key
+        FLARESOLVERR_IMAGE, SLIPGATE_BUILD_CONTEXT, SLIPGATE_IMAGE, config.key
     )
 }
 
@@ -160,18 +154,13 @@ async fn docker_info() -> DockerInfo {
         STATUS_TIMEOUT,
     )
     .await;
-    let docker_version = match docker {
-        Ok(version) => version,
-        Err(error) => {
-            return DockerInfo {
-                available: false,
-                compose_available: false,
-                docker_version: String::new(),
-                compose_version: String::new(),
-                error: Some(error),
-            };
-        }
-    };
+        if docker.is_err() {
+        return DockerInfo {
+            available: false,
+            compose_available: false,
+            error: docker.err(),
+        };
+    }
     match run_docker(
         &[
             "compose".to_string(),
@@ -182,18 +171,14 @@ async fn docker_info() -> DockerInfo {
     )
     .await
     {
-        Ok(compose_version) => DockerInfo {
+        Ok(_) => DockerInfo {
             available: true,
             compose_available: true,
-            docker_version,
-            compose_version,
             error: None,
         },
         Err(error) => DockerInfo {
             available: true,
             compose_available: false,
-            docker_version,
-            compose_version: String::new(),
             error: Some(error),
         },
     }
@@ -254,14 +239,7 @@ async fn wait_for_health(config: &ManagedConfig) -> Result<Value, String> {
     let mut last_error = "Slipgate did not become ready".to_string();
     for _ in 0..30 {
         match crate::slipgate::health(&base, &config.key).await {
-            Ok(status)
-                if status
-                    .get("flaresolverrOk")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false) =>
-            {
-                return Ok(status)
-            }
+            Ok(status) if crate::slipgate::fetch_usable(&status) => return Ok(status),
             Ok(_) => last_error = "Slipgate started but FlareSolverr is not ready".to_string(),
             Err(error) => last_error = error,
         }
@@ -305,26 +283,19 @@ async fn status_value(paths: &AppPaths) -> Value {
     let config = load_config(paths);
     let installed = config.is_some() && compose_path(paths).is_file();
     let mut running = false;
-    let mut healthy = false;
     let mut version = String::new();
     let mut flaresolverr_ok = false;
-    let mut recipes = json!([]);
     let mut error = info.error.clone();
     let url = config.as_ref().and_then(ManagedConfig::url);
     if let (Some(config), Some(base)) = (&config, &url) {
         if let Ok(value) = crate::slipgate::health(base, &config.key).await {
             running = true;
-            healthy = value.get("ok").and_then(Value::as_bool).unwrap_or(false);
             version = value
                 .get("version")
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string();
-            flaresolverr_ok = value
-                .get("flaresolverrOk")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
-            recipes = value.get("recipes").cloned().unwrap_or_else(|| json!([]));
+            flaresolverr_ok = crate::slipgate::fetch_usable(&value);
             error = None;
         }
     }
@@ -332,17 +303,13 @@ async fn status_value(paths: &AppPaths) -> Value {
         "ok": true,
         "dockerAvailable": info.available,
         "composeAvailable": info.compose_available,
-        "dockerVersion": info.docker_version,
-        "composeVersion": info.compose_version,
         "installed": installed,
         "running": running,
-        "healthy": healthy,
         "url": url,
         "version": version,
         "flaresolverrOk": flaresolverr_ok,
-        "recipes": recipes,
-        "slipgateImage": config.as_ref().map(|c| c.slipgate_image.as_str()).unwrap_or(SLIPGATE_IMAGE),
-        "flaresolverrImage": config.as_ref().map(|c| c.flaresolverr_image.as_str()).unwrap_or(FLARESOLVERR_IMAGE),
+        "slipgateImage": SLIPGATE_IMAGE,
+        "flaresolverrImage": FLARESOLVERR_IMAGE,
         "error": error,
     })
 }
@@ -369,9 +336,7 @@ pub async fn managed_slipgate_install(
             .error
             .unwrap_or_else(|| "Docker Compose is unavailable".to_string()));
     }
-    let mut config = load_config(&state.paths).unwrap_or_else(ManagedConfig::new);
-    config.slipgate_image = SLIPGATE_IMAGE.to_string();
-    config.flaresolverr_image = FLARESOLVERR_IMAGE.to_string();
+    let config = load_config(&state.paths).unwrap_or_else(ManagedConfig::new);
     write_private(&compose_path(&state.paths), &compose_text(&config))?;
     save_config(&state.paths, &config)?;
     up(&app, &state.paths, &state.settings, true).await?;
@@ -409,10 +374,8 @@ pub async fn managed_slipgate_update(
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
     let _guard = OPERATION.lock().await;
-    let mut config =
+    let config =
         load_config(&state.paths).ok_or_else(|| "Managed Slipgate is not installed".to_string())?;
-    config.slipgate_image = SLIPGATE_IMAGE.to_string();
-    config.flaresolverr_image = FLARESOLVERR_IMAGE.to_string();
     write_private(&compose_path(&state.paths), &compose_text(&config))?;
     save_config(&state.paths, &config)?;
     up(&app, &state.paths, &state.settings, true).await?;
@@ -465,8 +428,6 @@ mod tests {
         let config = ManagedConfig {
             key: "abc123".to_string(),
             port: 0,
-            slipgate_image: SLIPGATE_IMAGE.to_string(),
-            flaresolverr_image: FLARESOLVERR_IMAGE.to_string(),
         };
         let text = compose_text(&config);
         assert!(text.contains("127.0.0.1::8189"));

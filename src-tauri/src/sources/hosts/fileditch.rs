@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 
 use crate::http::{self, FetchOpts};
 use crate::sources::ResolveResult;
+use super::not_resolvable;
 
 static HOST_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(^|\.)(fileditchfiles\.(?:me|st)|fileditch\.(?:com|st))$").unwrap()
@@ -28,21 +29,9 @@ static JOINED_URL_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 pub fn matches(url: &str) -> bool {
-    url::Url::parse(url)
-        .ok()
-        .and_then(|u| u.host_str().map(|s| s.to_string()))
-        .map(|h| HOST_RE.is_match(&h))
-        .unwrap_or(false)
+    super::host_matches(url, &HOST_RE)
 }
 
-fn not_resolvable(url: &str, reason: &str) -> ResolveResult {
-    ResolveResult {
-        resolvable: false,
-        open_url: Some(url.to_string()),
-        reason: Some(reason.to_string()),
-        ..Default::default()
-    }
-}
 fn origin(url: &str) -> Option<String> {
     let mut parsed = url::Url::parse(url).ok()?;
     parsed.set_path("/");
@@ -52,13 +41,7 @@ fn origin(url: &str) -> Option<String> {
 }
 
 fn file_name(url: &str) -> Option<String> {
-    let parsed = url::Url::parse(url).ok()?;
-    let name = parsed.path_segments()?.next_back()?.trim();
-    (!name.is_empty()).then(|| {
-        percent_encoding::percent_decode_str(name)
-            .decode_utf8_lossy()
-            .to_string()
-    })
+    super::last_segment(url)
 }
 #[derive(Debug)]
 struct PowChallenge {
@@ -162,12 +145,11 @@ pub async fn resolve(url: &str) -> ResolveResult {
     .await
     {
         Ok(r) => r,
-        Err(_) => return not_resolvable(url, "fileditch request failed"),
+        Err(_) => return not_resolvable(url, Some("fileditch request failed")),
     };
     if !resp.status().is_success() {
         return not_resolvable(
-            url,
-            &format!("fileditch returned {}", resp.status().as_u16()),
+            url, Some(&format!("fileditch returned {}", resp.status().as_u16())),
         );
     }
 
@@ -188,13 +170,13 @@ pub async fn resolve(url: &str) -> ResolveResult {
     }
     let challenge = match pow_challenge(&html) {
         Some(challenge) => challenge,
-        None => return not_resolvable(url, "fileditch download challenge not found"),
+        None => return not_resolvable(url, Some("fileditch download challenge not found")),
     };
     let pow_input = challenge.challenge.clone();
     let difficulty = challenge.difficulty;
     let nonce = match tokio::task::spawn_blocking(move || solve_pow(&pow_input, difficulty)).await {
         Ok(Some(nonce)) => nonce,
-        _ => return not_resolvable(url, "fileditch proof-of-work challenge failed"),
+        _ => return not_resolvable(url, Some("fileditch proof-of-work challenge failed")),
     };
 
     let mut post_headers = headers.clone();
@@ -221,12 +203,11 @@ pub async fn resolve(url: &str) -> ResolveResult {
     .await
     {
         Ok(r) => r,
-        Err(_) => return not_resolvable(url, "fileditch challenge submission failed"),
+        Err(_) => return not_resolvable(url, Some("fileditch challenge submission failed")),
     };
     if !resp.status().is_success() {
         return not_resolvable(
-            url,
-            &format!("fileditch challenge returned {}", resp.status().as_u16()),
+            url, Some(&format!("fileditch challenge returned {}", resp.status().as_u16())),
         );
     }
 
@@ -243,7 +224,7 @@ pub async fn resolve(url: &str) -> ResolveResult {
     let html = resp.text().await.unwrap_or_default();
     match signed_url(&html) {
         Some(direct) => resolved(direct, url, headers),
-        None => not_resolvable(url, "fileditch signed download link not found"),
+        None => not_resolvable(url, Some("fileditch signed download link not found")),
     }
 }
 

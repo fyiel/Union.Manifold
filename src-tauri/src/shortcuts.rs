@@ -1,9 +1,5 @@
 use serde_json::{json, Value};
 
-fn desktop_dir() -> Option<std::path::PathBuf> {
-    dirs::desktop_dir()
-}
-
 fn desktop_entry_escape(value: &str) -> String {
     // Desktop-entry spec: backslash escapes the next character, so a quote
     // or backslash in a path cannot break out of the Exec/Path quoting.
@@ -16,7 +12,7 @@ pub fn create_desktop_shortcut(
     _appid: String,
     exe_path: Option<String>,
 ) -> Value {
-    let desktop = match desktop_dir() {
+    let desktop = match dirs::desktop_dir() {
         Some(d) => d,
         None => return json!({ "ok": false, "error": "no desktop dir" }),
     };
@@ -104,7 +100,7 @@ pub fn create_desktop_shortcut(
 
 #[tauri::command(async)]
 pub fn delete_desktop_shortcut(game_name: String) -> Value {
-    let desktop = match desktop_dir() {
+    let desktop = match dirs::desktop_dir() {
         Some(d) => d,
         None => return json!({ "ok": false, "error": "no desktop dir" }),
     };

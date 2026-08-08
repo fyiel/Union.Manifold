@@ -33,7 +33,7 @@ fn steam_compatibility_fixes_enabled(settings: &crate::settings::SettingsStore) 
         .unwrap_or(true)
 }
 
-#[cfg(any(windows, test))]
+#[cfg(any(windows, all(test, target_os = "linux")))]
 fn split_windows_launch_args(raw: &str) -> Vec<String> {
     let mut args = Vec::new();
     let mut chars = raw.chars().peekable();
@@ -115,26 +115,16 @@ fn systemd_run_available() -> bool {
         .unwrap_or(false)
 }
 
+fn already_running() -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::AlreadyExists, "already running")
+}
+
 fn install_dir_for(state: &AppState, appid: &str) -> Option<PathBuf> {
     crate::library::game_files_dir(&crate::library::scan_roots(state), appid)
 }
 
 fn executable_on_path(name: &str) -> Option<String> {
-    if let Some(path) = std::env::var_os("PATH") {
-        for dir in std::env::split_paths(&path) {
-            let candidate = dir.join(name);
-            if candidate.is_file() {
-                return Some(candidate.to_string_lossy().to_string());
-            }
-        }
-    }
-    if let Some(home) = dirs::home_dir() {
-        let candidate = home.join(".local/bin").join(name);
-        if candidate.is_file() {
-            return Some(candidate.to_string_lossy().to_string());
-        }
-    }
-    None
+    crate::launch::linux::which(name)
 }
 
 fn mod_engine_executable() -> Option<String> {
@@ -465,10 +455,7 @@ fn spawn_and_track(
         let mut running = RUNNING.lock();
         match running.entry(appid.to_string()) {
             Entry::Occupied(_) => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::AlreadyExists,
-                    "already running",
-                ))
+                return Err(already_running())
             }
             Entry::Vacant(slot) => {
                 let child = cmd.spawn()?;
@@ -565,10 +552,7 @@ fn spawn_elevated_and_track(
 
     let mut running = RUNNING.lock();
     if running.contains_key(appid) {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::AlreadyExists,
-            "already running",
-        ));
+        return Err(already_running());
     }
     if unsafe { ShellExecuteExW(&mut info) } == 0 {
         return Err(std::io::Error::last_os_error());

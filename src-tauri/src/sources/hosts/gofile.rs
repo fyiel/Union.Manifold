@@ -6,11 +6,11 @@ use regex::Regex;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::time::Duration;
+use super::not_resolvable;
 
 static HOST_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)(^|\.)gofile\.io$").unwrap());
 static ID_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?:/d/|/)([A-Za-z0-9]{4,})").unwrap());
 
-const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 const BROWSER_LANG: &str = "en-US";
 const WT_SALT: &str = "9844d94d963d30";
 const WT_WINDOW_SECS: u64 = 14400;
@@ -19,11 +19,7 @@ static GUEST_TOKEN: Lazy<Cached<String>> =
     Lazy::new(|| Cached::new(Duration::from_secs(12 * 60 * 60)));
 
 pub fn matches(url: &str) -> bool {
-    url::Url::parse(url)
-        .ok()
-        .and_then(|u| u.host_str().map(|s| s.to_string()))
-        .map(|h| HOST_RE.is_match(&h))
-        .unwrap_or(false)
+    super::host_matches(url, &HOST_RE)
 }
 
 fn content_id(url: &str) -> Option<String> {
@@ -35,15 +31,6 @@ fn content_id(url: &str) -> Option<String> {
         .find(|(k, _)| k == "c" || k == "id")
         .map(|(_, v)| v.to_string())
         .filter(|v| v.len() >= 4)
-}
-
-fn not_resolvable(url: &str, reason: &str) -> ResolveResult {
-    ResolveResult {
-        resolvable: false,
-        open_url: Some(url.to_string()),
-        reason: Some(reason.to_string()),
-        ..Default::default()
-    }
 }
 
 fn wt_window() -> u64 {
@@ -59,13 +46,13 @@ fn wt_hash(ua: &str, lang: &str, token: &str, window: u64) -> String {
 }
 
 fn website_token(token: &str, window: u64) -> String {
-    wt_hash(UA, BROWSER_LANG, token, window)
+    wt_hash(crate::http::UA, BROWSER_LANG, token, window)
 }
 
 async fn request_guest_token() -> Option<String> {
     let opts = FetchOpts {
         method: Some("POST".to_string()),
-        headers: HashMap::from([("User-Agent".to_string(), UA.to_string())]),
+        headers: HashMap::from([("User-Agent".to_string(), crate::http::UA.to_string())]),
         ..Default::default()
     };
     let resp = http::fetch("https://api.gofile.io/accounts", &opts)
@@ -115,12 +102,12 @@ fn collect_files(json: &serde_json::Value) -> Vec<ResolvedFile> {
 pub async fn resolve(url: &str) -> ResolveResult {
     let id = match content_id(url) {
         Some(id) => id,
-        None => return not_resolvable(url, "gofile link has no content id"),
+        None => return not_resolvable(url, Some("gofile link has no content id")),
     };
 
     let token = match guest_token().await {
         Some(t) => t,
-        None => return not_resolvable(url, "gofile guest session unavailable, opening the page"),
+        None => return not_resolvable(url, Some("gofile guest session unavailable, opening the page")),
     };
     let wt = website_token(&token, wt_window());
     let api = format!(
@@ -128,7 +115,7 @@ pub async fn resolve(url: &str) -> ResolveResult {
     );
     let headers = HashMap::from([
         ("Authorization".to_string(), format!("Bearer {token}")),
-        ("User-Agent".to_string(), UA.to_string()),
+        ("User-Agent".to_string(), crate::http::UA.to_string()),
         ("X-Website-Token".to_string(), wt),
         ("X-BL".to_string(), BROWSER_LANG.to_string()),
     ]);
@@ -140,24 +127,21 @@ pub async fn resolve(url: &str) -> ResolveResult {
     let json = match http::fetch(&api, &opts).await {
         Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
             Ok(json) => json,
-            Err(_) => return not_resolvable(url, "gofile response unreadable, opening the page"),
+            Err(_) => return not_resolvable(url, Some("gofile response unreadable, opening the page")),
         },
-        _ => return not_resolvable(url, "gofile did not respond, opening the page"),
+        _ => return not_resolvable(url, Some("gofile did not respond, opening the page")),
     };
     if json.get("status").and_then(|v| v.as_str()) != Some("ok") {
-        return not_resolvable(url, "gofile needs a browser session, opening the page");
+        return not_resolvable(url, Some("gofile needs a browser session, opening the page"));
     }
 
     let files = collect_files(&json);
     if files.is_empty() {
-        return not_resolvable(
-            url,
-            "gofile link has no downloadable files, opening the page",
-        );
+        return not_resolvable(url, Some("gofile link has no downloadable files, opening the page"));
     }
     let dl_headers = HashMap::from([
         ("Cookie".to_string(), format!("accountToken={token}")),
-        ("User-Agent".to_string(), UA.to_string()),
+        ("User-Agent".to_string(), crate::http::UA.to_string()),
     ]);
 
     if files.len() == 1 {

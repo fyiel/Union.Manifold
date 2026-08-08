@@ -56,21 +56,6 @@ fn value_to_u64(v: &Value) -> Option<u64> {
     None
 }
 
-fn value_to_f64(v: &Value) -> Option<f64> {
-    if let Some(f) = v.as_f64() {
-        if f.is_finite() {
-            return Some(f);
-        }
-    }
-    if let Some(s) = v.as_str() {
-        if let Ok(f) = s.trim().parse::<f64>() {
-            if f.is_finite() {
-                return Some(f);
-            }
-        }
-    }
-    None
-}
 
 fn get_str(v: &Value, key: &str) -> Option<String> {
     v.get(key)
@@ -146,7 +131,6 @@ fn mirrors_to_options(container: Option<&Value>) -> Vec<DownloadOption> {
         .filter(|d| value_truthy(d))
         .unwrap_or(container);
 
-    let data_name = get_str(data, "name");
     let data_size_human = get_str(data, "size_human");
     let data_size_bytes = data
         .get("size_bytes")
@@ -173,7 +157,6 @@ fn mirrors_to_options(container: Option<&Value>) -> Vec<DownloadOption> {
                 None => continue,
             };
             let host_type = detect_host_type(&url);
-            let file_name = get_str(link, "file_name").or_else(|| data_name.clone());
             let link_size = get_str(link, "file_size");
             let size_bytes = link_size
                 .as_deref()
@@ -187,7 +170,6 @@ fn mirrors_to_options(container: Option<&Value>) -> Vec<DownloadOption> {
                 host_type,
                 url: Some(url),
                 page_url: None,
-                file_name,
                 size_bytes,
                 size_text: size_text.filter(|s| !s.is_empty()),
                 resolvable,
@@ -255,16 +237,6 @@ fn post_to_game(post: &Value) -> Option<SourceGame> {
         .or_else(|| post.get("edited_at").filter(|v| value_truthy(v)));
     let updated_at = epoch_from_value(updated_raw);
 
-    let popularity = post
-        .get("view_count")
-        .and_then(value_to_f64)
-        .filter(|n| *n != 0.0)
-        .or_else(|| {
-            post.get("down_count")
-                .and_then(value_to_f64)
-                .filter(|n| *n != 0.0)
-        });
-
     let version = get_str(post, "version").or_else(|| get_str(post, "build_id"));
 
     let cdata = post.get("container").and_then(|c| c.get("data"));
@@ -279,7 +251,6 @@ fn post_to_game(post: &Value) -> Option<SourceGame> {
                 .filter(|n| *n > 0)
         });
 
-    let nsfw = post.get("is_nsfw").map(value_truthy).unwrap_or(false);
 
     Some(SourceGame {
         source_id: ID.to_string(),
@@ -297,11 +268,9 @@ fn post_to_game(post: &Value) -> Option<SourceGame> {
         release_year,
         added_at,
         updated_at,
-        popularity,
         version,
         size_bytes,
         size_text: size_human,
-        nsfw,
         download_options: mirrors_to_options(post.get("container")),
     })
 }
@@ -310,7 +279,6 @@ pub fn capabilities() -> Capabilities {
     Capabilities {
         search: true,
         catalog: true,
-        appid: true,
         bulk_browse: true,
         tags: true,
         release_date: true,

@@ -3,17 +3,14 @@ use crate::sources::ResolveResult;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashMap;
+use super::not_resolvable;
 
 static HOST_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)(^|\.)datanodes\.to$").unwrap());
 
 const BOUNDARY: &str = "----UnionManifoldBoundary7kJ2xQ9vRt3mWp";
 
 pub fn matches(url: &str) -> bool {
-    url::Url::parse(url)
-        .ok()
-        .and_then(|u| u.host_str().map(|s| s.to_string()))
-        .map(|h| HOST_RE.is_match(&h))
-        .unwrap_or(false)
+    super::host_matches(url, &HOST_RE)
 }
 
 fn file_code(url: &str) -> Option<String> {
@@ -21,15 +18,6 @@ fn file_code(url: &str) -> Option<String> {
     u.path_segments()?
         .find(|s| !s.is_empty())
         .map(|s| s.to_string())
-}
-
-fn not_resolvable(url: &str, reason: &str) -> ResolveResult {
-    ResolveResult {
-        resolvable: false,
-        open_url: Some(url.to_string()),
-        reason: Some(reason.to_string()),
-        ..Default::default()
-    }
 }
 
 fn multipart(fields: &[(&str, &str)], boundary: &str) -> Vec<u8> {
@@ -56,7 +44,7 @@ fn direct_url(encoded: &str) -> Option<String> {
 pub async fn resolve(url: &str) -> ResolveResult {
     let code = match file_code(url) {
         Some(c) => c,
-        None => return not_resolvable(url, "datanodes link has no file code"),
+        None => return not_resolvable(url, Some("datanodes link has no file code")),
     };
 
     let fields = [
@@ -92,17 +80,16 @@ pub async fn resolve(url: &str) -> ResolveResult {
 
     let resp = match http::fetch("https://datanodes.to/download", &opts).await {
         Ok(r) => r,
-        Err(_) => return not_resolvable(url, "datanodes request failed"),
+        Err(_) => return not_resolvable(url, Some("datanodes request failed")),
     };
     if !resp.status().is_success() {
         return not_resolvable(
-            url,
-            &format!("datanodes returned {}", resp.status().as_u16()),
+            url, Some(&format!("datanodes returned {}", resp.status().as_u16())),
         );
     }
     let json = match resp.json::<serde_json::Value>().await {
         Ok(j) => j,
-        Err(_) => return not_resolvable(url, "datanodes returned no json"),
+        Err(_) => return not_resolvable(url, Some("datanodes returned no json")),
     };
 
     let direct = json
@@ -116,6 +103,6 @@ pub async fn resolve(url: &str) -> ResolveResult {
             url: Some(direct),
             ..Default::default()
         },
-        None => not_resolvable(url, "no datanodes download url"),
+        None => not_resolvable(url, Some("no datanodes download url")),
     }
 }

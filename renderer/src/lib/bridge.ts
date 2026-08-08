@@ -177,7 +177,6 @@ export function installBridge(): void {
   }
 
   w.ucWand = {
-    status: () => call("wand_status"),
     lookup: (title: string, steamAppid?: number) => call("wand_lookup", { title, steamAppid }),
     connect: () => call("wand_auth_begin"),
     disconnect: () => call("wand_disconnect"),

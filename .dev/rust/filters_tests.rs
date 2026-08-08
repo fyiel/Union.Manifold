@@ -145,38 +145,17 @@ fn finalize_pool_latest_sort_puts_newest_first_and_undated_last() {
     assert_eq!(titles, vec!["Newest", "Older", "Undated"]);
 }
 
-#[test]
-fn finalize_pool_popular_sort_ranks_by_popularity() {
-    let mut a = game("s", "Meh");
-    a.popularity = Some(1.0);
-    let mut b = game("s", "Hit");
-    b.popularity = Some(99.0);
-    let p = QueryParams {
-        sort: Some("popular".to_string()),
-        ..Default::default()
-    };
-    let (games, _, _) = finalize_pool(vec![a, b], &p);
-    assert_eq!(games[0].title, "Hit");
-}
 
 #[test]
-fn finalize_pool_facets_count_tags_and_span_years_and_sizes() {
+fn finalize_pool_facets_count_tags() {
     let mut a = game("s", "A");
     a.genres = vec!["Action".to_string(), "Indie".to_string()];
-    a.release_year = Some(2010);
-    a.size_bytes = Some(100);
     let mut b = game("s", "B");
     b.genres = vec!["Action".to_string()];
-    b.release_year = Some(2020);
-    b.size_bytes = Some(900);
     let (_, facets, _) = finalize_pool(vec![a, b], &params());
     let action = facets.tags.iter().find(|t| t.tag == "Action").unwrap();
     assert_eq!(action.count, 2);
     assert_eq!(facets.tags[0].tag, "Action");
-    assert_eq!(facets.years.min, Some(2010));
-    assert_eq!(facets.years.max, Some(2020));
-    assert_eq!(facets.size.min, Some(100));
-    assert_eq!(facets.size.max, Some(900));
 }
 
 #[test]

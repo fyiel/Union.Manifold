@@ -13,15 +13,13 @@ pub struct DownloadOption {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub page_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub file_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub size_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size_text: Option<String>,
     pub resolvable: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceGame {
     pub source_id: String,
@@ -45,20 +43,17 @@ pub struct SourceGame {
     pub release_year: Option<i32>,
     pub added_at: Option<i64>,
     pub updated_at: Option<i64>,
-    pub popularity: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size_text: Option<String>,
-    #[serde(default)]
-    pub nsfw: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub download_options: Vec<DownloadOption>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct UnifiedGame {
     pub dedup_key: String,
@@ -79,15 +74,12 @@ pub struct UnifiedGame {
     pub release_year: Option<i32>,
     pub added_at: Option<i64>,
     pub updated_at: Option<i64>,
-    pub popularity: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size_text: Option<String>,
-    #[serde(default)]
-    pub nsfw: bool,
     pub sources: Vec<SourceGame>,
     #[serde(default)]
     pub fully_resolved: bool,
@@ -289,8 +281,6 @@ pub fn merge_games(records: Vec<SourceGame>) -> Vec<UnifiedGame> {
             game.release_year = max_opt(game.release_year, r.release_year);
             game.added_at = max_opt(game.added_at, r.added_at);
             game.updated_at = max_opt(game.updated_at, r.updated_at);
-            game.popularity = max_opt_f(game.popularity, r.popularity);
-            game.nsfw = game.nsfw || r.nsfw;
             for g in &r.genres {
                 if !game.genres.contains(g) {
                     game.genres.push(g.clone());
@@ -321,13 +311,6 @@ fn max_opt<T: Ord + Copy>(a: Option<T>, b: Option<T>) -> Option<T> {
     }
 }
 
-fn max_opt_f(a: Option<f64>, b: Option<f64>) -> Option<f64> {
-    match (a, b) {
-        (Some(x), Some(y)) => Some(x.max(y)),
-        (Some(x), None) => Some(x),
-        (None, y) => y,
-    }
-}
 
 #[cfg(test)]
 mod tests {

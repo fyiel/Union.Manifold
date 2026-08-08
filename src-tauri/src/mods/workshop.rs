@@ -77,13 +77,7 @@ fn parse_browse(html: &str) -> Vec<Value> {
             .captures(segment)
             .map(|c| http::decode_entities(c[1].trim()))
             .unwrap_or_default();
-        out.push(json!({
-            "remoteId": id.clone(),
-            "name": name,
-            "author": author,
-            "picture": picture,
-            "pageUrl": workshop_page_url(&id),
-        }));
+        out.push(browse_item(id.clone(), name, author, picture));
     }
     out
 }
@@ -103,15 +97,25 @@ fn parse_browse_new(html: &str) -> Vec<Value> {
         if !seen.insert(id.clone()) {
             continue;
         }
-        out.push(json!({
-            "remoteId": id.clone(),
-            "name": http::decode_entities(cap[3].trim()),
-            "author": "",
-            "picture": cap[2].to_string(),
-            "pageUrl": workshop_page_url(&id),
-        }));
+        out.push(browse_item(
+            id.clone(),
+            http::decode_entities(cap[3].trim()),
+            String::new(),
+            Some(cap[2].to_string()),
+        ));
     }
     out
+}
+
+
+fn browse_item(id: String, name: String, author: String, picture: Option<String>) -> Value {
+    json!({
+        "remoteId": id,
+        "name": name,
+        "author": author,
+        "picture": picture,
+        "pageUrl": workshop_page_url(&id),
+    })
 }
 
 fn parse_browse_total(html: &str) -> Option<u64> {
@@ -120,12 +124,10 @@ fn parse_browse_total(html: &str) -> Option<u64> {
         .and_then(|c| c[1].parse::<u64>().ok())
 }
 
-fn browse_sort(sort: &str) -> &'static str {
+fn browse_sort(sort: &str) -> &str {
     match sort {
-        "mostrecent" => "mostrecent",
-        "lastupdated" => "lastupdated",
         "subscribers" => "totaluniquesubscribers",
-        "toprated" => "toprated",
+        "trend" | "mostrecent" | "lastupdated" | "toprated" => sort,
         _ => "trend",
     }
 }
@@ -240,23 +242,11 @@ pub(crate) async fn fetch_details(ids: &[String]) -> Result<Vec<Value>, String> 
                     .map(String::from)
                     .or_else(|| v.as_u64().map(|n| n.to_string()))
             })?;
-            let size = d
-                .get("file_size")
-                .and_then(|v| {
-                    v.as_u64()
-                        .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
-                })
-                .unwrap_or(0);
             Some(json!({
                 "remoteId": id,
                 "name": d.get("title").and_then(|v| v.as_str()).unwrap_or(""),
                 "description": d.get("description").and_then(|v| v.as_str()).unwrap_or(""),
-                "sizeBytes": size,
-                "updatedAt": d.get("time_updated").and_then(|v| v.as_u64()),
                 "previewUrl": d.get("preview_url").and_then(|v| v.as_str()),
-                "subscriptions": d.get("subscriptions").and_then(|v| v.as_u64())
-                    .or_else(|| d.get("lifetime_subscriptions").and_then(|v| v.as_u64()))
-                    .unwrap_or(0),
             }))
         })
         .collect())
@@ -297,7 +287,6 @@ pub async fn workshop_install(
 }
 
 async fn run_workshop_install(app: AppHandle, appid: String, steam_appid: u64, fid: u64) {
-    let mod_id = format!("workshop-{fid}");
     let detail = fetch_details(&[fid.to_string()])
         .await
         .ok()
@@ -308,6 +297,7 @@ async fn run_workshop_install(app: AppHandle, appid: String, steam_appid: u64, f
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| format!("Workshop item {fid}"));
 
+    let mod_id = format!("workshop-{fid}");
     if let Err(e) =
         workshop_install_inner(&app, &appid, steam_appid, fid, &name, detail.as_ref()).await
     {

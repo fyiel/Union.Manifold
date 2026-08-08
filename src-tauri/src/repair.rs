@@ -26,7 +26,7 @@ fn referer_headers() -> HashMap<String, String> {
 }
 
 async fn download_to(app: &AppHandle, appid: &str, url: &str, dest: &Path) -> Result<()> {
-    let jar = crate::http::Jar::new();
+    let jar = crate::http::Jar::default();
     let dir = url
         .rsplit_once('/')
         .map(|(d, _)| format!("{d}/"))

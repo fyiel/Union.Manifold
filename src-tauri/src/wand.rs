@@ -13,8 +13,8 @@ use futures::StreamExt;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sha1::{Digest, Sha1};
-use sha2::Sha256;
+use sha1::Sha1;
+use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader};
@@ -31,6 +31,8 @@ const API_URL: &str = "https://api.wemod.com";
 const OAUTH_URL: &str = "https://wand.com/oauth/authorize";
 const OAUTH_REDIRECT: &str = "wemod://oauth";
 const AUTH_USER_AGENT: &str = concat!("Union.Manifold/", env!("CARGO_PKG_VERSION"), " Wand/0.0.0");
+const MAX_TARGET_NAME: usize = 31;
+
 const CATALOG_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 
 type WandCatalogCache = Option<(Instant, Arc<WandCatalog>)>;
@@ -98,7 +100,6 @@ struct WandAuth {
     refresh_token: Option<String>,
     user_id: String,
     expires_at: i64,
-    client_params: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -107,7 +108,6 @@ struct WandTokenResponse {
     refresh_token: Option<String>,
     user_id: String,
     expires_in: i64,
-    client_params: Option<Value>,
 }
 
 #[derive(Debug)]
@@ -149,8 +149,14 @@ async fn catalog() -> Result<Arc<WandCatalog>> {
         }
     }
 
+    let mut guard = CATALOG.write().await;
+    if let Some((loaded, catalog)) = guard.as_ref() {
+        if loaded.elapsed() < CATALOG_TTL {
+            return Ok(catalog.clone());
+        }
+    }
     let loaded = Arc::new(crate::http::get_json::<WandCatalog>(CATALOG_URL).await?);
-    *CATALOG.write().await = Some((Instant::now(), loaded.clone()));
+    *guard = Some((Instant::now(), loaded.clone()));
     Ok(loaded)
 }
 
@@ -272,10 +278,7 @@ async fn ensure_runtime(data_dir: &Path) -> Result<PathBuf> {
     .await?;
     let release = latest_runtime_release(&releases)
         .ok_or_else(|| AppError::msg("Wand release manifest has no full package"))?;
-    let version = release
-        .filename
-        .strip_suffix("-full.nupkg")
-        .unwrap_or("Wand");
+    let version = release.filename.strip_suffix("-full.nupkg").unwrap();
     let wand_root = data_dir.join("wand");
     let runtime = wand_root.join("runtime").join(version);
     if let Some(assets) = trainerlib_dir(&runtime) {
@@ -285,7 +288,7 @@ async fn ensure_runtime(data_dir: &Path) -> Result<PathBuf> {
         return Ok(assets);
     }
 
-    tokio::fs::create_dir_all(runtime.parent().unwrap_or(&wand_root))
+    tokio::fs::create_dir_all(runtime.parent().unwrap())
         .await
         .map_err(|error| AppError::msg(format!("create Wand runtime cache: {error}")))?;
     let archive = wand_root.join(format!("{}.download", release.filename));
@@ -299,28 +302,14 @@ async fn ensure_runtime(data_dir: &Path) -> Result<PathBuf> {
     )
     .await?
     .error_for_status()?;
-    let mut stream = response.bytes_stream();
-    let mut file = tokio::fs::File::create(&archive)
-        .await
-        .map_err(|error| AppError::msg(format!("create Wand package: {error}")))?;
-    let mut received = 0u64;
-    let mut hasher = Sha1::new();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk?;
-        received += chunk.len() as u64;
-        hasher.update(&chunk);
-        file.write_all(&chunk)
-            .await
-            .map_err(|error| AppError::msg(format!("write Wand package: {error}")))?;
-    }
-    file.flush()
-        .await
-        .map_err(|error| AppError::msg(format!("flush Wand package: {error}")))?;
-    drop(file);
-    if received != release.size || hex::encode(hasher.finalize()) != release.sha1 {
-        let _ = tokio::fs::remove_file(&archive).await;
-        return Err(AppError::msg("Wand package failed integrity verification"));
-    }
+    download_verified::<Sha1>(
+        response,
+        &archive,
+        &release.sha1,
+        Some(release.size),
+        "Wand package",
+    )
+    .await?;
 
     let staging = wand_root.join(format!(".{version}-extracting"));
     let _ = tokio::fs::remove_dir_all(&staging).await;
@@ -435,7 +424,6 @@ async fn request_access_token(params: &[(&str, String)]) -> Result<WandAuth> {
         refresh_token: response.refresh_token,
         user_id: response.user_id,
         expires_at: chrono::Utc::now().timestamp() + response.expires_in,
-        client_params: response.client_params,
     })
 }
 
@@ -466,6 +454,23 @@ async fn current_auth(state: &AppState) -> Result<Option<WandAuth>> {
     save_auth(state, Some(&refreshed));
     Ok(Some(refreshed))
 }
+
+/// Resolve the Wand match and auth for a trainer request. Returns
+/// (None, None) when the game is not supported, (Some, None) when the
+/// game matches but no account is connected (callers build their own
+/// needsAuth response), and (Some, Some) when both are ready.
+async fn matched_auth(
+    state: &State<'_, AppState>,
+    title: &str,
+    steam_appid: Option<u64>,
+) -> Result<(Option<WandMatch>, Option<WandAuth>)> {
+    let Some(matched) = match_for(catalog().await?.as_ref(), title, steam_appid) else {
+        return Ok((None, None));
+    };
+    let auth = current_auth(state).await?;
+    Ok((Some(matched), auth))
+}
+
 
 pub fn handle_deep_link(app: &AppHandle, uri: &str) {
     if !uri.to_ascii_lowercase().starts_with(OAUTH_REDIRECT) {
@@ -527,15 +532,6 @@ pub fn handle_deep_link(app: &AppHandle, uri: &str) {
 }
 
 #[tauri::command]
-pub fn wand_status(state: State<'_, AppState>) -> Value {
-    json!({
-        "ok": true,
-        "supported": cfg!(any(target_os = "windows", target_os = "linux")),
-        "authenticated": stored_auth(&state).is_some(),
-    })
-}
-
-#[tauri::command]
 pub async fn wand_auth_begin(app: AppHandle, state: State<'_, AppState>) -> Result<Value> {
     let mut verifier_bytes = [0u8; 32];
     let mut state_bytes = [0u8; 24];
@@ -587,7 +583,7 @@ fn parse_controls(response: &Value) -> Vec<WandControl> {
         .flatten()
         .filter_map(|cheat| {
             let target = cheat.get("target").and_then(Value::as_str)?.to_string();
-            if target.is_empty() || target.len() > 31 {
+            if target.is_empty() || target.len() > MAX_TARGET_NAME {
                 return None;
             }
             Some(WandControl {
@@ -655,7 +651,7 @@ fn parse_loader(response: &Value) -> Result<WandLoader> {
         for target in cheats
             .iter()
             .filter_map(|cheat| cheat.get("target").and_then(Value::as_str))
-            .filter(|target| !target.is_empty() && target.len() <= 31)
+            .filter(|target| !target.is_empty() && target.len() <= MAX_TARGET_NAME)
         {
             if !variables.iter().any(|value| value == target) {
                 variables.push(target.to_string());
@@ -721,10 +717,11 @@ pub async fn wand_trainer(
     title: String,
     steam_appid: Option<u64>,
 ) -> Result<Value> {
-    let Some(matched) = match_for(catalog().await?.as_ref(), &title, steam_appid) else {
+    let (matched, auth) = matched_auth(&state, &title, steam_appid).await?;
+    let Some(matched) = matched else {
         return Ok(json!({ "ok": false, "error": "This game is not supported by Wand" }));
     };
-    let Some(auth) = current_auth(&state).await? else {
+    let Some(auth) = auth else {
         return Ok(json!({
             "ok": false,
             "needsAuth": true,
@@ -809,20 +806,64 @@ async fn download_trainer(data_dir: &Path, loader: &WandLoader) -> Result<PathBu
     Ok(path)
 }
 
-async fn trainer_arch(path: &Path) -> Result<&'static str> {
+
+/// Stream a response body to `dest`, verifying its digest and optional size.
+/// Removes `dest` and errors when verification fails.
+async fn download_verified<D: Digest>(
+    response: reqwest::Response,
+    dest: &Path,
+    expected_hash: &str,
+    expected_size: Option<u64>,
+    what: &str,
+) -> Result<()> {
+    let mut stream = response.bytes_stream();
+    let mut file = tokio::fs::File::create(dest)
+        .await
+        .map_err(|error| AppError::msg(format!("create {what}: {error}")))?;
+    let mut received = 0u64;
+    let mut hasher = D::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk?;
+        received += chunk.len() as u64;
+        hasher.update(&chunk);
+        file.write_all(&chunk)
+            .await
+            .map_err(|error| AppError::msg(format!("write {what}: {error}")))?;
+    }
+    file.flush()
+        .await
+        .map_err(|error| AppError::msg(format!("flush {what}: {error}")))?;
+    drop(file);
+    let matches = hex::encode(hasher.finalize()) == expected_hash
+        && expected_size.map_or(true, |size| received == size);
+    if !matches {
+        let _ = tokio::fs::remove_file(dest).await;
+        return Err(AppError::msg(format!("{what} failed integrity verification")));
+    }
+    Ok(())
+}
+
+/// Read the COFF header of a Windows PE binary: machine type (bytes 4-5) and
+/// link timestamp (bytes 8-11) after the PE magic.
+async fn read_pe_header(path: &Path, kind: &str) -> Result<[u8; 12]> {
     let mut file = tokio::fs::File::open(path)
         .await
-        .map_err(|error| AppError::msg(format!("open Wand trainer: {error}")))?;
+        .map_err(|error| AppError::msg(format!("open {kind}: {error}")))?;
     file.seek(std::io::SeekFrom::Start(0x3c)).await?;
     let mut offset = [0u8; 4];
     file.read_exact(&mut offset).await?;
     file.seek(std::io::SeekFrom::Start(u32::from_le_bytes(offset) as u64))
         .await?;
-    let mut header = [0u8; 6];
+    let mut header = [0u8; 12];
     file.read_exact(&mut header).await?;
     if &header[..4] != b"PE\0\0" {
-        return Err(AppError::msg("Wand trainer is not a Windows DLL"));
+        return Err(AppError::msg(format!("{kind} is not a Windows PE file")));
     }
+    Ok(header)
+}
+
+async fn trainer_arch(path: &Path) -> Result<&'static str> {
+    let header = read_pe_header(path, "Wand trainer").await?;
     match u16::from_le_bytes([header[4], header[5]]) {
         0x8664 => Ok("x64"),
         0x014c => Ok("x86"),
@@ -833,19 +874,7 @@ async fn trainer_arch(path: &Path) -> Result<&'static str> {
 }
 
 async fn game_version(path: &Path) -> Result<u32> {
-    let mut file = tokio::fs::File::open(path)
-        .await
-        .map_err(|error| AppError::msg(format!("open game executable: {error}")))?;
-    file.seek(std::io::SeekFrom::Start(0x3c)).await?;
-    let mut offset = [0u8; 4];
-    file.read_exact(&mut offset).await?;
-    file.seek(std::io::SeekFrom::Start(u32::from_le_bytes(offset) as u64))
-        .await?;
-    let mut header = [0u8; 12];
-    file.read_exact(&mut header).await?;
-    if &header[..4] != b"PE\0\0" {
-        return Err(AppError::msg("Game executable is not a Windows PE file"));
-    }
+    let header = read_pe_header(path, "game executable").await?;
     Ok(u32::from_le_bytes([
         header[8], header[9], header[10], header[11],
     ]))
@@ -1189,7 +1218,7 @@ async fn start_host(
 
 #[tauri::command]
 pub async fn wand_control(appid: String, name: String, value: f64) -> Result<Value> {
-    if name.is_empty() || name.len() > 31 || !value.is_finite() {
+    if name.is_empty() || name.len() > MAX_TARGET_NAME || !value.is_finite() {
         return Err(AppError::msg("Invalid Wand trainer value"));
     }
     let writer = SESSIONS
@@ -1222,10 +1251,11 @@ pub async fn wand_launch(
     title: String,
     steam_appid: Option<u64>,
 ) -> Result<Value> {
-    let Some(matched) = match_for(catalog().await?.as_ref(), &title, steam_appid) else {
+    let (matched, auth) = matched_auth(&state, &title, steam_appid).await?;
+    let Some(matched) = matched else {
         return Ok(json!({ "ok": false, "error": "This game is not supported by Wand" }));
     };
-    let Some(auth) = current_auth(&state).await? else {
+    let Some(auth) = auth else {
         return Ok(json!({
             "ok": false,
             "needsAuth": true,
@@ -1265,7 +1295,6 @@ pub async fn wand_launch(
     Ok(json!({
         "ok": true,
         "game": matched,
-        "runtime": if cfg!(target_os = "linux") { "proton" } else { "native" },
     }))
 }
 

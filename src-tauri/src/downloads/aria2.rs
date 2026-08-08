@@ -81,18 +81,16 @@ impl Aria2Manager {
         self.ready.load(Ordering::SeqCst)
     }
 
+    async fn ping(&self) -> bool {
+        self.rpc("aria2.getVersion", vec![]).await.is_ok()
+    }
+
     pub async fn ensure_started(&self, limit_kbps: u64) -> bool {
         if self.is_ready() {
-            if self.rpc("aria2.getVersion", vec![]).await.is_ok() {
+            if self.ping().await {
                 return true;
             }
-            self.ready.store(false, Ordering::SeqCst);
-            if let Some(mut child) = self.child.lock().take() {
-                child.start_kill().ok();
-            }
-            if let Some(conf) = self.proxy_conf.lock().take() {
-                std::fs::remove_file(conf).ok();
-            }
+            self.teardown_daemon();
             crate::logging::write_line("warn", "aria2 daemon unresponsive, relaunching");
         }
         let _g = self.starting.lock().await;
@@ -201,7 +199,7 @@ impl Aria2Manager {
 
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(6);
         while std::time::Instant::now() < deadline {
-            if self.rpc("aria2.getVersion", vec![]).await.is_ok() {
+            if self.ping().await {
                 self.ready.store(true, Ordering::SeqCst);
                 crate::logging::write_line("info", "aria2 daemon ready");
                 return true;
@@ -212,12 +210,7 @@ impl Aria2Manager {
             "warn",
             &format!("aria2 daemon did not become ready on port {port}"),
         );
-        if let Some(mut child) = self.child.lock().take() {
-            child.start_kill().ok();
-        }
-        if let Some(conf) = self.proxy_conf.lock().take() {
-            std::fs::remove_file(conf).ok();
-        }
+        self.teardown_daemon();
         false
     }
 
@@ -249,7 +242,7 @@ impl Aria2Manager {
         }
     }
 
-    pub fn stop(&self) {
+    fn teardown_daemon(&self) {
         self.ready.store(false, Ordering::SeqCst);
         if let Some(mut child) = self.child.lock().take() {
             child.start_kill().ok();
@@ -257,6 +250,10 @@ impl Aria2Manager {
         if let Some(conf) = self.proxy_conf.lock().take() {
             std::fs::remove_file(conf).ok();
         }
+    }
+
+    pub fn stop(&self) {
+        self.teardown_daemon();
     }
 
     async fn rpc(&self, method: &str, params: Vec<Value>) -> crate::error::Result<Value> {
@@ -301,22 +298,26 @@ impl Aria2Manager {
             .ok_or_else(|| crate::error::AppError::msg("aria2 addUri returned no gid"))
     }
 
+    async fn rpc_gid(&self, method: &str, gid: &str) {
+        self.rpc(method, vec![json!(gid)]).await.ok();
+    }
+
     pub async fn pause(&self, gid: &str) {
-        self.rpc("aria2.pause", vec![json!(gid)]).await.ok();
+        self.rpc_gid("aria2.pause", gid).await;
     }
 
     pub async fn unpause(&self, gid: &str) {
-        self.rpc("aria2.unpause", vec![json!(gid)]).await.ok();
-    }
-
-    pub async fn force_remove(&self, gid: &str) {
-        self.rpc("aria2.forceRemove", vec![json!(gid)]).await.ok();
+        self.rpc_gid("aria2.unpause", gid).await;
     }
 
     pub async fn remove_download_result(&self, gid: &str) {
-        self.rpc("aria2.removeDownloadResult", vec![json!(gid)])
-            .await
-            .ok();
+        self.rpc_gid("aria2.removeDownloadResult", gid).await;
+    }
+
+    /// Abort a transfer and purge its result so the gid is gone for good.
+    pub async fn discard(&self, gid: &str) {
+        self.rpc_gid("aria2.forceRemove", gid).await;
+        self.rpc_gid("aria2.removeDownloadResult", gid).await;
     }
 
     pub async fn tell_status(&self, gid: &str) -> crate::error::Result<Value> {
@@ -325,14 +326,11 @@ impl Aria2Manager {
             vec![
                 json!(gid),
                 json!([
-                    "gid",
                     "status",
                     "totalLength",
                     "completedLength",
                     "downloadSpeed",
-                    "errorCode",
-                    "errorMessage",
-                    "files"
+                    "errorMessage"
                 ]),
             ],
         )

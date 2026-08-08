@@ -6,6 +6,7 @@ use regex::Regex;
 
 use crate::http::{self, FetchOpts, Jar};
 use crate::sources::ResolveResult;
+use super::not_resolvable;
 
 static HOST_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)(^|\.)datavaults\.co$").unwrap());
@@ -29,30 +30,14 @@ const MIN_WAIT: u64 = 3;
 const MAX_WAIT: u64 = 60;
 
 pub fn matches(url: &str) -> bool {
-    url::Url::parse(url)
-        .ok()
-        .and_then(|u| u.host_str().map(|s| s.to_string()))
-        .map(|h| HOST_RE.is_match(&h))
-        .unwrap_or(false)
+    super::host_matches(url, &HOST_RE)
 }
 
-fn not_resolvable(url: &str, reason: &str) -> ResolveResult {
-    ResolveResult {
-        resolvable: false,
-        open_url: Some(url.to_string()),
-        reason: Some(reason.to_string()),
-        ..Default::default()
-    }
-}
-
-fn enc(s: &str) -> String {
-    percent_encoding::utf8_percent_encode(s, percent_encoding::NON_ALPHANUMERIC).to_string()
-}
 
 fn form(pairs: &[(&str, &str)]) -> Vec<u8> {
     pairs
         .iter()
-        .map(|(k, v)| format!("{k}={}", enc(v)))
+        .map(|(k, v)| format!("{k}={}", crate::mods::urlenc(v)))
         .collect::<Vec<_>>()
         .join("&")
         .into_bytes()
@@ -108,7 +93,7 @@ fn needs_interactive_captcha(html: &str) -> bool {
 pub async fn resolve(url: &str) -> ResolveResult {
     let parsed = match url::Url::parse(url) {
         Ok(u) => u,
-        Err(_) => return not_resolvable(url, "bad datavaults url"),
+        Err(_) => return not_resolvable(url, Some("bad datavaults url")),
     };
     let segs: Vec<&str> = parsed
         .path_segments()
@@ -116,12 +101,12 @@ pub async fn resolve(url: &str) -> ResolveResult {
         .unwrap_or_default();
     let segs: Vec<&str> = segs.into_iter().filter(|s| !s.is_empty()).collect();
     if segs.len() < 2 {
-        return not_resolvable(url, "datavaults link has no file id");
+        return not_resolvable(url, Some("datavaults link has no file id"));
     }
     let file_id = segs[0];
     let fname = *segs.last().unwrap();
 
-    let jar = Jar::new();
+    let jar = Jar::default();
     let _ = http::fetch(
         url,
         &FetchOpts {
@@ -142,10 +127,10 @@ pub async fn resolve(url: &str) -> ResolveResult {
     ]);
     let page2 = match http::fetch(url, &post_opts(&jar, url, dl1, false)).await {
         Ok(r) => r.text().await.unwrap_or_default(),
-        Err(_) => return not_resolvable(url, "datavaults download1 failed"),
+        Err(_) => return not_resolvable(url, Some("datavaults download1 failed")),
     };
     if needs_interactive_captcha(&page2) {
-        return not_resolvable(url, "datavaults requires interactive verification");
+        return not_resolvable(url, Some("datavaults requires interactive verification"));
     }
 
     let rand = match RAND_RE.captures(&page2).and_then(|c| c.get(1)) {
@@ -154,7 +139,7 @@ pub async fn resolve(url: &str) -> ResolveResult {
             if let Some(m) = DIRECT_RE.find(&http::decode_entities(&page2)) {
                 return ok(m.as_str(), fname);
             }
-            return not_resolvable(url, &reason(&page2));
+            return not_resolvable(url, Some(&reason(&page2)));
         }
     };
     let code = solve_captcha(&page2);
@@ -171,7 +156,7 @@ pub async fn resolve(url: &str) -> ResolveResult {
     ]);
     let resp = match http::fetch(url, &post_opts(&jar, url, dl2, true)).await {
         Ok(r) => r,
-        Err(_) => return not_resolvable(url, "datavaults download2 failed"),
+        Err(_) => return not_resolvable(url, Some("datavaults download2 failed")),
     };
     if resp.status().is_redirection() {
         if let Some(loc) = resp
@@ -186,7 +171,7 @@ pub async fn resolve(url: &str) -> ResolveResult {
     let body = resp.text().await.unwrap_or_default();
     match DIRECT_RE.find(&http::decode_entities(&body)) {
         Some(m) => ok(m.as_str(), fname),
-        None => not_resolvable(url, &reason(&body)),
+        None => not_resolvable(url, Some(&reason(&body))),
     }
 }
 

@@ -93,7 +93,6 @@ pub fn capabilities() -> Capabilities {
     Capabilities {
         search: true,
         catalog: true,
-        appid: false,
         bulk_browse: true,
         tags: true,
         release_date: false,
@@ -111,7 +110,7 @@ fn genre_name(id: u32) -> Option<&'static str> {
 }
 
 fn enc(s: &str) -> String {
-    percent_encoding::utf8_percent_encode(s, percent_encoding::NON_ALPHANUMERIC).to_string()
+    crate::mods::urlenc(s)
 }
 
 fn collapse(s: &str) -> String {
@@ -198,7 +197,6 @@ fn slug_from_url(url: &str) -> Option<String> {
 }
 
 fn parse_listing(html: &str, genre: &str) -> Vec<SourceGame> {
-    let nsfw = genre == "Adult";
     let mut games = Vec::new();
     let mut seen = HashSet::new();
     for chunk in html.split("data-ips-hook=\"topicRow\"").skip(1) {
@@ -235,7 +233,6 @@ fn parse_listing(html: &str, genre: &str) -> Vec<SourceGame> {
             added_at,
             updated_at: added_at,
             version,
-            nsfw,
             ..Default::default()
         });
     }
@@ -405,10 +402,6 @@ async fn zeilink_options(slug: &str) -> Vec<DownloadOption> {
                 },
                 host_type,
                 url: Some(url.to_string()),
-                file_name: link
-                    .get("fileName")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string),
                 size_bytes: size_text.as_deref().and_then(parse_size_to_bytes),
                 size_text,
                 resolvable: hosts::is_resolvable(url),
@@ -481,7 +474,6 @@ pub async fn get_detail(slug: &str) -> Option<SourceGame> {
                 .captures_iter(&html)
                 .filter_map(|c| c[1].parse::<u32>().ok())
                 .find_map(genre_name);
-            let nsfw = genre == Some("Adult");
             let genres = genre.map(|g| vec![g.to_string()]).unwrap_or_default();
 
             let download_options = match ZEILINK_RE.captures(&html) {
@@ -508,7 +500,6 @@ pub async fn get_detail(slug: &str) -> Option<SourceGame> {
                 version,
                 size_bytes,
                 size_text,
-                nsfw,
                 download_options,
                 ..Default::default()
             })

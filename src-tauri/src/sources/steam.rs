@@ -155,7 +155,7 @@ pub async fn search_app_id(title: &str) -> Option<u64> {
     }
     let url = format!(
         "https://store.steampowered.com/api/storesearch/?term={}&cc=US&l=en",
-        urlencoding(&norm)
+        crate::mods::urlenc(&norm)
     );
     let mut appid = None;
     let mut definitive = false;
@@ -292,9 +292,6 @@ pub async fn enrich(game: &mut UnifiedGame) {
     }
 }
 
-fn urlencoding(s: &str) -> String {
-    percent_encoding::utf8_percent_encode(s, percent_encoding::NON_ALPHANUMERIC).to_string()
-}
 
 #[cfg(test)]
 mod tests {

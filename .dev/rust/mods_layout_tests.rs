@@ -398,13 +398,13 @@ fn loader_registry_matches_official_title_ids() {
     let me3 = loader_compatibility(None, Some(1_245_620));
     assert!(
         me3.iter()
-            .find(|loader| loader.id == "mod-engine-3")
+            .find(|loader| loader.name == "Mod Engine 3")
             .unwrap()
             .compatible
     );
     assert!(
         !me3.iter()
-            .find(|loader| loader.id == "lennys-mod-loader")
+            .find(|loader| loader.name == "Lenny's Mod Loader")
             .unwrap()
             .compatible
     );
@@ -412,7 +412,7 @@ fn loader_registry_matches_official_title_ids() {
     let lenny = loader_compatibility(None, Some(1_174_180));
     let loader = lenny
         .iter()
-        .find(|loader| loader.id == "lennys-mod-loader")
+        .find(|loader| loader.name == "Lenny's Mod Loader")
         .unwrap();
     assert!(loader.compatible);
     assert!(loader.reason.contains("Red Dead Redemption 2"));
@@ -428,7 +428,7 @@ fn loader_registry_detects_unity_and_re_engine_files() {
     assert!(
         unity_loaders
             .iter()
-            .find(|loader| loader.id == "melonloader")
+            .find(|loader| loader.name == "MelonLoader")
             .unwrap()
             .compatible
     );
@@ -439,7 +439,7 @@ fn loader_registry_detects_unity_and_re_engine_files() {
     assert!(
         fluffy_loaders
             .iter()
-            .find(|loader| loader.id == "fluffy")
+            .find(|loader| loader.name == "Fluffy Mod Manager")
             .unwrap()
             .compatible
     );
@@ -450,7 +450,7 @@ fn loader_registry_detects_unity_and_re_engine_files() {
     assert!(
         mod_engine_loaders
             .iter()
-            .find(|loader| loader.id == "mod-engine-3")
+            .find(|loader| loader.name == "Mod Engine 3")
             .unwrap()
             .compatible
     );
@@ -460,7 +460,7 @@ fn loader_registry_detects_unity_and_re_engine_files() {
     let lenny_loaders = loader_compatibility(Some(&red_dead), None);
     let lenny = lenny_loaders
         .iter()
-        .find(|loader| loader.id == "lennys-mod-loader")
+        .find(|loader| loader.name == "Lenny's Mod Loader")
         .unwrap();
     assert!(lenny.compatible);
     assert!(lenny.reason.contains("Red Dead Redemption 2"));
@@ -638,7 +638,6 @@ fn deploy_to_rolls_back_game_dir_and_journal_on_mid_deploy_failure() {
     assert!(!target.join("c.txt").exists());
     let journal = load_journal(&game_dir);
     assert_eq!(journal.files.len(), 1);
-    assert_eq!(journal.files["file.txt"].mod_id, "mod1");
 
     undeploy_from(&game_dir, &target).unwrap();
     assert!(!target.join("file.txt").exists());
@@ -682,7 +681,6 @@ fn undeploy_from_keeps_file_when_claimed_backup_is_missing() {
     j.files.insert(
         "file.txt".to_string(),
         JournalEntry {
-            mod_id: "mod1".to_string(),
             backup: Some("file.txt".to_string()),
         },
     );
@@ -707,7 +705,6 @@ fn disable_path_keeps_unbacked_file_when_backup_is_missing() {
     j.files.insert(
         "file.txt".to_string(),
         JournalEntry {
-            mod_id: "mod1".to_string(),
             backup: Some("file.txt".to_string()),
         },
     );
@@ -770,7 +767,6 @@ fn retry_deploy_preserves_unbacked_original_when_claimed_backup_missing() {
     j.files.insert(
         "file.txt".to_string(),
         JournalEntry {
-            mod_id: "mod1".to_string(),
             backup: Some("file.txt".to_string()),
         },
     );

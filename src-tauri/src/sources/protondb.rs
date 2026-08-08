@@ -11,7 +11,7 @@ static SUMMARY_CACHE: LazyLock<metacache::WriteBehind<Option<ProtonDbSummary>>> 
     LazyLock::new(|| metacache::WriteBehind::load("protondb.json"));
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct ProtonDbSummary {
     pub tier: String,
     pub trending_tier: String,
@@ -42,25 +42,8 @@ pub async fn summary(appid: u64) -> Option<ProtonDbSummary> {
             Ok(v) => v,
             Err(_) => return None,
         };
-        let str_field = |key: &str| {
-            json.get(key)
-                .and_then(|x| x.as_str())
-                .unwrap_or("")
-                .to_string()
-        };
-        let tier = str_field("tier");
-        if tier.is_empty() {
-            None
-        } else {
-            Some(ProtonDbSummary {
-                tier,
-                trending_tier: str_field("trendingTier"),
-                best_reported_tier: str_field("bestReportedTier"),
-                confidence: str_field("confidence"),
-                score: json.get("score").and_then(|x| x.as_f64()).unwrap_or(0.0),
-                total: json.get("total").and_then(|x| x.as_u64()).unwrap_or(0),
-            })
-        }
+        let summary = serde_json::from_value::<ProtonDbSummary>(json).ok();
+        summary.filter(|s| !s.tier.is_empty())
     } else {
         None
     };

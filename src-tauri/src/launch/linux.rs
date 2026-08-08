@@ -19,7 +19,7 @@ fn config_for(state: &AppState, appid: &str) -> Value {
     state.settings.get(&format!("gameLinux:{appid}"))
 }
 
-fn which(tool: &str) -> Option<String> {
+pub(crate) fn which(tool: &str) -> Option<String> {
     if let Some(path) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&path) {
             let candidate = dir.join(tool);
@@ -49,13 +49,8 @@ fn is_windows_exe(exe_path: &str) -> bool {
 
 fn parse_extra_env(cfg: &Value) -> Vec<(String, String)> {
     cfg.get("extraEnv")
-        .and_then(|v| v.as_str())
-        .map(|s| {
-            s.lines()
-                .filter_map(|line| line.split_once('='))
-                .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
-                .collect()
-        })
+        .and_then(Value::as_str)
+        .map(parse_env_lines)
         .unwrap_or_default()
 }
 
@@ -387,6 +382,7 @@ pub fn resolve_launch(state: &AppState, appid: &str, exe_path: &str) -> Result<L
     )
 }
 
+#[cfg(target_os = "linux")]
 pub(crate) fn resolve_auxiliary(
     state: &AppState,
     appid: &str,
@@ -434,6 +430,7 @@ pub(crate) fn resolve_auxiliary(
     )
 }
 
+#[cfg(target_os = "linux")]
 fn retarget_auxiliary(
     mut plan: LaunchPlan,
     auxiliary_exe: &str,
@@ -460,7 +457,7 @@ fn retarget_auxiliary(
     Err("Wand on Linux requires this game to use Proton or umu".to_string())
 }
 
-#[allow(dead_code)]
+#[cfg(all(test, target_os = "linux"))]
 pub(crate) fn plan_launch(
     cfg: &Value,
     global_mode: Option<String>,

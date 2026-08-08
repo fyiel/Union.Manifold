@@ -5,6 +5,36 @@ All notable changes to Union.Manifold. This project is a fork of
 
 ## Unreleased
 
+### Fixed
+
+- Pausing downloads frees their concurrency slot so the queue keeps
+  starting; resuming a paused transfer re-takes it
+- A download that completed between queueing and start no longer fires
+  auto-install for a row the user just cancelled
+- A typed deploy target that fails validation no longer persists in the
+  mods config
+- Clearing the image cache also clears the in-memory caches, so the freed
+  size is honest and stale 404s do not linger
+- Cold-start deep links for unknown schemes (unionmanifold://) now route
+  to the app like they do for an already-running instance
+
+### Changed
+
+- Source health surfaced per source in browse results; failed sources are
+  refetched on their own after a short cooldown instead of poisoning the
+  whole browse pool cache
+
+### Removed
+
+- Dead wire fields: popularity/nsfw/appid on game payloads, capability
+  coverage/supports/scope maps, facet year/size ranges (renderer never
+  read them), unused Nexus profileUrl/total/offset/summary/version fields,
+  the unused wand_status command and trainer runtime flag
+- 11 duplicated not-resolvable helpers, 10 duplicated host-match helpers,
+  7 duplicated URL-encoding helpers, and the write-only gid_to_id download
+  map
+
+
 ### Added
 
 - Online-Fix repairs get a dedicated toggle in Settings → Sources and the

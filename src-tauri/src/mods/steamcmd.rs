@@ -15,7 +15,7 @@ const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 static LOCK: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(|| tokio::sync::Mutex::new(()));
 static BOOTSTRAPPING: AtomicBool = AtomicBool::new(false);
 
-pub(crate) fn dir(paths: &AppPaths) -> PathBuf {
+fn dir(paths: &AppPaths) -> PathBuf {
     paths.data_dir.join("steamcmd")
 }
 

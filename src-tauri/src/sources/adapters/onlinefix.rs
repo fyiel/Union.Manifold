@@ -131,7 +131,7 @@ async fn scrape_downloads(title: &str) -> Option<Vec<DownloadOption>> {
 }
 
 async fn resolve_game_page(title: &str) -> Option<String> {
-    let q = percent_encoding::utf8_percent_encode(title, percent_encoding::NON_ALPHANUMERIC);
+    let q = crate::mods::urlenc(title);
     let url = format!("{ORIGIN}/index.php?do=search&subaction=search&story={q}");
     let html = fetch_page(&url).await?;
     let want = squash(title);

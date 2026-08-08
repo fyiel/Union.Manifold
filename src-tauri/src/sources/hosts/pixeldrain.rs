@@ -10,11 +10,7 @@ static PATH_RE: Lazy<Regex> =
 static HOST_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)(^|\.)pixeldrain\.com$").unwrap());
 
 pub fn matches(url: &str) -> bool {
-    url::Url::parse(url)
-        .ok()
-        .and_then(|u| u.host_str().map(|s| s.to_string()))
-        .map(|h| HOST_RE.is_match(&h))
-        .unwrap_or(false)
+    super::host_matches(url, &HOST_RE)
 }
 
 fn parse(url: &str) -> Option<(bool, String)> {
@@ -31,20 +27,7 @@ fn direct_url(id: &str) -> String {
 }
 
 fn num(v: Option<&Value>) -> Option<u64> {
-    let v = v?;
-    let n = v
-        .as_u64()
-        .or_else(|| v.as_f64().map(|f| f as u64))
-        .or_else(|| {
-            v.as_str()
-                .and_then(|s| s.parse::<f64>().ok())
-                .map(|f| f as u64)
-        })?;
-    if n == 0 {
-        None
-    } else {
-        Some(n)
-    }
+    super::num(v)
 }
 
 async fn fetch_json(url: &str) -> Option<Value> {

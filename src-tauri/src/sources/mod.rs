@@ -79,7 +79,6 @@ fn pool_sig(params: &QueryParams, ids: &[String]) -> String {
 pub struct Capabilities {
     pub search: bool,
     pub catalog: bool,
-    pub appid: bool,
     pub bulk_browse: bool,
     pub tags: bool,
     pub release_date: bool,
@@ -439,26 +438,7 @@ async fn run_query(reg: &Registry, params: QueryParams) -> filters::QueryResult 
         .await;
     match cached {
         Some(cp) => page_from(&cp, &params, &ids, reg),
-        None => filters::QueryResult {
-            ok: true,
-            games: Vec::new(),
-            total: 0,
-            facets: filters::Facets {
-                tags: Vec::new(),
-                years: filters::MinMax {
-                    min: None,
-                    max: None,
-                },
-                size: filters::MinMax {
-                    min: None,
-                    max: None,
-                },
-            },
-            applied: params.clone(),
-            capabilities: filters::capability_report(&ids, reg),
-            error: None,
-            sources_errored: false,
-        },
+        None => page_from(&empty_pool(), &params, &ids, reg),
     }
 }
 
@@ -492,14 +472,6 @@ fn empty_pool() -> std::sync::Arc<CachedPool> {
         ordered: Vec::new(),
         facets: filters::Facets {
             tags: Vec::new(),
-            years: filters::MinMax {
-                min: None,
-                max: None,
-            },
-            size: filters::MinMax {
-                min: None,
-                max: None,
-            },
         },
         total: 0,
         errored: false,

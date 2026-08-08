@@ -155,7 +155,7 @@ async fn jar_round_trips_cookies_between_requests() {
         "Set-Cookie: session=abc123; Path=/\r\n",
         "first",
     )]);
-    let jar = Jar::new();
+    let jar = Jar::default();
     let host = url::Url::parse(&base)
         .unwrap()
         .host_str()

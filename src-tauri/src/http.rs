@@ -3,7 +3,6 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 use futures::stream::{self, StreamExt};
-use once_cell::sync::Lazy;
 use rand::Rng;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::redirect::Policy;
@@ -33,10 +32,6 @@ fn base_headers() -> HeaderMap {
 pub struct Jar(pub Arc<Mutex<HashMap<String, HashMap<String, String>>>>);
 
 impl Jar {
-    pub fn new() -> Self {
-        Jar(Arc::new(Mutex::new(HashMap::new())))
-    }
-
     pub fn set(&self, host: &str, name: &str, value: &str) {
         self.0
             .lock()
@@ -278,11 +273,11 @@ pub fn decode_entities(s: &str) -> String {
         .to_string()
 }
 
-static ENTITY_RE: Lazy<regex::Regex> = Lazy::new(|| {
+static ENTITY_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"&(?:#(?:[xX][0-9a-fA-F]{1,6}|[0-9]{1,7})|[a-zA-Z]+);").unwrap()
 });
 
-static TAG_RE: Lazy<regex::Regex> = Lazy::new(|| regex::Regex::new(r"(?s)<[^>]*>").unwrap());
+static TAG_RE: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"(?s)<[^>]*>").unwrap());
 
 pub fn strip_tags(s: &str) -> String {
     decode_entities(&TAG_RE.replace_all(s, " "))

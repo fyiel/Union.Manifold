@@ -12,9 +12,14 @@ use crate::sources::metacache;
 use crate::sources::schema::normalize_title;
 use crate::state::AppState;
 
-use super::{emit_progress, fold, load_config, run_archive_install, urlenc, InstallSpec};
+use super::{
+    emit_progress, fold, load_config, now_secs, period_days, run_archive_install, urlenc,
+    InstallSpec,
+};
 
 const API: &str = "https://api.nexusmods.com";
+
+const CLOUDFLARE_HINT: &str = "Cloudflare blocked the request. A cf_clearance cookie only works from the same browser AND the same User-Agent that made it. Copy a fresh cf_clearance and paste your browser's User-Agent under Settings > Mods too";
 
 const WWW_HOST: &str = "www.nexusmods.com";
 const GENERATE_URL: &str =
@@ -56,10 +61,10 @@ async fn api_json(key: &str, url: &str) -> Result<Value, String> {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub(crate) struct NexusGame {
-    pub id: u64,
-    pub name: String,
-    pub domain: String,
+struct NexusGame {
+    id: u64,
+    name: String,
+    domain: String,
 }
 
 static GAMES_CACHE: LazyLock<metacache::WriteBehind<Vec<NexusGame>>> =
@@ -124,11 +129,14 @@ fn mod_page_url(domain: &str, mod_id: u64) -> String {
     format!("https://www.nexusmods.com/{domain}/mods/{mod_id}")
 }
 
+fn str_field(v: &Value, k: &str) -> String {
+    v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string()
+}
+
 fn browse_mod_from_graphql(n: &Value, fallback_domain: &str) -> Option<Value> {
     let id = n.get("modId")?.as_u64()?;
-    let s = |k: &str| n.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
     let author = {
-        let a = s("author");
+        let a = str_field(n, "author");
         if a.is_empty() {
             n.pointer("/uploader/name")
                 .and_then(|x| x.as_str())
@@ -145,15 +153,11 @@ fn browse_mod_from_graphql(n: &Value, fallback_domain: &str) -> Option<Value> {
         .unwrap_or(fallback_domain);
     Some(json!({
         "remoteId": id.to_string(),
-        "name": s("name"),
-        "summary": s("summary"),
+        "name": str_field(n, "name"),
         "author": author,
         "picture": n.get("pictureUrl").and_then(|p| p.as_str()),
         "downloads": n.get("downloads").and_then(|d| d.as_u64()).unwrap_or(0),
         "endorsements": n.get("endorsements").and_then(|e| e.as_u64()).unwrap_or(0),
-        "version": s("version"),
-        "updatedAt": to_unix_secs(n.get("updatedAt")),
-        "sizeBytes": n.get("fileSize").and_then(|v| v.as_u64()),
         "pageUrl": mod_page_url(domain, id),
     }))
 }
@@ -165,16 +169,6 @@ const SEARCH_QUERY: &str = "query Mods($count: Int!, $offset: Int!, $filter: Mod
 
 const BROWSE_COUNT: u64 = 24;
 const BROWSE_QUERY: &str = "query($count:Int!,$offset:Int!,$filter:ModsFilter,$sort:[ModsSort!]){mods(count:$count,offset:$offset,filter:$filter,sort:$sort){totalCount nodes{modId name summary version author downloads endorsements fileSize pictureUrl updatedAt createdAt game{domainName} uploader{name}}}}";
-
-fn to_unix_secs(v: Option<&Value>) -> Value {
-    match v {
-        Some(Value::Number(n)) => json!(n.as_u64()),
-        Some(Value::String(s)) => chrono::DateTime::parse_from_rfc3339(s)
-            .map(|d| json!(d.timestamp()))
-            .unwrap_or(Value::Null),
-        _ => Value::Null,
-    }
-}
 
 fn map_graphql_search(v: &Value, fallback_domain: &str, offset: u64) -> (Vec<Value>, bool) {
     let total = v
@@ -205,12 +199,40 @@ fn sort_field(sort: &str) -> &'static str {
     }
 }
 
-fn period_days(period: &str) -> Option<i64> {
-    match period {
-        "7" => Some(7),
-        "28" => Some(28),
-        _ => None,
+/// POST a GraphQL query to the Nexus API, mapping transport and
+/// response-shape failures to user-facing strings.
+async fn graphql_post(tag: &str, body: Value) -> Result<Value, String> {
+    let mut headers = HashMap::new();
+    headers.insert("Content-Type".to_string(), "application/json".to_string());
+    headers.insert("Accept".to_string(), "application/json".to_string());
+    let opts = http::FetchOpts {
+        method: Some("POST".to_string()),
+        headers,
+        body: Some(serde_json::to_vec(&body).map_err(|e| format!("nexus {tag} encode: {e}"))?),
+        ..Default::default()
+    };
+    let resp = http::fetch(GRAPHQL_URL, &opts)
+        .await
+        .map_err(|e| format!("nexus {tag}: {e}"))?;
+    let status = resp.status();
+    if status.as_u16() == 429 {
+        return Err("NexusMods rate limit reached — wait a bit and try again".to_string());
     }
+    if !status.is_success() {
+        return Err(format!("nexus {tag}: HTTP {status}"));
+    }
+    let v: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("nexus {tag} parse: {e}"))?;
+    if v.pointer("/data/mods").is_none() {
+        let msg = v
+            .pointer("/errors/0/message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("unexpected response");
+        return Err(format!("nexus {tag}: {msg}"));
+    }
+    Ok(v)
 }
 
 fn browse_variables(
@@ -413,7 +435,7 @@ async fn native_free_download(
         .await?
         .ok_or_else(|| format!("no numeric NexusMods game id for {domain}"))?;
 
-    let jar = http::Jar::new();
+    let jar = http::Jar::default();
     for (n, v) in &pairs {
         jar.set(WWW_HOST, n, v);
     }
@@ -445,9 +467,7 @@ async fn native_free_download(
     let page_status = page.status().as_u16();
     let page_body = page.text().await.unwrap_or_default();
     if is_cloudflare_challenge(page_status, &page_body) {
-        return Ok(FreeDownload::NeedsSession(Some(
-            "Cloudflare blocked the request. A cf_clearance cookie only works from the same browser AND the same User-Agent that made it. Copy a fresh cf_clearance and paste your browser's User-Agent under Settings > Mods too".to_string(),
-        )));
+        return Ok(FreeDownload::NeedsSession(Some(CLOUDFLARE_HINT.to_string())));
     }
 
     let mut headers = HashMap::new();
@@ -478,7 +498,7 @@ async fn native_free_download(
     let body = resp.text().await.unwrap_or_default();
     if is_cloudflare_challenge(status, &body) {
         return Ok(FreeDownload::NeedsSession(Some(
-            "Cloudflare blocked the request. A cf_clearance cookie only works from the same browser AND the same User-Agent that made it. Copy a fresh cf_clearance and paste your browser's User-Agent under Settings > Mods too".to_string(),
+            CLOUDFLARE_HINT.to_string(),
         )));
     }
     if status == 401 || status == 403 {
@@ -500,6 +520,11 @@ async fn native_free_download(
     Ok(FreeDownload::Started)
 }
 
+async fn premium_user(key: &str) -> Result<bool, String> {
+    let v = api_json(key, &format!("{API}/v1/users/validate.json")).await?;
+    Ok(v.get("is_premium").and_then(|x| x.as_bool()).unwrap_or(false))
+}
+
 #[tauri::command]
 pub async fn nexus_validate(state: State<'_, AppState>) -> Result<Value, String> {
     let res = async {
@@ -508,7 +533,6 @@ pub async fn nexus_validate(state: State<'_, AppState>) -> Result<Value, String>
         Ok(json!({ "ok": true, "user": {
             "name": v.get("name").and_then(|x| x.as_str()).unwrap_or(""),
             "premium": v.get("is_premium").and_then(|x| x.as_bool()).unwrap_or(false),
-            "profileUrl": v.get("profile_url").and_then(|x| x.as_str()).unwrap_or(""),
         }}))
     }
     .await;
@@ -524,39 +548,9 @@ pub async fn nexus_browse(
     offset: u32,
 ) -> Result<Value, String> {
     let res = async {
-        let now = chrono::Utc::now().timestamp();
-        let variables = browse_variables(&domain, &sort, &order, &period, offset, now);
+        let variables = browse_variables(&domain, &sort, &order, &period, offset, now_secs());
         let body = json!({ "query": BROWSE_QUERY, "variables": variables });
-        let mut headers = HashMap::new();
-        headers.insert("Content-Type".to_string(), "application/json".to_string());
-        headers.insert("Accept".to_string(), "application/json".to_string());
-        let opts = http::FetchOpts {
-            method: Some("POST".to_string()),
-            headers,
-            body: Some(serde_json::to_vec(&body).map_err(|e| format!("nexus browse encode: {e}"))?),
-            ..Default::default()
-        };
-        let resp = http::fetch(GRAPHQL_URL, &opts)
-            .await
-            .map_err(|e| format!("nexus browse: {e}"))?;
-        let status = resp.status();
-        if status.as_u16() == 429 {
-            return Err("NexusMods rate limit reached, wait a bit and try again".to_string());
-        }
-        if !status.is_success() {
-            return Err(format!("nexus browse: HTTP {status}"));
-        }
-        let v: Value = resp
-            .json()
-            .await
-            .map_err(|e| format!("nexus browse parse: {e}"))?;
-        if v.pointer("/data/mods").is_none() {
-            let msg = v
-                .pointer("/errors/0/message")
-                .and_then(|m| m.as_str())
-                .unwrap_or("unexpected response");
-            return Err(format!("nexus browse: {msg}"));
-        }
+        let v = graphql_post("browse", body).await?;
         let total = v
             .pointer("/data/mods/totalCount")
             .and_then(|t| t.as_u64())
@@ -582,8 +576,6 @@ pub async fn nexus_browse(
             "ok": true,
             "mods": mods,
             "hasMore": has_more,
-            "total": total,
-            "offset": offset,
         }))
     }
     .await;
@@ -611,36 +603,7 @@ pub async fn nexus_search(domain: String, query: String, page: u32) -> Result<Va
                 "sort": [ { "downloads": { "direction": "DESC" } } ]
             }
         });
-        let mut headers = HashMap::new();
-        headers.insert("Content-Type".to_string(), "application/json".to_string());
-        headers.insert("Accept".to_string(), "application/json".to_string());
-        let opts = http::FetchOpts {
-            method: Some("POST".to_string()),
-            headers,
-            body: Some(serde_json::to_vec(&body).map_err(|e| format!("nexus search encode: {e}"))?),
-            ..Default::default()
-        };
-        let resp = http::fetch(GRAPHQL_URL, &opts)
-            .await
-            .map_err(|e| format!("nexus search: {e}"))?;
-        let status = resp.status();
-        if status.as_u16() == 429 {
-            return Err("NexusMods rate limit reached — wait a bit and try again".to_string());
-        }
-        if !status.is_success() {
-            return Err(format!("nexus search: HTTP {status}"));
-        }
-        let v: Value = resp
-            .json()
-            .await
-            .map_err(|e| format!("nexus search parse: {e}"))?;
-        if v.pointer("/data/mods").is_none() {
-            let msg = v
-                .pointer("/errors/0/message")
-                .and_then(|m| m.as_str())
-                .unwrap_or("unexpected response");
-            return Err(format!("nexus search: {msg}"));
-        }
+        let v = graphql_post("search", body).await?;
         let (mods, has_more) = map_graphql_search(&v, &domain, offset);
         Ok(json!({ "ok": true, "mods": mods, "hasMore": has_more }))
     }
@@ -704,11 +667,7 @@ pub async fn nexus_install(
     let res = async {
         let mid: u64 = mod_id.parse().map_err(|_| format!("bad mod id {mod_id}"))?;
         let key = api_key(&state)?;
-        let user = api_json(&key, &format!("{API}/v1/users/validate.json")).await?;
-        let premium = user
-            .get("is_premium")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        let premium = premium_user(&key).await?;
         if !premium {
             if let Some(sg) = crate::slipgate::cfg() {
                 match slipgate_resolve(&state, &sg, &key, &domain, mid, file_id).await {
@@ -766,15 +725,15 @@ pub async fn nexus_install(
     Ok(fold(res))
 }
 
-pub(crate) struct NxmLink {
-    pub domain: String,
-    pub mod_id: u64,
-    pub file_id: u64,
-    pub key: String,
-    pub expires: String,
+struct NxmLink {
+    domain: String,
+    mod_id: u64,
+    file_id: u64,
+    key: String,
+    expires: String,
 }
 
-pub(crate) fn parse_nxm(url: &str) -> Option<NxmLink> {
+fn parse_nxm(url: &str) -> Option<NxmLink> {
     let u = url::Url::parse(url).ok()?;
     if u.scheme() != "nxm" {
         return None;
@@ -1035,17 +994,11 @@ mod tests {
         assert_eq!(m["downloads"], 26722916);
         assert_eq!(m["endorsements"], 12345);
         assert_eq!(m["picture"], "https://staticdelivery.nexusmods.com/mod.jpg");
-        assert_eq!(m["version"], "4.3.5a");
-        assert_eq!(
-            m["updatedAt"], 1767323045,
-            "ISO-8601 normalized to unix secs"
-        );
         assert_eq!(
             m["pageUrl"],
             "https://www.nexusmods.com/skyrimspecialedition/mods/266"
         );
         assert_eq!(mods[1]["author"], "someone");
-        assert_eq!(mods[1]["updatedAt"], Value::Null);
         assert_eq!(
             mods[1]["pageUrl"],
             "https://www.nexusmods.com/skyrimspecialedition/mods/42"
@@ -1150,20 +1103,6 @@ mod tests {
     }
 
     #[test]
-    fn iso_updated_at_converts_to_unix_secs() {
-        assert_eq!(
-            to_unix_secs(Some(&json!("2026-01-02T03:04:05+00:00"))),
-            json!(1767323045_i64)
-        );
-        assert_eq!(
-            to_unix_secs(Some(&json!(1_700_000_000_u64))),
-            json!(1_700_000_000_u64)
-        );
-        assert_eq!(to_unix_secs(Some(&Value::Null)), Value::Null);
-        assert_eq!(to_unix_secs(Some(&json!("not-a-date"))), Value::Null);
-    }
-
-    #[test]
     fn browse_mapper_includes_size_bytes() {
         let node = json!({
             "modId": 100,
@@ -1175,14 +1114,12 @@ mod tests {
         });
         let m = browse_mod_from_graphql(&node, "fallback").unwrap();
         assert_eq!(m["remoteId"], "100");
-        assert_eq!(m["sizeBytes"], 987654321_u64);
         assert_eq!(
             m["pageUrl"],
             "https://www.nexusmods.com/stardewvalley/mods/100"
         );
         let no_size = json!({ "modId": 7, "name": "x", "game": { "domainName": "" } });
         let ms = browse_mod_from_graphql(&no_size, "dom").unwrap();
-        assert_eq!(ms["sizeBytes"], Value::Null);
         assert_eq!(ms["pageUrl"], "https://www.nexusmods.com/dom/mods/7");
     }
 }

@@ -4,9 +4,9 @@ use tauri::{AppHandle, Manager};
 use crate::error::{AppError, Result};
 
 pub struct AppPaths {
-    pub config_dir: PathBuf,
+    config_dir: PathBuf,
     pub data_dir: PathBuf,
-    pub logs_dir: PathBuf,
+    logs_dir: PathBuf,
     pub asset_cache_dir: PathBuf,
 }
 

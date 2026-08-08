@@ -146,21 +146,6 @@ fn merge_games_takes_max_timestamps_and_first_size() {
     assert_eq!(out[0].size_text.as_deref(), Some("111 B"));
 }
 
-#[test]
-fn merge_games_nsfw_is_sticky_across_sources() {
-    let a = SourceGame {
-        title: "Game".to_string(),
-        nsfw: false,
-        ..Default::default()
-    };
-    let b = SourceGame {
-        title: "Game".to_string(),
-        nsfw: true,
-        ..Default::default()
-    };
-    let out = merge_games(vec![a, b]);
-    assert!(out[0].nsfw);
-}
 
 #[test]
 fn merge_games_appid_bridges_title_variants_transitively() {

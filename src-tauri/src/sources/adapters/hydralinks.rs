@@ -72,7 +72,6 @@ pub fn capabilities() -> Capabilities {
     Capabilities {
         search: true,
         catalog: true,
-        appid: false,
         bulk_browse: true,
         tags: false,
         release_date: false,
@@ -261,10 +260,6 @@ async fn zeilink_options(slug: &str) -> Vec<DownloadOption> {
                 },
                 host_type,
                 url: Some(url.to_string()),
-                file_name: link
-                    .get("fileName")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string),
                 size_bytes: size_text.as_deref().and_then(parse_size_to_bytes),
                 size_text,
                 resolvable: hosts::is_resolvable(url),

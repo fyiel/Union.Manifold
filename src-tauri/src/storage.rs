@@ -69,16 +69,10 @@ pub fn storage_precheck(state: State<'_, AppState>, opts: Value) -> Value {
     let shortfall = required.saturating_sub(free);
     json!({
         "ok": ok,
-        "requiredBytes": required,
-        "freeBytes": free,
-        "shortfallBytes": shortfall,
         "downloadBytes": download_bytes,
         "extractBytes": extract,
         "alreadyReservedBytes": 0,
-        "availableAfterReservation": free,
-        "mountRoot": first_existing_ancestor(&target).to_string_lossy(),
         "humanRequired": human(required),
-        "humanFree": human(free),
         "humanShortfall": human(shortfall),
         "humanAvailable": human(free),
     })

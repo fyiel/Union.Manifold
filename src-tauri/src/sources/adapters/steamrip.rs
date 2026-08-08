@@ -101,7 +101,6 @@ pub fn capabilities() -> Capabilities {
     Capabilities {
         search: true,
         catalog: true,
-        appid: false,
         bulk_browse: true,
         tags: true,
         release_date: false,
@@ -360,11 +359,9 @@ fn build_game(post: &Value, appid: Option<u64>, cats: &Cats) -> SourceGame {
         release_year: None,
         added_at,
         updated_at,
-        popularity: None,
         version,
         size_bytes: find_size(content),
         size_text: None,
-        nsfw: false,
         download_options: extract_download_options(content),
     }
 }

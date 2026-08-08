@@ -106,19 +106,10 @@ fn log_failure(what: &str, url: &str) {
 }
 
 fn query_param(uri: &str, key: &str) -> Option<String> {
-    let q = uri.split('?').nth(1)?;
-    for pair in q.split('&') {
-        if let Some((k, v)) = pair.split_once('=') {
-            if k == key {
-                return Some(
-                    percent_encoding::percent_decode_str(v)
-                        .decode_utf8_lossy()
-                        .to_string(),
-                );
-            }
-        }
-    }
-    None
+    url::Url::parse(uri)
+        .ok()?
+        .query_pairs()
+        .find_map(|(k, v)| (k == key).then(|| v.into_owned()))
 }
 
 pub async fn respond(app: AppHandle, uri: String) -> (u16, Vec<u8>, String) {
@@ -281,14 +272,7 @@ pub async fn respond(app: AppHandle, uri: String) -> (u16, Vec<u8>, String) {
 
 #[tauri::command(async)]
 pub fn assets_size(app: AppHandle) -> Value {
-    let dir = cache_dir(&app);
-    let bytes: u64 = walkdir::WalkDir::new(&dir)
-        .into_iter()
-        .flatten()
-        .filter_map(|e| e.metadata().ok())
-        .filter(|m| m.is_file())
-        .map(|m| m.len())
-        .sum();
+    let bytes = crate::install::dir_size(&cache_dir(&app));
     json!({ "ok": true, "bytes": bytes })
 }
 
@@ -304,6 +288,10 @@ pub fn assets_clear(app: AppHandle) -> Value {
             std::fs::remove_file(entry.path()).ok();
         }
     }
+    // The in-memory caches keep serving stale bytes (and stale 404s) after
+    // the disk wipe; clear them so the reported freed size is real.
+    MEM_CACHE.lock().clear();
+    NEG_CACHE.lock().clear();
     json!({ "ok": true, "freed": freed })
 }
 

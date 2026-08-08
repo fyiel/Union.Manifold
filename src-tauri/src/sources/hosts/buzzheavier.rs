@@ -5,6 +5,7 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashMap;
 use std::time::Duration;
+use super::not_resolvable;
 
 static HOSTS_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)(^|\.)(buzzheavier\.com|bzzhr\.(?:to|co))$").unwrap());
@@ -17,13 +18,7 @@ static HXGET_RE: Lazy<Regex> =
 static ALT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"[?&]alt=true").unwrap());
 
 pub fn matches(url: &str) -> bool {
-    match url::Url::parse(url)
-        .ok()
-        .and_then(|u| u.host_str().map(|s| s.to_string()))
-    {
-        Some(h) => HOSTS_RE.is_match(&h) && !TS_RE.is_match(&h),
-        None => false,
-    }
+    super::host_matches(url, &HOSTS_RE) && !super::host_matches(url, &TS_RE)
 }
 
 fn id_from(url: &str) -> Option<String> {
@@ -39,15 +34,6 @@ fn origin_of(url: &str) -> Option<String> {
     match u.port() {
         Some(p) => Some(format!("{scheme}://{host}:{p}")),
         None => Some(format!("{scheme}://{host}")),
-    }
-}
-
-fn not_resolvable(url: &str, reason: Option<String>) -> ResolveResult {
-    ResolveResult {
-        resolvable: false,
-        open_url: Some(url.to_string()),
-        reason,
-        ..Default::default()
     }
 }
 
@@ -122,7 +108,7 @@ pub async fn resolve(url: &str) -> ResolveResult {
             Ok(r) => r,
             Err(_) => {
                 if attempt > 0 {
-                    return not_resolvable(url, Some("no buzzheavier download token".to_string()));
+                    return not_resolvable(url, Some("no buzzheavier download token"));
                 }
                 continue;
             }
@@ -130,7 +116,7 @@ pub async fn resolve(url: &str) -> ResolveResult {
         let status = resp.status();
         if !status.is_success() {
             if attempt > 0 {
-                return not_resolvable(url, Some(format!("buzzheavier page {}", status.as_u16())));
+                return not_resolvable(url, Some(&format!("buzzheavier page {}", status.as_u16())));
             }
             continue;
         }
@@ -170,7 +156,7 @@ pub async fn resolve(url: &str) -> ResolveResult {
         } else {
             "no buzzheavier download token"
         };
-        return not_resolvable(url, Some(reason.to_string()));
+        return not_resolvable(url, Some(reason));
     }
 
     let mut headers = HashMap::new();
@@ -186,7 +172,7 @@ pub async fn resolve(url: &str) -> ResolveResult {
                 headers: Some(headers),
                 ..Default::default()
             },
-            None => not_resolvable(url, Some("no buzzheavier redirect".to_string())),
+            None => not_resolvable(url, Some("no buzzheavier redirect")),
         };
     }
 
@@ -201,7 +187,7 @@ pub async fn resolve(url: &str) -> ResolveResult {
     }
 
     if files.is_empty() {
-        return not_resolvable(url, Some("no buzzheavier redirects".to_string()));
+        return not_resolvable(url, Some("no buzzheavier redirects"));
     }
 
     ResolveResult {

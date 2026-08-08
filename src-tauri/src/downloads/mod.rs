@@ -138,7 +138,6 @@ struct EngineState {
     by_id: HashMap<String, Download>,
     queue: Vec<String>,
     active: std::collections::HashSet<String>,
-    gid_to_id: HashMap<String, String>,
 }
 
 pub struct DownloadEngine {
@@ -351,6 +350,9 @@ impl DownloadEngine {
             }
             _ => return false,
         };
+        if was_downloading {
+            st.active.remove(id);
+        }
         drop(st);
         self.emit(&snap);
         write_manifest(&snap);
@@ -382,6 +384,7 @@ impl DownloadEngine {
                 if self.aria2.is_ready() {
                     dl.status = "downloading".to_string();
                     let snap = dl.clone();
+                    st.active.insert(id.to_string());
                     self.emit(&snap);
                     drop(st);
                     let aria2 = self.aria2.clone();
@@ -396,7 +399,6 @@ impl DownloadEngine {
         dl.poll_failures = 0;
         let snap = dl.clone();
         if let Some(gid) = taken_gid {
-            st.gid_to_id.remove(&gid);
             let aria2 = self.aria2.clone();
             tauri::async_runtime::spawn(async move { aria2.remove_download_result(&gid).await });
         }
@@ -443,9 +445,6 @@ impl DownloadEngine {
             }
             None => return json!({ "ok": false }),
         };
-        if let Some(g) = &gid {
-            st.gid_to_id.remove(g);
-        }
         st.queue.retain(|x| x != id);
         st.active.remove(id);
         self.emit(&snap);
@@ -457,8 +456,7 @@ impl DownloadEngine {
         let aria2 = self.aria2.clone();
         tauri::async_runtime::spawn(async move {
             if let Some(gid) = gid {
-                aria2.force_remove(&gid).await;
-                aria2.remove_download_result(&gid).await;
+                aria2.discard(&gid).await;
             }
             if should_delete {
                 for suffix in ["", ".aria2"] {
@@ -515,11 +513,7 @@ impl DownloadEngine {
 
     pub fn active_status(&self, appid: &str) -> Value {
         let extracting = self.extracting.lock().contains(appid);
-        let st = self.state.lock();
-        let downloading = st
-            .by_id
-            .values()
-            .any(|d| d.appid == appid && (d.status == "downloading" || d.status == "queued"));
+        let downloading = self.appid_active(appid);
         json!({ "extracting": extracting, "downloading": downloading })
     }
 
@@ -541,10 +535,7 @@ impl DownloadEngine {
                 while let Some(id) = st.queue.first().cloned() {
                     st.queue.remove(0);
                     match st.by_id.get(&id) {
-                        Some(dl)
-                            if dl.status == "queued"
-                                || dl.status == "paused"
-                                || dl.status == "failed" =>
+                        Some(dl) if dl.status == "queued" =>
                         {
                             chosen = Some(id);
                             break;
@@ -577,18 +568,7 @@ impl DownloadEngine {
             .unwrap_or(0);
         let control_present = PathBuf::from(format!("{}.aria2", dl.save_path.display())).exists();
         if offset > 0 && dl.total_bytes > 0 && offset >= dl.total_bytes && !control_present {
-            dl.received_bytes = offset;
-            dl.status = "completed".to_string();
-            self.commit(&dl);
-            self.emit(&dl);
-            write_manifest(&dl);
-            {
-                let mut st = self.state.lock();
-                st.active.remove(&id);
-            }
-            self.maybe_start_next();
-            let engine = self.clone();
-            tauri::async_runtime::spawn(async move { engine.on_complete(dl).await });
+            self.finish_complete(&id).await;
             return;
         }
         dl.status = "downloading".to_string();
@@ -640,7 +620,6 @@ impl DownloadEngine {
                         Some(d) if d.status != "cancelled" => {
                             d.gid = Some(gid.clone());
                             let paused = d.status == "paused";
-                            st.gid_to_id.insert(gid.clone(), id.clone());
                             (true, paused)
                         }
                         _ => (false, false),
@@ -648,10 +627,7 @@ impl DownloadEngine {
                 };
                 if !keep {
                     let aria2 = self.aria2.clone();
-                    tauri::async_runtime::spawn(async move {
-                        aria2.force_remove(&gid).await;
-                        aria2.remove_download_result(&gid).await;
-                    });
+                    tauri::async_runtime::spawn(async move { aria2.discard(&gid).await });
                 } else if should_pause {
                     self.aria2.pause(&gid).await;
                 }
@@ -677,6 +653,7 @@ impl DownloadEngine {
                 dl.error = Some(error.to_string());
                 dl.speed_bps = 0;
                 dl.eta_seconds = None;
+                let _ = dl.gid.take();
                 let snap = dl.clone();
                 st.active.remove(id);
                 Some(snap)
@@ -723,7 +700,7 @@ impl DownloadEngine {
             (id, gid, status)
         }))
         .await;
-        for (id, gid, fetched) in statuses {
+        for (id, _gid, fetched) in statuses {
             let status = match fetched {
                 Ok(s) => {
                     if let Some(d) = self.state.lock().by_id.get_mut(&id) {
@@ -781,7 +758,6 @@ impl DownloadEngine {
                         .get(&id)
                         .map(|d| d.status == "paused")
                         .unwrap_or(false);
-                    st.gid_to_id.remove(&gid);
                     if let Some(d) = st.by_id.get_mut(&id) {
                         d.gid = None;
                     }
@@ -868,18 +844,19 @@ impl DownloadEngine {
                 Some(d) => d,
                 None => return,
             };
-            let gid = dl.gid.take();
+            // A row cancelled or paused during the final fetch must not be
+            // flipped to completed, and must not fire on_complete.
+            if matches!(dl.status.as_str(), "cancelled" | "paused") {
+                return;
+            }
+            let _ = dl.gid.take();
             if let Ok(meta) = std::fs::metadata(&dl.save_path) {
                 dl.received_bytes = meta.len();
             }
             dl.status = "completed".to_string();
             dl.speed_bps = 0;
             dl.eta_seconds = None;
-            let snap = dl.clone();
-            if let Some(g) = gid {
-                st.gid_to_id.remove(&g);
-            }
-            snap
+            dl.clone()
         };
         self.emit(&snap);
         write_manifest(&snap);
@@ -892,9 +869,7 @@ impl DownloadEngine {
         {
             let mut st = self.state.lock();
             if let Some(dl) = st.by_id.get_mut(id) {
-                if let Some(g) = dl.gid.take() {
-                    st.gid_to_id.remove(&g);
-                }
+                let _ = dl.gid.take();
             }
         }
         self.fail(id, msg);
@@ -1161,19 +1136,19 @@ pub fn catalog_state_load(state: State<'_, AppState>) -> Value {
 }
 
 #[tauri::command(async)]
-pub fn catalog_state_save(state: State<'_, AppState>, payload: Value) -> Value {
+pub fn catalog_state_save(state: State<'_, AppState>, mut payload: Value) -> Value {
     let path = state.paths.catalog_state_file();
-    let mut stored = payload.clone();
-    if let Some(obj) = stored.as_object_mut() {
-        obj.insert("updatedAt".into(), json!(now_ms()));
-    }
     let games = payload
         .get("games")
         .and_then(|v| v.as_array())
         .map(|a| a.len())
         .unwrap_or(0);
-    match write_json_atomic(&path, &stored) {
-        Ok(_) => json!({ "ok": true, "games": games, "updatedAt": now_ms() }),
+    let updated_at = now_ms();
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert("updatedAt".into(), json!(updated_at));
+    }
+    match write_json_atomic(&path, &payload) {
+        Ok(_) => json!({ "ok": true, "games": games, "updatedAt": updated_at }),
         Err(e) => json!({ "ok": false, "error": e.to_string() }),
     }
 }

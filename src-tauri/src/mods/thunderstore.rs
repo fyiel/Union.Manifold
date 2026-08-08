@@ -16,13 +16,12 @@ use crate::state::AppState;
 
 use super::{
     apply_bepinex_layout, download_to_file, emit_progress, finalize_install, fold, game_mods_dir,
-    now_secs, InstallSpec,
+    now_secs, period_days, InstallSpec,
 };
 
 const SITE: &str = "https://thunderstore.io";
 const PAGE_SIZE: usize = 24;
-const CACHE_TTL_SECS: i64 = 3 * 60 * 60;
-const CACHE_TTL: Duration = Duration::from_secs(CACHE_TTL_SECS as u64);
+const CACHE_TTL: Duration = Duration::from_secs(3 * 60 * 60);
 
 #[derive(Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -221,7 +220,7 @@ fn cache_file(paths: &AppPaths, community: &str) -> PathBuf {
 fn load_disk(paths: &AppPaths, community: &str) -> Option<Arc<Vec<TsPackage>>> {
     let text = std::fs::read_to_string(cache_file(paths, community)).ok()?;
     let disk: DiskCache = serde_json::from_str(&text).ok()?;
-    if now_secs() - disk.fetched_at >= CACHE_TTL_SECS {
+    if now_secs() - disk.fetched_at >= CACHE_TTL.as_secs() as i64 {
         return None;
     }
     Some(Arc::new(disk.packages))
@@ -389,11 +388,7 @@ fn filter_sort_page(
     now: i64,
 ) -> (Vec<Value>, bool) {
     let q = query.trim().to_lowercase();
-    let cutoff = match period {
-        "7" => Some(now - 7 * 86_400),
-        "28" => Some(now - 28 * 86_400),
-        _ => None,
-    };
+    let cutoff = period_days(period).map(|days| now - days * 86_400);
     let mut filtered: Vec<&TsPackage> = pkgs
         .iter()
         .filter(|p| {
@@ -462,6 +457,20 @@ fn version_json(v: &TsVersion) -> Value {
     })
 }
 
+/// Same shape as `version_json` but read from a raw API `latest` value
+/// (used when the cached dump is unavailable and only the detail endpoint
+/// responded). Keeps the two fallbacks from drifting.
+fn version_json_from_value(latest: &Value) -> Value {
+    json!({
+        "version": latest.get("version_number").and_then(|x| x.as_str()).unwrap_or(""),
+        "downloads": latest.get("downloads").and_then(|x| x.as_u64()).unwrap_or(0),
+        "sizeBytes": latest.get("file_size").and_then(|x| x.as_u64()).unwrap_or(0),
+        "uploadedAt": iso_to_unix(latest.get("date_created").and_then(|x| x.as_str()).unwrap_or("")),
+        "dependencyCount": latest.get("dependencies").and_then(|x| x.as_array()).map(|a| a.len()).unwrap_or(0),
+        "description": latest.get("description").and_then(|x| x.as_str()).unwrap_or("").trim(),
+    })
+}
+
 async fn versions_for(
     paths: &AppPaths,
     community: &str,
@@ -483,14 +492,7 @@ async fn versions_for(
     let latest = detail
         .get("latest")
         .ok_or("Thunderstore package has no versions")?;
-    Ok(vec![json!({
-        "version": latest.get("version_number").and_then(|x| x.as_str()).unwrap_or(""),
-        "downloads": latest.get("downloads").and_then(|x| x.as_u64()).unwrap_or(0),
-        "sizeBytes": latest.get("file_size").and_then(|x| x.as_u64()).unwrap_or(0),
-        "uploadedAt": iso_to_unix(latest.get("date_created").and_then(|x| x.as_str()).unwrap_or("")),
-        "dependencyCount": latest.get("dependencies").and_then(|x| x.as_array()).map(|a| a.len()).unwrap_or(0),
-        "description": latest.get("description").and_then(|x| x.as_str()).unwrap_or("").trim(),
-    })])
+    Ok(vec![version_json_from_value(latest)])
 }
 
 struct ResolvedMod {

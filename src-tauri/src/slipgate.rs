@@ -34,7 +34,7 @@ pub fn cfg() -> Option<Cfg> {
     Some(Cfg { base, key })
 }
 
-pub async fn post(cfg: &Cfg, path: &str, body: Value, timeout: Duration) -> Result<Value, String> {
+async fn post(cfg: &Cfg, path: &str, body: Value, timeout: Duration) -> Result<Value, String> {
     let mut headers = HashMap::new();
     headers.insert("Content-Type".to_string(), "application/json".to_string());
     headers.insert("Accept".to_string(), "application/json".to_string());

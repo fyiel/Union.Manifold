@@ -180,22 +180,9 @@ fn last_percent(s: &str) -> Option<u8> {
 }
 
 pub(crate) fn which_extractor() -> Option<String> {
-    let path = std::env::var("PATH").ok()?;
-    let sep = if cfg!(windows) { ';' } else { ':' };
-    for name in ["bsdtar", "tar"] {
-        let file = if cfg!(windows) {
-            format!("{name}.exe")
-        } else {
-            name.to_string()
-        };
-        for dir in path.split(sep) {
-            let p = std::path::Path::new(dir).join(&file);
-            if p.is_file() {
-                return Some(p.to_string_lossy().to_string());
-            }
-        }
-    }
-    None
+    ["bsdtar", "tar"]
+        .into_iter()
+        .find_map(|name| crate::bins::find_on_path(name).map(|p| p.to_string_lossy().to_string()))
 }
 
 /// Post-extraction containment check: every entry must resolve inside the

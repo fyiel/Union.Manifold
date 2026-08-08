@@ -2,6 +2,7 @@ use serde_json::json;
 
 use crate::slipgate;
 use crate::sources::ResolveResult;
+use super::not_resolvable;
 
 pub struct GateHost {
     pub recipe: &'static str,
@@ -52,26 +53,17 @@ pub fn host_type(url: &str) -> Option<&'static str> {
     entry_for(url).map(|g| g.recipe)
 }
 
-fn not_resolvable(url: &str, reason: String) -> ResolveResult {
-    ResolveResult {
-        resolvable: false,
-        open_url: Some(url.to_string()),
-        reason: Some(reason),
-        ..Default::default()
-    }
-}
-
 pub async fn resolve(url: &str) -> ResolveResult {
     let Some(g) = entry_for(url) else {
-        return not_resolvable(url, "not a Slipgate host".to_string());
+        return not_resolvable(url, Some("not a Slipgate host"));
     };
     let Some(cfg) = slipgate::cfg() else {
         return not_resolvable(
             url,
-            format!(
+            Some(&format!(
                 "{} ({}) — set a Slipgate URL in Settings to resolve in-app",
                 g.recipe, g.wall
-            ),
+            )),
         );
     };
     match slipgate::resolve(&cfg, g.recipe, url, json!({}), json!([])).await {
@@ -86,12 +78,12 @@ pub async fn resolve(url: &str) -> ResolveResult {
         },
         Ok(_) => not_resolvable(
             url,
-            format!(
+            Some(&format!(
                 "{} returned the host page instead of a direct download",
                 g.recipe
-            ),
+            )),
         ),
-        Err(e) => not_resolvable(url, format!("Slipgate: {e}")),
+        Err(e) => not_resolvable(url, Some(&format!("Slipgate: {e}"))),
     }
 }
 

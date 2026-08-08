@@ -97,9 +97,9 @@ const EMPTY_QUERY_RESULT: SourceQueryResult = {
   ok: false,
   games: [],
   total: 0,
-  facets: { tags: [], years: { min: null, max: null }, size: { min: null, max: null } },
+  facets: { tags: [] },
   applied: {},
-  capabilities: { perSource: [], scope: [], coverage: {}, supports: {} },
+  capabilities: { perSource: [] },
 }
 
 export async function querySources(params: SourceQueryParams, reqId?: number): Promise<SourceQueryResult> {
