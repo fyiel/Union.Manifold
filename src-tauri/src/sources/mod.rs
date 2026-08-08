@@ -30,10 +30,10 @@ struct CachedPool {
 }
 
 static QUERY_POOL: LazyLock<cache::KeyedCache<std::sync::Arc<CachedPool>>> =
-    LazyLock::new(|| cache::KeyedCache::new(std::time::Duration::from_secs(90)));
+    LazyLock::new(|| cache::KeyedCache::with_limit(std::time::Duration::from_secs(90), 64));
 
 static CATALOG_POOL: LazyLock<cache::KeyedCache<std::sync::Arc<CachedPool>>> =
-    LazyLock::new(|| cache::KeyedCache::new(std::time::Duration::from_secs(600)));
+    LazyLock::new(|| cache::KeyedCache::with_limit(std::time::Duration::from_secs(600), 8));
 
 fn pool_for(params: &QueryParams) -> &'static cache::KeyedCache<std::sync::Arc<CachedPool>> {
     let unfiltered = params
@@ -519,6 +519,10 @@ async fn run_query_stream(
     if let Some(cp) = pool_cache.peek(&sig).await {
         return page_from(&cp, &params, &ids, reg);
     }
+    // Capture the cache epoch before the fetch loop: a sources_refresh clear()
+    // mid-fetch must discard this pool's store, or pre-refresh data would be
+    // served as fresh for the full TTL.
+    let epoch = pool_cache.epoch();
     let mut p = params.clone();
     p.limit = POOL_SIZE;
     p.offset = 0;
@@ -562,9 +566,7 @@ async fn run_query_stream(
     }
     let cp = latest.unwrap_or_else(empty_pool);
     let stored = cp.clone();
-    pool_cache
-        .get_or(&sig, || async move { Some(stored) })
-        .await;
+    pool_cache.store_if_epoch(&sig, epoch, stored).await;
     page_from(&cp, &params, &ids, reg)
 }
 

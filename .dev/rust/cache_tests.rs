@@ -78,3 +78,67 @@ async fn keyed_cache_serves_stale_per_key_when_refresh_fails() {
     tokio::time::sleep(Duration::from_millis(60)).await;
     assert_eq!(c.get_or("k", || async { None }).await, Some(5));
 }
+
+#[tokio::test]
+async fn store_if_epoch_discards_writes_after_clear() {
+    let c: KeyedCache<u32> = KeyedCache::new(Duration::from_secs(60));
+    let epoch = c.epoch();
+    c.clear();
+    c.store_if_epoch("k", epoch, 9).await;
+    assert_eq!(c.peek("k").await, None);
+    assert_eq!(c.get_or("k", || async { Some(3) }).await, Some(3));
+}
+
+#[tokio::test]
+async fn store_if_epoch_keeps_same_epoch_writes() {
+    let c: KeyedCache<u32> = KeyedCache::new(Duration::from_secs(60));
+    let epoch = c.epoch();
+    c.store_if_epoch("k", epoch, 9).await;
+    assert_eq!(c.peek("k").await, Some(9));
+}
+
+#[tokio::test]
+async fn in_flight_fetch_after_clear_does_not_re_seed_the_cache() {
+    let c = std::sync::Arc::new(KeyedCache::new(Duration::from_secs(60)));
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    let fetch_started = std::sync::Arc::new(tokio::sync::Notify::new());
+    let start = fetch_started.clone();
+    let fetcher = async move {
+        start.notify_one();
+        rx.await.ok();
+        Some(42)
+    };
+    let handle = tokio::spawn({
+        let cache = c.clone();
+        async move { cache.get_or("k", || fetcher).await }
+    });
+    fetch_started.notified().await;
+    c.clear();
+    tx.send(()).ok();
+    assert_eq!(handle.await.unwrap(), Some(42)); // caller still served
+    assert_eq!(c.peek("k").await, None); // but the store was discarded
+    assert_eq!(c.get_or("k", || async { Some(7) }).await, Some(7));
+}
+
+#[tokio::test]
+async fn bounded_cache_evicts_oldest_beyond_limit() {
+    let c: KeyedCache<u32> = KeyedCache::with_limit(Duration::from_secs(60), 2);
+    c.get_or("a", || async { Some(1) }).await;
+    c.get_or("b", || async { Some(2) }).await;
+    c.get_or("c", || async { Some(3) }).await;
+    assert_eq!(c.peek("a").await, None); // oldest evicted
+    assert_eq!(c.peek("b").await, Some(2));
+    assert_eq!(c.peek("c").await, Some(3));
+}
+
+#[tokio::test]
+async fn bounded_cache_evicts_expired_before_fresh() {
+    let c: KeyedCache<u32> = KeyedCache::with_limit(Duration::from_millis(30), 2);
+    c.get_or("old", || async { Some(1) }).await;
+    tokio::time::sleep(Duration::from_millis(60)).await;
+    c.get_or("fresh", || async { Some(2) }).await;
+    c.get_or("new", || async { Some(3) }).await;
+    assert_eq!(c.peek("old").await, None); // expired evicted
+    assert_eq!(c.peek("fresh").await, Some(2));
+    assert_eq!(c.peek("new").await, Some(3));
+}

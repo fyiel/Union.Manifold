@@ -3,6 +3,39 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## Unreleased
+
+### Added
+
+- Online-Fix repairs get a dedicated toggle in Settings → Sources and the
+  Library game menu, migrated from the legacy disabledSources entry
+- Theme fonts are bundled with the app instead of loaded from the Google Fonts
+  CDN, and the webview runs under a strict Content-Security-Policy
+- CI runs clippy plus the full backend and renderer test suites
+
+### Fixed
+
+- Mod deployment is transactional: the deploy journal is written before any
+  game file is touched, a mid-deploy failure rolls the directory back and
+  reconciles the journal with disk, and undeploy never deletes a file whose
+  backup is missing
+- Downloads removed by aria2 fail cleanly instead of stranding forever, and
+  re-enqueuing part one of a multi-part update no longer wipes in-flight
+  sibling parts
+- Achievement unlock timestamps survive timestamp-less providers and the
+  scan picks the richest state file
+- Concurrent trainer launches can no longer orphan the trainer host, and
+  trainer downloads are race-safe
+- The Steam API compatibility repair never leaves the game without a
+  steam_api64.dll
+- Settings are written owner-only, desktop shortcuts escape hostile titles,
+  archive extraction verifies containment, pacman updates verify signatures,
+  the asset protocol serves only app-owned files, and external opens are
+  scheme-allowlisted
+- The browse query and catalog caches are now bounded and refresh-safe: a
+  source refresh can no longer be overwritten by an in-flight fetch, and
+  stale pre-refresh data is never served after a refresh
+
 ## 3.5.6
 
 ### Added
