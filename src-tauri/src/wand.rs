@@ -766,7 +766,11 @@ async fn download_trainer(data_dir: &Path, loader: &WandLoader) -> Result<PathBu
     if path.is_file() {
         return Ok(path);
     }
-    let temporary = cache.join(format!(".{trainer_id}.download"));
+    // Unique per call: two concurrent downloads of the same trainer (shared
+    // by several library games, or a retry racing an in-flight launch) must
+    // not interleave writes in one temp file and poison the cache with a
+    // partial or mixed binary.
+    let temporary = crate::downloads::unique_tmp_path(&path);
     let response = crate::http::fetch(
         &loader.binary_url,
         &crate::http::FetchOpts {

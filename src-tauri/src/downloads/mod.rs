@@ -980,7 +980,7 @@ fn write_manifest(dl: &Download) {
     write_manifest_atomic(&path, &Value::Object(manifest));
 }
 
-fn unique_tmp_path(path: &Path) -> PathBuf {
+pub(crate) fn unique_tmp_path(path: &Path) -> PathBuf {
     static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     path.with_extension(format!("tmp.{}.{}", std::process::id(), n))
