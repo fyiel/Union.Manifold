@@ -423,10 +423,7 @@ export async function startSourceDownload(
   const gameName = game.title
   if (!update) {
     try {
-      update = Boolean(
-        (await window.ucDownloads?.getInstalledGlobal?.(appid)) ||
-        (await window.ucDownloads?.getInstalled?.(appid)),
-      )
+      update = Boolean(await window.ucDownloads?.getInstalled?.(appid))
     } catch {  }
   }
   recordDownloadArt(appid, game.image, game.title)

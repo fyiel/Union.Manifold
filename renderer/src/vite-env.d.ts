@@ -424,9 +424,6 @@ declare global {
       getInstalled: (appid: string) => Promise<any | null>
       listInstalling: () => Promise<any[]>
       getInstalling: (appid: string) => Promise<any | null>
-      listInstalledGlobal: () => Promise<any[]>
-      getInstalledGlobal: (appid: string) => Promise<any | null>
-      listInstallingGlobal: () => Promise<any[]>
       listGameExecutables: (appid: string) => Promise<{ ok: boolean; folder?: string; exes: { name: string; path: string; size?: number; depth?: number }[]; error?: string }>
       findGameSubfolder: (folder: string) => Promise<string | null>
       preflightGameLaunch: (appid: string, exePath: string) => Promise<{

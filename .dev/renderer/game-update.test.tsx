@@ -21,7 +21,7 @@ describe("installed game updates", () => {
 
   it("queues the current catalog build over an older installation", async () => {
     let installedVersion = "1.0"
-    const listInstalledGlobal = vi.fn(async () => [
+    const listInstalled = vi.fn(async () => [
       { appid: "update-game", metadata: { downloadedVersion: installedVersion } },
     ])
     const saveInstalledMetadata = vi.fn(async () => ({ ok: true }))
@@ -29,7 +29,7 @@ describe("installed game updates", () => {
     Object.defineProperty(window, "ucDownloads", {
       configurable: true,
       value: {
-        listInstalledGlobal,
+        listInstalled,
         saveInstalledMetadata,
         start,
       },

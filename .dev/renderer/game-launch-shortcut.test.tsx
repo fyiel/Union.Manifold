@@ -125,7 +125,7 @@ describe("Steam import launch settings", () => {
     Object.defineProperty(window, "ucDownloads", {
       configurable: true,
       value: {
-        getInstalledGlobal: vi.fn(async () => ({ installType: "steam", steamAppId: 620 })),
+        getInstalled: vi.fn(async () => ({ installType: "steam", steamAppId: 620 })),
         listGameExecutables: vi.fn(async () => ({ ok: true, folder: "/games/Portal 2", exes: [{ name: "portal2.exe", path: "/games/Portal 2/portal2.exe" }] })),
         preflightGameLaunch: vi.fn(async () => ({ ok: true, canLaunch: true, checks: [] })),
         launchGameExecutable,
