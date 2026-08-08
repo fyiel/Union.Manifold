@@ -14,6 +14,7 @@ pub struct Aria2Manager {
     secret: String,
     proxy: Mutex<Option<String>>,
     child: Mutex<Option<Child>>,
+    proxy_conf: Mutex<Option<PathBuf>>,
     ready: AtomicBool,
     starting: tokio::sync::Mutex<()>,
     rpc_id: AtomicU64,
@@ -101,6 +102,7 @@ impl Aria2Manager {
                     .filter(|s| !s.is_empty()),
             ),
             child: Mutex::new(None),
+            proxy_conf: Mutex::new(None),
             ready: AtomicBool::new(false),
             starting: tokio::sync::Mutex::new(()),
             rpc_id: AtomicU64::new(0),
@@ -123,6 +125,9 @@ impl Aria2Manager {
             self.ready.store(false, Ordering::SeqCst);
             if let Some(mut child) = self.child.lock().take() {
                 child.start_kill().ok();
+            }
+            if let Some(conf) = self.proxy_conf.lock().take() {
+                std::fs::remove_file(conf).ok();
             }
             crate::logging::write_line("warn", "aria2 daemon unresponsive, relaunching");
         }
@@ -172,8 +177,32 @@ impl Aria2Manager {
             format!("--stop-with-process={}", std::process::id()),
             format!("--max-overall-download-limit={}", limit_arg(limit_kbps)),
         ];
-        if let Some(p) = self.proxy.lock().clone() {
-            args.push(format!("--all-proxy={p}"));
+        let proxy = self.proxy.lock().clone();
+        let mut conf_path: Option<PathBuf> = None;
+        if let Some(p) = proxy {
+            // Credentials embedded in the proxy URL must not be visible in
+            // the process list; aria2 reads them from a 0600 config file
+            // instead. The file is parsed once at daemon startup and removed
+            // when the daemon stops.
+            let conf = std::env::temp_dir().join(format!(
+                "union-manifold-aria2-{}-{}.conf",
+                std::process::id(),
+                port
+            ));
+            if std::fs::write(&conf, format!("all-proxy={p}\n")).is_err() {
+                crate::logging::write_line(
+                    "warn",
+                    "aria2 proxy config could not be written; refusing to start with proxy on argv",
+                );
+                return false;
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&conf, std::fs::Permissions::from_mode(0o600)).ok();
+            }
+            args.push(format!("--conf-path={}", conf.display()));
+            conf_path = Some(conf);
         }
         if let Some(ca) = &self.ca_cert {
             if ca.is_file() {
@@ -194,10 +223,16 @@ impl Aria2Manager {
         let child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
+                if let Some(conf) = &conf_path {
+                    std::fs::remove_file(conf).ok();
+                }
                 crate::logging::write_line("warn", &format!("aria2 spawn failed: {e}"));
                 return false;
             }
         };
+        if let Some(conf) = conf_path {
+            *self.proxy_conf.lock() = Some(conf);
+        }
         *self.child.lock() = Some(child);
 
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(6);
@@ -215,6 +250,9 @@ impl Aria2Manager {
         );
         if let Some(mut child) = self.child.lock().take() {
             child.start_kill().ok();
+        }
+        if let Some(conf) = self.proxy_conf.lock().take() {
+            std::fs::remove_file(conf).ok();
         }
         false
     }
@@ -251,6 +289,9 @@ impl Aria2Manager {
         self.ready.store(false, Ordering::SeqCst);
         if let Some(mut child) = self.child.lock().take() {
             child.start_kill().ok();
+        }
+        if let Some(conf) = self.proxy_conf.lock().take() {
+            std::fs::remove_file(conf).ok();
         }
     }
 
