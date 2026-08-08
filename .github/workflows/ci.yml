@@ -60,6 +60,14 @@ jobs:
         working-directory: src-tauri
         run: cargo check --locked
 
+      - name: Cargo clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings --locked
+
+      - name: Cargo test
+        working-directory: src-tauri
+        run: cargo test --locked
+
   verify:
     runs-on: ubuntu-latest
     steps:
@@ -84,3 +92,6 @@ jobs:
 
       - name: Typecheck renderer
         run: bun run typecheck
+
+      - name: Test renderer
+        run: bun run test:renderer
