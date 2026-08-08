@@ -147,7 +147,32 @@ pub async fn respond(app: AppHandle, uri: String) -> (u16, Vec<u8>, String) {
         if !path.is_absolute() {
             return (400, b"bad path".to_vec(), "text/plain".to_string());
         }
-        return match tokio::fs::read(&path).await {
+        // Only serve files the app itself wrote: the data directory and the
+        // configured download root. A webview XSS must not be able to read
+        // arbitrary files through this handler, so the canonicalized path
+        // (symlinks resolved) has to stay inside one of those roots.
+        let state = app.state::<AppState>();
+        let mut allowed: Vec<PathBuf> = vec![state.paths.data_dir.clone()];
+        if let Some(root) = state.settings.get_string("downloadPath") {
+            allowed.push(PathBuf::from(root));
+        } else {
+            allowed.push(crate::paths::default_download_root(&state.paths.data_dir));
+        }
+        let allowed: Vec<PathBuf> = allowed
+            .into_iter()
+            .filter_map(|root| std::fs::canonicalize(&root).ok())
+            .collect();
+        let Ok(canonical) = std::fs::canonicalize(&path) else {
+            return (404, b"not found".to_vec(), "text/plain".to_string());
+        };
+        if !allowed.iter().any(|root| canonical.starts_with(root)) {
+            log_failure(
+                &format!("local image denied outside allowed roots ({})", canonical.display()),
+                &path.to_string_lossy(),
+            );
+            return (403, b"forbidden".to_vec(), "text/plain".to_string());
+        }
+        return match tokio::fs::read(&canonical).await {
             Ok(bytes) => {
                 let ct = content_type_of(&bytes);
                 (200, bytes, ct.to_string())
@@ -165,6 +190,14 @@ pub async fn respond(app: AppHandle, uri: String) -> (u16, Vec<u8>, String) {
         Some(u) if !u.is_empty() => u,
         _ => return (400, b"missing u".to_vec(), "text/plain".to_string()),
     };
+    // The fetch proxy is for catalog image URLs only; anything outside
+    // http(s) (file:, gopher:, custom schemes) is rejected up front.
+    let Ok(parsed) = url::Url::parse(&remote) else {
+        return (400, b"bad url".to_vec(), "text/plain".to_string());
+    };
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return (400, b"bad url".to_vec(), "text/plain".to_string());
+    }
     let dir = cache_dir(&app);
     let key = hex::encode(Sha256::digest(remote.as_bytes()));
     let path = dir.join(&key);

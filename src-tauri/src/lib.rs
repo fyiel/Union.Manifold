@@ -132,12 +132,24 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol("uc-asset", |ctx, request, responder| {
             let app = ctx.app_handle().clone();
             let uri = request.uri().to_string();
+            let origin = request
+                .headers()
+                .get("origin")
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_string);
             tauri::async_runtime::spawn(async move {
                 let (status, body, ct) = assets::respond(app, uri).await;
                 let mut builder = tauri::http::Response::builder()
                     .status(status)
-                    .header("Content-Type", ct)
-                    .header("Access-Control-Allow-Origin", "*");
+                    .header("Content-Type", ct);
+                // Only the app's own webview origins may read responses, so
+                // a compromised page hosted anywhere else cannot exfiltrate
+                // files through this protocol.
+                if let Some(origin) = origin.as_deref() {
+                    if origin == "tauri://localhost" || origin == "http://tauri.localhost" {
+                        builder = builder.header("Access-Control-Allow-Origin", origin);
+                    }
+                }
                 if status == 200 {
                     builder = builder.header("Cache-Control", "public, max-age=604800, immutable");
                 }
