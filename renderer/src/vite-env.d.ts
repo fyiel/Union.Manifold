@@ -595,7 +595,6 @@ declare global {
     }
     ucLogs?: {
       log: (level: string, message: string, data?: any) => Promise<void>
-      shareLogs: (payload?: { baseUrl?: string }) => Promise<{ ok: boolean; error?: string; endpoint?: string; status?: number }>
     }
     ucAutostart?: {
       get: () => Promise<{ ok: boolean; enabled: boolean }>

@@ -73,7 +73,7 @@ export function useController() {
     
     try {
       if (window.ucController?.setSettings) {
-        await (window.ucController as ControllerAPI).setSettings(updated)
+        await window.ucController?.setSettings(updated)
       }
     } catch (err) {
       console.error('Failed to save controller settings:', err)
@@ -138,27 +138,6 @@ export function useController() {
   const setEnabled = useCallback(async (enabled: boolean) => {
     await updateSettings({ enabled })
   }, [updateSettings])
-
-  useEffect(() => {
-    if (!window.ucController) return
-
-    const unsubConnected = (window.ucController as ControllerAPI).onControllerConnected?.((data) => {
-      updateConnectionState(true, {
-        id: data.controllerId ?? null,
-        name: data.controllerName ?? null,
-        type: data.controllerType ?? null
-      })
-    })
-
-    const unsubDisconnected = (window.ucController as ControllerAPI).onControllerDisconnected?.(() => {
-      updateConnectionState(false, { id: null, name: null, type: null })
-    })
-
-    return () => {
-      unsubConnected?.()
-      unsubDisconnected?.()
-    }
-  }, [updateConnectionState])
 
   useEffect(() => () => {
     clearTimeout(connectionDebounceRef.current.timeout ?? undefined)

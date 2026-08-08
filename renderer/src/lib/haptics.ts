@@ -91,17 +91,6 @@ export function playHaptic(pattern: HapticPattern, padIndex?: number) {
     delivered = true
   }
 
-  if (!delivered) {
-    const rumble = (window as unknown as { ucController?: { rumble?: (slot: number, l: number, r: number) => unknown } })
-      .ucController?.rumble
-    if (typeof rumble === 'function') {
-      const slot = typeof padIndex === 'number' ? padIndex : (pad?.index ?? 0)
-      try {
-        rumble(slot, Math.round(strong * 255), Math.round(weak * 255))
-        window.setTimeout(() => { try { rumble(slot, 0, 0) } catch {} }, spec.duration)
-      } catch {}
-    }
-  }
 }
 
 export function stopHaptics(padIndex?: number) {
