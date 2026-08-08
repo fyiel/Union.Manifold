@@ -13,10 +13,17 @@ use crate::settings::SettingsStore;
 use crate::state::AppState;
 
 const PROJECT: &str = "union-manifold-slipgate";
+// Slipgate is built locally from the pinned commit below, so its tag names
+// a local build target rather than a registry pull; supply-chain trust
+// comes from SLIPGATE_BUILD_CONTEXT, not a digest.
 const SLIPGATE_IMAGE: &str = "union-manifold/slipgate:0.5.1";
 const SLIPGATE_BUILD_CONTEXT: &str =
     "https://github.com/fyiel/Slipgate.git#b5eb9da6f1e45b6f2858699ad418980d416510b9";
-const FLARESOLVERR_IMAGE: &str = "ghcr.io/flaresolverr/flaresolverr:v3.5.0";
+// Pinned by digest so a republished tag cannot silently change what runs
+// with the user's API key. Bump deliberately when upgrading FlareSolverr
+// (source tag v3.5.0).
+const FLARESOLVERR_IMAGE: &str =
+    "ghcr.io/flaresolverr/flaresolverr@sha256:139dfee1c6f89249c8d665d1333a42e8ec74ec0a86bc6bb1c8461e10d3a66a47";
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(600);
 const STATUS_TIMEOUT: Duration = Duration::from_secs(15);
 
