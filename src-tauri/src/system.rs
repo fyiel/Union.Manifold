@@ -220,8 +220,25 @@ pub fn reveal_in_folder(path: &Path) -> Result<()> {
     }
 }
 
+/// Whether a target is safe to hand to the OS opener: only well-known web,
+/// Steam and magnet links. A compromised catalog response must not be able
+/// to trigger file:// readers or custom protocol handlers.
+fn openable_externally(target: &str) -> bool {
+    url::Url::parse(target)
+        .map(|parsed| {
+            matches!(
+                parsed.scheme(),
+                "http" | "https" | "steam" | "magnet"
+            )
+        })
+        .unwrap_or(false)
+}
+
 #[tauri::command(async)]
 pub fn system_open_external(app: AppHandle, target: String) -> Value {
+    if !openable_externally(&target) {
+        return json!({ "ok": false, "error": "unsupported url scheme" });
+    }
     match app.opener().open_url(&target, None::<&str>) {
         Ok(_) => json!({ "ok": true }),
         Err(e) => json!({ "ok": false, "error": e.to_string() }),
@@ -327,4 +344,27 @@ mod tests {
         child.wait().ok();
         assert!(detected);
     }
+
+    #[test]
+    fn open_external_allowlist_covers_known_schemes_only() {
+        for target in [
+            "https://online-fix.me/game",
+            "http://example.com/x?y=1",
+            "steam://store/620",
+            "magnet:?xt=urn:btih:abc",
+        ] {
+            assert!(openable_externally(target), "{target}");
+        }
+        for target in [
+            "file:///etc/passwd",
+            "ms-settings:",
+            "javascript:alert(1)",
+            "not a url",
+            "ftp://example.com/x",
+            "gopher://example.com",
+        ] {
+            assert!(!openable_externally(target), "{target}");
+        }
+    }
+
 }
