@@ -62,7 +62,7 @@ jobs:
 
       - name: Cargo clippy
         working-directory: src-tauri
-        run: cargo clippy --all-targets -- -D warnings --locked
+        run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: Cargo test
         working-directory: src-tauri
