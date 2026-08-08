@@ -26,18 +26,35 @@ pub fn hide_torrent_sources() -> bool {
 /// availability is tracked by its own setting rather than `disabledSources`.
 /// When unset, it falls back to the legacy disabledSources entry so existing
 /// users keep their previous choice.
+/// Whether the legacy `disabledSources` list held an "onlinefix" entry.
+/// The startup migration performs the same check so the two stay in
+/// lockstep; keep them identical when touching either.
+fn legacy_onlinefix_disabled(store: &SettingsStore) -> bool {
+    store
+        .get("disabledSources")
+        .as_array()
+        .map(|a| a.iter().any(|v| v.as_str() == Some("onlinefix")))
+        .unwrap_or(false)
+}
+
 pub fn onlinefix_enabled() -> bool {
     SETTINGS_GLOBAL
         .get()
-        .map(|s| match s.get("onlineFixEnabled") {
-            Value::Bool(b) => b,
-            _ => !s
-                .get("disabledSources")
-                .as_array()
-                .map(|a| a.iter().any(|v| v.as_str() == Some("onlinefix")))
-                .unwrap_or(false),
-        })
+        .map(|s| onlinefix_enabled_in(s))
         .unwrap_or(false)
+}
+
+fn onlinefix_enabled_in(store: &SettingsStore) -> bool {
+    match store.get("onlineFixEnabled") {
+        Value::Bool(b) => b,
+        // Unset means the startup migration has not run yet (or a fresh
+        // profile): fall back to the legacy disabledSources entry.
+        Value::Null => !legacy_onlinefix_disabled(store),
+        // Any other type is garbage from a generic setting write; the
+        // repair feature is gated, so default to disabled rather than
+        // accidentally re-enabling it.
+        _ => false,
+    }
 }
 
 pub struct SettingsStore {

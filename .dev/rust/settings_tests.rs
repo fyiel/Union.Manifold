@@ -101,3 +101,31 @@ fn concurrent_library_activity_and_favorite_merges_preserve_both() {
         entry
     );
 }
+
+#[test]
+fn onlinefix_enabled_matrix_covers_unset_legacy_and_garbage_values() {
+    let tmp = tempfile::tempdir().unwrap();
+    let store = SettingsStore::load(tmp.path().join("settings.json"));
+
+    assert!(onlinefix_enabled_in(&store));
+    store.set("disabledSources", json!(["gog", "onlinefix"]));
+    assert!(!onlinefix_enabled_in(&store));
+    store.set("disabledSources", json!(["gog"]));
+    assert!(onlinefix_enabled_in(&store));
+    store.set("disabledSources", json!("not-an-array"));
+    assert!(onlinefix_enabled_in(&store));
+
+    store.set("onlineFixEnabled", json!(false));
+    assert!(!onlinefix_enabled_in(&store));
+    store.set("onlineFixEnabled", json!(true));
+    assert!(onlinefix_enabled_in(&store));
+
+    store.set("onlineFixEnabled", json!("false"));
+    assert!(!onlinefix_enabled_in(&store));
+    store.set("onlineFixEnabled", json!("true"));
+    assert!(!onlinefix_enabled_in(&store));
+    store.set("onlineFixEnabled", json!(1));
+    assert!(!onlinefix_enabled_in(&store));
+    store.set("onlineFixEnabled", json!({}));
+    assert!(!onlinefix_enabled_in(&store));
+}
