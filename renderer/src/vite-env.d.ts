@@ -400,19 +400,6 @@ declare global {
       cancel: (downloadId: string) => Promise<{ ok: boolean; status?: DownloadUpdatePayload["status"]; preservedArchive?: boolean; error?: string; downloadId?: string; appid?: string | null }>
       pause: (downloadId: string) => Promise<{ ok: boolean }>
       resume: (downloadId: string) => Promise<{ ok: boolean }>
-      resumeWithFreshUrl: (payload: {
-        downloadId: string
-        url: string
-        filename?: string
-        appid?: string
-        gameName?: string
-        partIndex?: number
-        partTotal?: number
-        savePath?: string
-        totalBytes?: number
-        update?: boolean
-        installMetadata?: Record<string, unknown>
-      }) => Promise<{ ok: boolean; actualOffset?: number; error?: string }>
       openPath: (path: string) => Promise<{ ok: boolean }>
       getDownloadPath: () => Promise<{ path: string }>
       pickDownloadPath: () => Promise<{ ok: boolean; path?: string }>
