@@ -263,14 +263,6 @@ pub(crate) async fn fetch_details(ids: &[String]) -> Result<Vec<Value>, String> 
 }
 
 #[tauri::command]
-pub async fn workshop_details(ids: Vec<String>) -> Result<Value, String> {
-    let res = fetch_details(&ids)
-        .await
-        .map(|items| json!({ "ok": true, "items": items }));
-    Ok(fold(res))
-}
-
-#[tauri::command]
 pub async fn workshop_install(
     app: AppHandle,
     state: State<'_, AppState>,

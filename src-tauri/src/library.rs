@@ -333,12 +333,6 @@ pub fn installing_delete(state: State<'_, AppState>, appid: String) -> Value {
     json!({ "ok": true })
 }
 
-#[tauri::command(async)]
-pub fn installing_dismiss(state: State<'_, AppState>, appid: String) -> Value {
-    remove_dir_unless_installed(&scan_roots(&state), &appid);
-    json!({ "ok": true, "prompted": false })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

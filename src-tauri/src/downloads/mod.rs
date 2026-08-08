@@ -1183,12 +1183,6 @@ pub fn download_path_get(state: State<'_, AppState>) -> Value {
     json!({ "path": state.download_root().to_string_lossy() })
 }
 
-#[tauri::command(async)]
-pub fn download_path_set(state: State<'_, AppState>, target_path: String) -> Value {
-    state.settings.set("downloadPath", json!(target_path));
-    json!({ "ok": true, "path": target_path })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

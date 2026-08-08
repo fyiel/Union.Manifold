@@ -30,11 +30,6 @@ pub fn window_close(window: Window) -> Result<()> {
 }
 
 #[tauri::command]
-pub fn window_is_maximized(window: Window) -> Result<bool> {
-    Ok(window.is_maximized()?)
-}
-
-#[tauri::command]
 pub fn app_close_response(app: tauri::AppHandle, should_proceed: bool) -> Value {
     if should_proceed {
         app.exit(0);

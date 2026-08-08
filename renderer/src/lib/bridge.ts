@@ -22,7 +22,6 @@ function call<T = any>(cmd: string, args?: Record<string, unknown>): Promise<T> 
   })
 }
 
-const noop = () => () => {}
 
 function apiBaseUrl(): string {
   try {
@@ -43,7 +42,6 @@ export function installBridge(): void {
     minimize: () => call("window_minimize"),
     maximize: () => call("window_maximize"),
     close: () => call("window_close"),
-    isMaximized: () => call<boolean>("window_is_maximized"),
   }
 
   w.ucDownloads = {
@@ -52,10 +50,8 @@ export function installBridge(): void {
     cancel: (downloadId: string) => call("download_cancel", { downloadId }),
     pause: (downloadId: string) => call("download_pause", { downloadId }),
     resume: (downloadId: string) => call("download_resume", { downloadId }),
-    showInFolder: (path: string) => call("download_show", { path }),
     openPath: (path: string) => call("download_open", { path }),
     getDownloadPath: () => call("download_path_get"),
-    setDownloadPath: (targetPath: string) => call("download_path_set", { targetPath }),
     pickDownloadPath: () => call("download_path_pick"),
     loadPersistedState: () => call("downloads_state_load"),
     savePersistedState: (downloads: any[]) => call("downloads_state_save", { downloads }),
@@ -68,7 +64,6 @@ export function installBridge(): void {
     listInstalledGlobal: () => call("installed_list"),
     getInstalledGlobal: (appid: string) => call("installed_get", { appid }),
     listInstallingGlobal: () => call("installing_list"),
-    getInstallingGlobal: (appid: string) => call("installing_get", { appid }),
     listGameExecutables: (appid: string) => call("game_exe_list", { appid }),
     findGameSubfolder: (folder: string) => call("game_subfolder_find", { folder }),
     preflightGameLaunch: (appid: string, exePath: string) =>
@@ -79,7 +74,6 @@ export function installBridge(): void {
     quitGameExecutable: (appid: string) => call("game_exe_quit", { appid }),
     deleteInstalled: (appid: string) => call("installed_delete", { appid }),
     deleteInstalling: (appid: string) => call("installing_delete", { appid }),
-    dismissInstalling: (appid: string) => call("installing_dismiss", { appid }),
     saveInstalledMetadata: (appid: string, metadata: any) =>
       call("installed_save", { appid, metadata }),
     setInstallingStatus: (appid: string, status: string, error?: string | null) =>
@@ -117,7 +111,6 @@ export function installBridge(): void {
       call("app_close_response", { shouldProceed }),
     onCloseRequest: (cb: Cb) => on("uc:app-close-requested", cb),
     onNavigationAction: (cb: Cb) => on("uc:navigation-action", cb),
-    getBaseUrl: () => apiBaseUrl(),
   }
 
   w.ucSettings = {
@@ -125,7 +118,6 @@ export function installBridge(): void {
     set: (key: string, value: any) => call("setting_set", { key, value }),
     mergeLibraryGameMeta: (appid: string, patch: Record<string, unknown>, playTimeDeltaMs?: number) =>
       call("setting_merge_library_game_meta", { appid, patch, playTimeDeltaMs }),
-    clearAll: () => call("setting_clear_all"),
     onChanged: (cb: Cb) => on("uc:setting-changed", cb),
   }
 
@@ -175,8 +167,6 @@ export function installBridge(): void {
 
   w.ucStorage = {
     precheck: (opts: any) => call("storage_precheck", { opts }),
-    summary: (targetPath?: string) => call("storage_summary", { targetPath }),
-    snapshot: () => call("storage_snapshot"),
   }
 
   w.ucSystem = {
@@ -184,8 +174,6 @@ export function installBridge(): void {
     launchSteam: () => call("system_launch_steam"),
     runSteamGame: (appid: string, steamAppid: number, installPath: string) =>
       call("steam_game_run", { appid, steamAppid, installPath }),
-    getNotifications: () => call("system_notifications"),
-    onNotificationActivated: noop,
   }
 
   w.ucWand = {
@@ -239,7 +227,6 @@ export function installBridge(): void {
   }
 
   w.ucPresence = {
-    heartbeat: () => call("presence_heartbeat"),
     onChanged: (cb: Cb) => on("uc:presence-changed", cb),
   }
 
@@ -276,7 +263,6 @@ export function installBridge(): void {
     managedSlipgateUpdate: () => call("managed_slipgate_update"),
     managedSlipgateUninstall: () => call("managed_slipgate_uninstall"),
     workshopBrowse: (steamAppid: number, sort: string, period: string, page: number, query: string) => call("workshop_browse", { steamAppid, sort, period, page, query }),
-    workshopDetails: (ids: string[]) => call("workshop_details", { ids }),
     workshopInstall: (appid: string, steamAppid: number, publishedFileId: string) => call("workshop_install", { appid, steamAppid, publishedFileId }),
     workshopStatus: () => call("workshop_status"),
     thunderstoreCommunities: () => call("thunderstore_communities"),

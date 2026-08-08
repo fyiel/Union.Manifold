@@ -444,7 +444,6 @@ declare global {
       minimize: () => void
       maximize: () => void
       close: () => void
-      isMaximized: () => Promise<boolean>
     }
     ucDownloads?: {
       start: (payload: {
@@ -477,10 +476,8 @@ declare global {
         update?: boolean
         installMetadata?: Record<string, unknown>
       }) => Promise<{ ok: boolean; actualOffset?: number; error?: string }>
-      showInFolder: (path: string) => Promise<{ ok: boolean }>
       openPath: (path: string) => Promise<{ ok: boolean }>
       getDownloadPath: () => Promise<{ path: string }>
-      setDownloadPath: (targetPath: string) => Promise<{ ok: boolean; path?: string }>
       pickDownloadPath: () => Promise<{ ok: boolean; path?: string }>
       loadPersistedState: () => Promise<{ ok: boolean; downloads: any[]; error?: string }>
       savePersistedState: (downloads: any[]) => Promise<{ ok: boolean; count?: number; error?: string }>
@@ -493,7 +490,6 @@ declare global {
       listInstalledGlobal: () => Promise<any[]>
       getInstalledGlobal: (appid: string) => Promise<any | null>
       listInstallingGlobal: () => Promise<any[]>
-      getInstallingGlobal: (appid: string) => Promise<any | null>
       listGameExecutables: (appid: string) => Promise<{ ok: boolean; folder?: string; exes: { name: string; path: string; size?: number; depth?: number }[]; error?: string }>
       findGameSubfolder: (folder: string) => Promise<string | null>
       preflightGameLaunch: (appid: string, exePath: string) => Promise<{
@@ -514,7 +510,6 @@ declare global {
       quitGameExecutable: (appid: string) => Promise<{ ok: boolean; stopped?: boolean }>
       deleteInstalled: (appid: string) => Promise<{ ok: boolean }>
       deleteInstalling: (appid: string) => Promise<{ ok: boolean }>
-      dismissInstalling: (appid: string) => Promise<{ ok: boolean; prompted?: boolean }>
       saveInstalledMetadata: (appid: string, metadata: any) => Promise<{ ok: boolean }>
       setInstallingStatus: (appid: string, status: string, error?: string | null) => Promise<{ ok: boolean }>
       getActiveStatus: (appid: string) => Promise<{ extracting: boolean; downloading: boolean }>
@@ -556,7 +551,6 @@ declare global {
       get: (key: string) => Promise<any>
       set: (key: string, value: any) => Promise<{ ok: boolean }>
       mergeLibraryGameMeta: (appid: string, patch: Record<string, unknown>, playTimeDeltaMs?: number) => Promise<{ ok: boolean; entry: Record<string, unknown> }>
-      clearAll: () => Promise<{ ok: boolean; shortcutsRemoved?: number }>
       onChanged: (callback: (data: { key: string; value: any }) => void) => () => void
     }
     ucThemeEditor?: {
@@ -619,23 +613,14 @@ declare global {
     }
     ucStorage?: {
       precheck: (opts: { targetPath?: string; downloadBytes: number; declaredInstallBytes?: number }) => Promise<StoragePrecheckResult>
-      summary: (targetPath?: string) => Promise<StorageSummaryResult>
-      snapshot: () => Promise<{ ok: boolean; reservations?: Array<{ id: string; mountRoot: string; downloadBytes: number; extractBytes: number; status: string; createdAt: number }>; error?: string }>
     }
     ucPresence?: {
-      heartbeat: (
-        baseUrl: string,
-        appVersion?: string,
-        opts?: { currentAppid?: string | null; currentGameName?: string | null }
-      ) => Promise<{ ok: boolean; status?: number; error?: string }>
       onChanged?: (handler: (detail: { reason?: string; appid?: string | null; gameName?: string | null; startedAt?: number; activityRecorded?: boolean }) => void) => () => void
     }
     ucSystem?: {
       openExternal?: (target: string) => Promise<{ ok: boolean; error?: string }>
       launchSteam?: () => Promise<{ ok: boolean; method?: string; error?: string }>
       runSteamGame?: (appid: string, steamAppid: number, installPath: string) => Promise<{ ok: boolean; error?: string }>
-      getNotifications: () => Promise<{ ok: boolean; notifications: SystemNotification[] }>
-      onNotificationActivated: (callback: (data: { id: string }) => void) => () => void
     }
     ucWand?: {
       status: () => Promise<{ ok: boolean; supported: boolean; authenticated: boolean }>
@@ -706,7 +691,6 @@ declare global {
       managedSlipgateUpdate?: () => Promise<ManagedSlipgateStatus>
       managedSlipgateUninstall?: () => Promise<ManagedSlipgateStatus>
       workshopBrowse?: (steamAppid: number, sort: string, period: string, page: number, query: string) => Promise<{ ok: boolean; items?: WorkshopBrowseItem[]; hasMore?: boolean; error?: string }>
-      workshopDetails?: (ids: string[]) => Promise<{ ok: boolean; items?: Array<{ remoteId: string; name: string; description?: string; sizeBytes?: number; updatedAt?: number; previewUrl?: string; subscriptions?: number }>; error?: string }>
       workshopInstall?: (appid: string, steamAppid: number, publishedFileId: string) => Promise<{ ok: boolean; started?: boolean; error?: string }>
       workshopStatus?: () => Promise<{ ok: boolean; steamcmd?: "absent" | "bootstrapping" | "ready"; error?: string }>
       thunderstoreCommunities?: () => Promise<{ ok: boolean; communities?: ThunderstoreCommunity[]; error?: string }>

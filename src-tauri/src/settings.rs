@@ -5,7 +5,6 @@ use parking_lot::Mutex;
 use serde_json::{json, Map, Value};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::error::Result;
 use crate::state::AppState;
 
 static SETTINGS_GLOBAL: OnceLock<Arc<SettingsStore>> = OnceLock::new();
@@ -214,14 +213,6 @@ pub fn setting_merge_library_game_meta(
 ) -> Value {
     let entry = merge_library_game_meta(&app, &appid, patch, play_time_delta_ms.unwrap_or(0));
     json!({ "ok": true, "entry": entry })
-}
-
-#[tauri::command(async)]
-pub fn setting_clear_all(state: State<'_, AppState>) -> Result<Value> {
-    let mut map = state.settings.inner.lock();
-    map.clear();
-    state.settings.persist(&map);
-    Ok(json!({ "ok": true }))
 }
 
 #[cfg(test)]

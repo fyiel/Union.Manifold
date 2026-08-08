@@ -84,31 +84,6 @@ pub fn storage_precheck(state: State<'_, AppState>, opts: Value) -> Value {
     })
 }
 
-#[tauri::command(async)]
-pub fn storage_summary(state: State<'_, AppState>, target_path: Option<String>) -> Value {
-    let target = target_path
-        .map(PathBuf::from)
-        .unwrap_or_else(|| state.download_root());
-    let free = free_bytes(&target);
-    json!({
-        "ok": true,
-        "mountRoot": first_existing_ancestor(&target).to_string_lossy(),
-        "freeBytes": free,
-        "reservedBytes": 0,
-        "reservedDownloadBytes": 0,
-        "reservedExtractBytes": 0,
-        "availableBytes": free,
-        "humanFree": human(free),
-        "humanReserved": human(0),
-        "humanAvailable": human(free),
-    })
-}
-
-#[tauri::command(async)]
-pub fn storage_snapshot() -> Value {
-    json!({ "ok": true, "reservations": [] })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

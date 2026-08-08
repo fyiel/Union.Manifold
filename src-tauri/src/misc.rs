@@ -55,11 +55,6 @@ pub fn theme_preview_end(app: AppHandle) {
 }
 
 #[tauri::command]
-pub fn presence_heartbeat() -> Value {
-    json!({ "ok": true })
-}
-
-#[tauri::command]
 pub fn autostart_get(app: AppHandle) -> Value {
     use tauri_plugin_autostart::ManagerExt;
     let enabled = app.autolaunch().is_enabled().unwrap_or(false);
@@ -80,7 +75,3 @@ pub fn autostart_set(app: AppHandle, enabled: bool) -> Value {
     }
 }
 
-#[tauri::command]
-pub fn system_notifications() -> Value {
-    json!({ "ok": true, "notifications": [] })
-}

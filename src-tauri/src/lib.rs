@@ -278,12 +278,12 @@ pub fn run() {
             settings::setting_get,
             settings::setting_set,
             settings::setting_merge_library_game_meta,
-            settings::setting_clear_all,
+            
             logging::log,
             window_cmds::window_minimize,
             window_cmds::window_maximize,
             window_cmds::window_close,
-            window_cmds::window_is_maximized,
+            
             window_cmds::app_close_response,
             system::system_open_external,
             system::system_launch_steam,
@@ -294,7 +294,7 @@ pub fn run() {
             import::steam_library_scan,
             import::steam_library_import,
             system::download_open,
-            system::download_show,
+            
             achievements::achievements_list,
             achievements::achievements_toast_hide,
             achievements::achievements_test_notification,
@@ -331,21 +331,22 @@ pub fn run() {
             downloads::catalog_state_load,
             downloads::catalog_state_save,
             downloads::download_path_get,
-            downloads::download_path_set,
+            
             install::install_from_archive,
             install::install_downloaded_archive,
             install::delete_archive_files,
             repair::onlinefix_repair,
+            library::installing_get,
             library::installed_list,
             library::installed_get,
             library::installing_list,
-            library::installing_get,
+            
             library::installed_save,
             library::installed_update_metadata,
             library::installing_status_set,
             library::installed_delete,
             library::installing_delete,
-            library::installing_dismiss,
+            
             launch::game_exe_list,
             launch::game_subfolder_find,
             launch::game_exe_preflight,
@@ -356,8 +357,8 @@ pub fn run() {
             launch::linux::game_linux_config_set,
             launch::linux::linux_detect_proton,
             storage::storage_precheck,
-            storage::storage_summary,
-            storage::storage_snapshot,
+            
+            
             assets::assets_size,
             assets::assets_clear,
             updater::check_for_updates,
@@ -376,11 +377,11 @@ pub fn run() {
             misc::theme_editor_close,
             misc::theme_preview,
             misc::theme_preview_end,
-            misc::presence_heartbeat,
+            
             misc::autostart_get,
             misc::autostart_set,
             dialogs::folder_pick,
-            misc::system_notifications,
+            
             net::auth_fetch,
             mods::mods_game_get,
             mods::mods_game_set,
@@ -404,7 +405,7 @@ pub fn run() {
             slipgate_managed::managed_slipgate_update,
             slipgate_managed::managed_slipgate_uninstall,
             mods::workshop::workshop_browse,
-            mods::workshop::workshop_details,
+            
             mods::workshop::workshop_install,
             mods::workshop::workshop_status,
             mods::thunderstore::thunderstore_communities,

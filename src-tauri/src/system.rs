@@ -194,32 +194,6 @@ pub fn open_path_os(path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn reveal_in_folder(path: &Path) -> Result<()> {
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("explorer")
-            .arg("/select,")
-            .arg(path)
-            .spawn()
-            .map_err(|e| AppError::msg(format!("reveal: {e}")))?;
-        return Ok(());
-    }
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg("-R")
-            .arg(path)
-            .spawn()
-            .map_err(|e| AppError::msg(format!("reveal: {e}")))?;
-        return Ok(());
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        let parent = path.parent().unwrap_or(path);
-        open_path_os(parent)
-    }
-}
-
 /// Whether a target is safe to hand to the OS opener: only well-known web,
 /// Steam and magnet links. A compromised catalog response must not be able
 /// to trigger file:// readers or custom protocol handlers.
@@ -305,14 +279,6 @@ pub fn steam_game_run(
 #[tauri::command(async)]
 pub fn download_open(_state: State<'_, AppState>, path: String) -> Value {
     match open_path_os(Path::new(&path)) {
-        Ok(_) => json!({ "ok": true }),
-        Err(e) => json!({ "ok": false, "error": e.to_string() }),
-    }
-}
-
-#[tauri::command(async)]
-pub fn download_show(_state: State<'_, AppState>, path: String) -> Value {
-    match reveal_in_folder(Path::new(&path)) {
         Ok(_) => json!({ "ok": true }),
         Err(e) => json!({ "ok": false, "error": e.to_string() }),
     }
