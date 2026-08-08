@@ -40,14 +40,11 @@ hex = "0.4"
 base64 = "0.22"
 rand = "0.8"
 thiserror = "2"
-anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 dirs = "5"
 tempfile = "3"
 walkdir = "2"
 fs4 = "0.12"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tauri-plugin-autostart = "2.5.1"
 tauri-plugin-notification = "2.3.3"
 
