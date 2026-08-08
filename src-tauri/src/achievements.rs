@@ -1933,58 +1933,6 @@ mod tests {
         let loaded = AchievementService::new(file);
         assert_eq!(loaded.list(), vec![expected]);
     }
-}
-    #[test]
-    fn merge_game_keeps_fresh_timestamp_when_previous_unlocked_at_is_none() {
-        let previous = AchievementGame {
-            appid: "g1".to_string(),
-            steam_app_id: None,
-            title: "Game".to_string(),
-            image: None,
-            provider: "CODEX".to_string(),
-            catalog_complete: true,
-            updated_at: 1,
-            achievements: vec![LocalAchievement {
-                api_name: "ACH_A".to_string(),
-                display_name: "A".to_string(),
-                description: String::new(),
-                hidden: false,
-                icon: None,
-                icon_locked: None,
-                unlocked: true,
-                unlocked_at: None,
-            }],
-        };
-        let current = AchievementGame {
-            achievements: vec![LocalAchievement {
-                api_name: "ACH_A".to_string(),
-                display_name: "A".to_string(),
-                description: String::new(),
-                hidden: false,
-                icon: None,
-                icon_locked: None,
-                unlocked: true,
-                unlocked_at: Some(500),
-            }],
-            ..previous.clone()
-        };
-
-        let merged = merge_game(&previous, current.clone(), true);
-        let achievement = merged
-            .achievements
-            .iter()
-            .find(|achievement| achievement.api_name == "ACH_A")
-            .unwrap();
-        assert_eq!(achievement.unlocked_at, Some(500));
-
-        let again = merge_game(&merged, current, true);
-        let achievement = again
-            .achievements
-            .iter()
-            .find(|achievement| achievement.api_name == "ACH_A")
-            .unwrap();
-        assert_eq!(achievement.unlocked_at, Some(500));
-    
     #[test]
     fn merge_game_keeps_fresh_timestamp_when_previous_unlocked_at_is_none() {
         let previous = AchievementGame {
@@ -2037,4 +1985,3 @@ mod tests {
         assert_eq!(achievement.unlocked_at, Some(500));
     }
 }
-
