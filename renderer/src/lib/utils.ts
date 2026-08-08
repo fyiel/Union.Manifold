@@ -417,49 +417,7 @@ export function rankGameExecutables(exes: GameExecutable[], gameName: string, ba
     })
 }
 
-function pickGameExecutable(exes: GameExecutable[], gameName: string, gameSource?: string, baseFolder?: string | null) {
-  const seen = new Set<string>()
-  const unique: GameExecutable[] = []
-  for (const exe of exes) {
-    const key = (exe.path || "").toLowerCase().replace(/\//g, "\\")
-    if (seen.has(key)) continue
-    seen.add(key)
-    unique.push(exe)
-  }
 
-  const candidates = filterGameExecutables(unique)
-  if (!candidates.length) return { pick: null, confident: false }
-
-  if (candidates.length === 1) {
-    return { pick: candidates[0], confident: true }
-  }
-
-  const isUcOnlineSource = gameSource?.toLowerCase().includes("uc-online") ||
-                           gameSource?.toLowerCase().includes("uconline") ||
-                           gameSource?.toLowerCase().includes("uc online")
-
-  if (isUcOnlineSource) {
-    const ucOnlineExe = candidates.find((exe) => {
-      const lower = exe.name.toLowerCase()
-      return lower === "uc-online.exe" || lower === "uc-online64.exe"
-    })
-    if (ucOnlineExe) {
-      return { pick: ucOnlineExe, confident: true }
-    }
-  }
-
-  const ranked = rankGameExecutables(candidates, gameName, baseFolder)
-  const top = ranked[0]
-  const topScore = top?.score ?? 0
-  const confident = topScore >= 6
-  return { pick: top || null, confident }
-}
-
-function getCardImage(imageUrl: string): string {
-  return imageUrl
-    .replace('/t_thumb/', '/t_cover_big_2x/')
-    .replace('/t_cover_big/', '/t_cover_big_2x/')
-}
 
 export function getInstalledVersionLabel(manifest: any): string | null {
   const label = manifest?.metadata?.downloadedVersion || manifest?.metadata?.version || manifest?.version
@@ -486,46 +444,7 @@ export function hasInstalledVersionUpdate(
   return normalizedInstalled.length > 0 && !normalizedInstalled.includes(normalizedCatalog)
 }
 
-function timeAgo(dateStr?: string | null): string {
-  if (!dateStr) return ""
-  const date = new Date(dateStr)
-  if (isNaN(date.getTime())) return ""
-  const seconds = Math.floor((Date.now() - date.getTime()) / 1000)
-  if (seconds < 60) return "just now"
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  if (days < 30) return `${days}d ago`
-  const months = Math.floor(days / 30)
-  if (months < 12) return `${months}mo ago`
-  return `${Math.floor(months / 12)}y ago`
-}
 
-function timeAgoLong(dateStr?: string | null): string {
-  if (!dateStr) return ""
-  const date = new Date(dateStr)
-  if (isNaN(date.getTime())) return ""
-
-  const seconds = Math.floor((Date.now() - date.getTime()) / 1000)
-  if (seconds < 60) return "just now"
-
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`
-
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`
-
-  const days = Math.floor(hours / 24)
-  if (days < 30) return `${days} day${days === 1 ? "" : "s"} ago`
-
-  const months = Math.floor(days / 30)
-  if (months < 12) return `${months} month${months === 1 ? "" : "s"} ago`
-
-  const years = Math.floor(months / 12)
-  return `${years} year${years === 1 ? "" : "s"} ago`
-}
 
 export function isGameVersionUpdate(game: { update_time?: string; release_time?: string; posted_time?: string }): boolean {
   if (!game.update_time) return false
@@ -540,11 +459,3 @@ export function isGameVersionUpdate(game: { update_time?: string; release_time?:
   return updateDate.getTime() > postedDate.getTime() + 60000
 }
 
-function formatVersion(version: string | undefined | null): string {
-  if (!version) return ""
-  const trimmed = version.trim()
-  if (/^[vvbb]/i.test(trimmed)) {
-    return trimmed
-  }
-  return `v${trimmed}`
-}

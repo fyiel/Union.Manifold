@@ -223,18 +223,6 @@ export async function getPreferredDownloadHost(): Promise<PreferredDownloadHost>
   return "ucfiles"
 }
 
-function setPreferredDownloadHost(host: PreferredDownloadHost) {
-  if (typeof window === "undefined") return
-  if (!PREFERRED_HOSTS.includes(host)) return
-
-  if (window.ucSettings?.set) {
-    window.ucSettings.set('defaultMirrorHost', host).catch((err: any) => {
-      downloadLogger.warn('Failed to set defaultMirrorHost', { data: err })
-    })
-  }
-
-  localStorage.setItem(DOWNLOAD_HOST_STORAGE_KEY, host)
-}
 
 export function selectHost(available: DownloadHosts, _preferredHost?: PreferredDownloadHost): { host: string; links: DownloadHostEntry[] } {
   const links = pickHostLinks(available, "ucfiles")

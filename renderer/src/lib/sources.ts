@@ -42,14 +42,6 @@ async function searchSources(query: string, limit = 24): Promise<UnifiedSourceGa
   return res.games || []
 }
 
-async function browseSources(offset = 0, limit = 36): Promise<UnifiedSourceGame[]> {
-  const res = await api()?.catalog?.(offset, limit)
-  if (!res?.ok) {
-    if (res?.error) sourceLogger.warn("sources catalog failed", { data: res.error })
-    return []
-  }
-  return res.games || []
-}
 
 export async function getSourceDetail(
   sources: Array<{ sourceId: string; sourceSlug: string }>
@@ -140,12 +132,6 @@ export function fetchSteamArt(appid?: number | null, name?: string): Promise<str
   void p.then((urls) => { if (!urls.length) _steamArt.delete(appid) })
   return p
 }
-
-async function sourceTags(): Promise<{ tags: string[]; bySource: Record<string, string[]> }> {
-  const res = await api()?.tags?.()
-  return res?.ok ? { tags: res.tags, bySource: res.bySource } : { tags: [], bySource: {} }
-}
-
 export const SOURCE_PRIORITY = ["unioncrax", "gamebounty", "steamrip", "zeigames", "onlinefix", "gog", "empress", "kaoskrew"]
 
 export const SOURCE_NAMES: Record<string, string> = {
@@ -218,9 +204,6 @@ export async function loadSourcePriority(): Promise<string[]> {
   return [...SOURCE_PRIORITY]
 }
 
-async function saveSourcePriority(ids: string[]): Promise<void> {
-  try { await window.ucSettings?.set?.(SOURCE_PRIORITY_KEY, ids) } catch {  }
-}
 
 export async function loadDisabledSources(): Promise<string[]> {
   try {
@@ -391,9 +374,6 @@ export function downloadAppidFor(seed: string): string {
   return safeId(seed)
 }
 
-function unifiedId(game: UnifiedSourceGame): string {
-  return game.dedupKey
-}
 
 export function unifiedToGame(game: UnifiedSourceGame): Game {
   return {

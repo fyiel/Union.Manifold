@@ -134,21 +134,6 @@ export function resetApiReachability(): void {
   setServiceReachable(true)
 }
 
-async function recheckApiReachability(): Promise<boolean> {
-  try {
-    const response = await fetch(apiUrl("/api/health"), {
-      method: "GET",
-      cache: "no-store",
-      credentials: "include",
-    })
-    const ok = response.ok
-    setServiceReachable(ok)
-    return ok
-  } catch {
-    setServiceReachable(false)
-    return false
-  }
-}
 
 export function subscribeApiConnectivity(callback: () => void): () => void {
   connectivityListeners.add(callback)
@@ -213,19 +198,6 @@ export function getApiBaseUrl(): string {
   return readCustomApiBaseUrl() || readDetectedApiBaseUrl() || DEFAULT_BASE_URL
 }
 
-function setApiBaseUrl(url: string): void {
-  if (typeof window === "undefined") return
-  const normalized = normalizeApiBaseUrl(url)
-  try {
-    if (normalized) {
-      window.localStorage.setItem(CUSTOM_API_BASE_URL_STORAGE_KEY, normalized)
-    } else {
-      window.localStorage.removeItem(CUSTOM_API_BASE_URL_STORAGE_KEY)
-    }
-  } catch {
-  }
-  resetApiReachability()
-}
 
 export function apiUrl(path: string): string {
   const base = getApiBaseUrl().replace(/\/+$/, "")
@@ -350,17 +322,3 @@ function base64ToUint8Array(base64: string): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
 }
 
-async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await apiFetch(path, init)
-  if (!response.ok) {
-    let detail = `${response.status}`
-    try {
-      const body = await response.json()
-      if (body && typeof body === "object" && "error" in body) {
-        detail = String((body as { error?: string }).error || detail)
-      }
-    } catch { }
-    throw new Error(detail)
-  }
-  return response.json() as Promise<T>
-}
