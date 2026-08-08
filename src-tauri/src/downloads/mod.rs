@@ -764,10 +764,33 @@ impl DownloadEngine {
                 }
                 "removed" => {
                     let mut st = self.state.lock();
+                    let paused = st
+                        .by_id
+                        .get(&id)
+                        .map(|d| d.status == "paused")
+                        .unwrap_or(false);
                     st.gid_to_id.remove(&gid);
                     if let Some(d) = st.by_id.get_mut(&id) {
                         d.gid = None;
                     }
+                    drop(st);
+                    if paused {
+                        // A paused row holds no concurrency slot; keep it
+                        // resumable instead of failing it. resume() re-adds
+                        // a fresh gid on the next kick.
+                        continue;
+                    }
+                    // aria2 reports the download as removed (external RPC
+                    // removal, or the daemon relaunching between poll
+                    // snapshots). The gid is gone for good: fail the row so
+                    // it leaves `active` and frees a concurrency slot instead
+                    // of stranding a forever-"downloading" zombie that
+                    // resume() refuses to touch.
+                    // ponytail: no engine-level harness for the aria2 poll
+                    // loop (needs a fake Aria2Manager + AppHandle); upgrade
+                    // path is extracting status-arm transitions into a pure
+                    // fn over EngineState.
+                    self.fail(&id, "download removed by aria2");
                 }
                 _ => {
                     let snap = {
