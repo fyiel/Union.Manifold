@@ -895,13 +895,17 @@ fn decode_host_text(value: &str) -> String {
 
 async fn stop_session(appid: &str) {
     if let Some(session) = SESSIONS.lock().await.remove(appid) {
-        let mut writer = session.writer.lock().await;
-        let _ = writer.write_all(b"STOP\n").await;
-        let _ = writer.shutdown().await;
-        drop(writer);
-        let _ = session.stop.send(());
-        let _ = session.process.await;
+        stop_session_entry(session).await;
     }
+}
+
+async fn stop_session_entry(session: WandSession) {
+    let mut writer = session.writer.lock().await;
+    let _ = writer.write_all(b"STOP\n").await;
+    let _ = writer.shutdown().await;
+    drop(writer);
+    let _ = session.stop.send(());
+    let _ = session.process.await;
 }
 
 #[cfg(target_os = "windows")]
@@ -1066,15 +1070,30 @@ async fn start_host(
     });
     let writer = Arc::new(Mutex::new(writer));
     let id = NEXT_SESSION_ID.fetch_add(1, Ordering::Relaxed);
-    SESSIONS.lock().await.insert(
-        appid.to_string(),
-        WandSession {
-            id,
-            writer: writer.clone(),
-            stop,
-            process,
-        },
-    );
+    // Displace (remove + insert) any existing session for this appid under a
+    // single lock acquisition, then stop the displaced session after
+    // releasing the lock. stop_session ran before the spawn, but a
+    // concurrent launch for the same appid can insert its session during the
+    // up-to-60s connect window; a remove-then-insert gap would let the last
+    // inserter overwrite a session without stopping it, orphaning its
+    // trainer-host child until the game exits.
+    let displaced = {
+        let mut sessions = SESSIONS.lock().await;
+        let displaced = sessions.remove(appid);
+        sessions.insert(
+            appid.to_string(),
+            WandSession {
+                id,
+                writer: writer.clone(),
+                stop,
+                process,
+            },
+        );
+        displaced
+    };
+    if let Some(session) = displaced {
+        stop_session_entry(session).await;
+    }
 
     let app_handle = app.clone();
     let session_appid = appid.to_string();
