@@ -21,6 +21,25 @@ pub fn hide_torrent_sources() -> bool {
         .unwrap_or(false)
 }
 
+/// Dedicated toggle for Online-Fix repair fetching. Online-Fix is a
+/// torrent-only source excluded from the regular source lists, so its
+/// availability is tracked by its own setting rather than `disabledSources`.
+/// When unset, it falls back to the legacy disabledSources entry so existing
+/// users keep their previous choice.
+pub fn onlinefix_enabled() -> bool {
+    SETTINGS_GLOBAL
+        .get()
+        .map(|s| match s.get("onlineFixEnabled") {
+            Value::Bool(b) => b,
+            _ => !s
+                .get("disabledSources")
+                .as_array()
+                .map(|a| a.iter().any(|v| v.as_str() == Some("onlinefix")))
+                .unwrap_or(false),
+        })
+        .unwrap_or(false)
+}
+
 pub struct SettingsStore {
     path: PathBuf,
     inner: Mutex<Map<String, Value>>,

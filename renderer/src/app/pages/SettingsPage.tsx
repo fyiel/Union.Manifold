@@ -415,11 +415,20 @@ function SourcesTab() {
   const [managedSlipgateLoading, setManagedSlipgateLoading] = useState(true)
   const [managedSlipgateAction, setManagedSlipgateAction] = useState<"install" | "start" | "stop" | "update" | "uninstall" | null>(null)
   const [hideTorrent, setHideTorrent] = useState(false)
+  const [onlineFixOn, setOnlineFixOn] = useState(false)
+  const [onlineFixAvailable, setOnlineFixAvailable] = useState(false)
 
   const loadSources = async () => {
-    const [list, disabled, report] = await Promise.all([listSources(), loadDisabledSources(), sourceCapabilities()])
+    const [list, disabled, report, ofStatus] = await Promise.all([
+      listSources(),
+      loadDisabledSources(),
+      sourceCapabilities(),
+      window.ucSources?.onlinefixStatus?.(),
+    ])
     setSources(list)
     setEnabled(Object.fromEntries(list.map((s) => [s.id, !disabled.includes(s.id)])))
+    setOnlineFixOn(Boolean(ofStatus?.enabled))
+    setOnlineFixAvailable(Boolean(ofStatus?.available))
     const capMap: Record<string, SourceCapabilityFlags> = {}
     for (const p of report?.perSource || []) capMap[p.id] = p
     setCaps(capMap)
@@ -474,6 +483,13 @@ function SourcesTab() {
     const next = !hideTorrent
     setHideTorrent(next)
     try { await window.ucSettings?.set?.("hideTorrentSources", next) } catch {  }
+    await loadSources()
+  }
+
+  const toggleOnlineFix = async () => {
+    const next = !onlineFixOn
+    setOnlineFixOn(next)
+    try { await window.ucSources?.onlinefixSetEnabled?.(next) } catch {  }
     await loadSources()
   }
 
@@ -672,10 +688,21 @@ function SourcesTab() {
         ) : null}
       </div>
 
+      <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", border: "1px solid var(--mf-line)", borderRadius: 11, background: "var(--mf-panel-2)", marginBottom: 10 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Online-Fix repairs</div>
+          <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)", marginTop: 3, lineHeight: 1.5 }}>Fetch Online-Fix repair archives for installed games from the Library right-click menu. Online-Fix is a torrent-only source, so it is never listed in Browse — this toggle only controls the repair feature.</div>
+          {onlineFixOn && !onlineFixAvailable ? (
+            <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-danger)", marginTop: 4 }}>Requires a healthy Slipgate and a successful live source refresh.</div>
+          ) : null}
+        </div>
+        <Toggle on={onlineFixOn} onToggle={() => void toggleOnlineFix()} />
+      </div>
+
       <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", border: "1px solid var(--mf-line)", borderRadius: 11, background: "var(--mf-panel-2)", marginBottom: 18 }}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Hide torrent sources</div>
-          <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)", marginTop: 3, lineHeight: 1.5 }}>Hide GOG, EMPRESS and KaOsKrew from Browse, search and the sidebar. They only surface magnet or torrent links, which Manifold can't download. Online-Fix is a separate toggle above.</div>
+          <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)", marginTop: 3, lineHeight: 1.5 }}>Hide GOG, EMPRESS, KaOsKrew and Online-Fix from Browse, search and the sidebar. They only surface magnet or torrent links, which Manifold can't download.</div>
         </div>
         <Toggle on={hideTorrent} onToggle={() => void toggleHideTorrent()} />
       </div>

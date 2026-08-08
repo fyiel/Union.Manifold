@@ -674,6 +674,8 @@ declare global {
       onBrowsePartial: (cb: (payload: { reqId: number; games: UnifiedSourceGame[]; total: number; doneSources: string[] }) => void) => () => void
       capabilities: (sourceIds?: string[]) => Promise<{ ok: boolean; capabilities: SourceCapabilityReport; error?: string }>
       tags: () => Promise<{ ok: boolean; tags: string[]; bySource: Record<string, string[]>; error?: string }>
+      onlinefixStatus: () => Promise<{ ok: boolean; enabled: boolean; available: boolean; error?: string }>
+      onlinefixSetEnabled: (enabled: boolean) => Promise<{ ok: boolean; error?: string }>
       onlinefixRepair: (appid: string, title: string) => Promise<{ ok: boolean; error?: string }>
       onRepairProgress: (cb: (p: RepairProgress) => void) => () => void
     }

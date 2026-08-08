@@ -203,7 +203,7 @@ pub const SOURCES: &[SourceMeta] = &[
         name: "Online-Fix",
         homepage: "https://online-fix.me",
         requires_slipgate: true,
-        torrent_only: false,
+        torrent_only: true,
     },
     SourceMeta {
         id: "gog",
@@ -356,11 +356,19 @@ impl Registry {
         )
     }
 
+    /// Regular, user-facing sources. Online-Fix is a torrent-only source whose
+    /// only in-app use is fetching repair archives, so it is managed by its own
+    /// dedicated toggle and never surfaces in Browse, search, or the sidebar.
+    fn is_regular_source(source: &SourceMeta) -> bool {
+        source.id != "onlinefix"
+    }
+
     pub fn active_ids(&self, requested: &Option<Vec<String>>) -> Vec<String> {
         let slipgate = crate::slipgate::cfg().is_some();
         let hide_torrent = crate::settings::hide_torrent_sources();
         SOURCES
             .iter()
+            .filter(|s| Self::is_regular_source(s))
             .filter(|s| Self::source_available(s, slipgate, hide_torrent))
             .map(|s| s.id.to_string())
             .filter(|id| self.is_enabled(id))
@@ -373,6 +381,7 @@ impl Registry {
         let hide_torrent = crate::settings::hide_torrent_sources();
         SOURCES
             .iter()
+            .filter(|s| Self::is_regular_source(s))
             .map(|s| SourceInfo {
                 id: s.id.to_string(),
                 name: s.name.to_string(),
@@ -581,10 +590,31 @@ pub fn sources_set_enabled(state: State<'_, AppState>, id: String, enabled: bool
     state.sources.set_enabled(&id, enabled);
     let disabled: Vec<String> = SOURCES
         .iter()
+        .filter(|s| Registry::is_regular_source(s))
         .map(|s| s.id.to_string())
         .filter(|id| !state.sources.is_enabled(id))
         .collect();
     state.settings.set("disabledSources", json!(disabled));
+    json!({ "ok": true })
+}
+
+#[tauri::command]
+pub fn sources_onlinefix_status(_state: State<'_, AppState>) -> Value {
+    json!({
+        "ok": true,
+        "enabled": crate::settings::onlinefix_enabled(),
+        "available": adapters::onlinefix::is_ready(),
+    })
+}
+
+#[tauri::command]
+pub fn sources_onlinefix_set_enabled(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Value {
+    state.settings.set("onlineFixEnabled", json!(enabled));
+    app.emit("uc:sources-updated", json!({})).ok();
     json!({ "ok": true })
 }
 
@@ -800,7 +830,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn torrent_filter_keeps_onlinefix_independent() {
+    fn torrent_filter_groups_onlinefix_with_torrents() {
         let onlinefix = SOURCES
             .iter()
             .find(|source| source.id == "onlinefix")
@@ -811,11 +841,21 @@ mod tests {
             .find(|source| source.id == "steamrip")
             .unwrap();
 
-        assert!(!hidden_by_torrent_filter(onlinefix));
-        assert!(!onlinefix.torrent_only);
+        assert!(hidden_by_torrent_filter(onlinefix));
+        assert!(onlinefix.torrent_only);
         assert!(hidden_by_torrent_filter(gog));
         assert!(gog.torrent_only);
         assert!(!hidden_by_torrent_filter(steamrip));
+    }
+
+    #[test]
+    fn onlinefix_is_excluded_from_regular_source_lists() {
+        let reg = Registry::new(&[]);
+        let listed = reg.list();
+        assert!(!listed.iter().any(|s| s.id == "onlinefix"));
+        assert!(listed.iter().any(|s| s.id == "gog"));
+        let active = reg.active_ids(&None);
+        assert!(!active.iter().any(|id| id == "onlinefix"));
     }
 
     #[test]

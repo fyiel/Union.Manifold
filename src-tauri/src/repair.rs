@@ -160,6 +160,11 @@ pub async fn onlinefix_repair(
     appid: String,
     title: String,
 ) -> Result<Value> {
+    if !crate::settings::onlinefix_enabled() {
+        let message = "Online-Fix repairs are disabled — enable them in Settings → Sources";
+        emit(&app, &appid, "failed", None, Some(message));
+        return Ok(json!({ "ok": false, "error": message }));
+    }
     if !crate::sources::adapters::onlinefix::is_ready() {
         let message = "Online-Fix requires a healthy Slipgate and a successful live source refresh";
         emit(&app, &appid, "failed", None, Some(message));

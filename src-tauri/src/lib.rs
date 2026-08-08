@@ -152,6 +152,17 @@ pub fn run() {
             let settings = Arc::new(SettingsStore::load(paths.settings_file()));
             slipgate::init(settings.clone());
             crate::settings::init(settings.clone());
+            // Migrate the legacy disabledSources entry for Online-Fix (it used
+            // to be lumped with the torrent-only sources) into the dedicated
+            // onlineFixEnabled toggle before the registry is built.
+            if settings.get("onlineFixEnabled").is_null() {
+                let was_disabled = settings
+                    .get("disabledSources")
+                    .as_array()
+                    .map(|a| a.iter().any(|v| v.as_str() == Some("onlinefix")))
+                    .unwrap_or(false);
+                settings.set("onlineFixEnabled", serde_json::json!(!was_disabled));
+            }
             crate::http::set_proxy(settings.get_string("proxyUrl"));
             let cacert = crate::downloads::aria2::resolve_ca_cert(app.path().resource_dir().ok());
             let aria2 = Arc::new(Aria2Manager::new(cacert, settings.get_string("proxyUrl")));
@@ -281,6 +292,8 @@ pub fn run() {
             achievements::achievements_test_notification,
             sources::sources_list,
             sources::sources_set_enabled,
+            sources::sources_onlinefix_status,
+            sources::sources_onlinefix_set_enabled,
             sources::sources_query,
             sources::sources_search,
             wand::wand_status,

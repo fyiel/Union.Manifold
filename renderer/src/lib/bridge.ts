@@ -227,6 +227,8 @@ export function installBridge(): void {
     onBrowsePartial: (cb: Cb) => on("uc:browse-partial", cb),
     capabilities: (sourceIds?: string[]) => call("sources_capabilities", { sourceIds }),
     tags: () => call("sources_tags"),
+    onlinefixStatus: () => call("sources_onlinefix_status"),
+    onlinefixSetEnabled: (enabled: boolean) => call("sources_onlinefix_set_enabled", { enabled }),
     onlinefixRepair: (appid: string, title: string) => call("onlinefix_repair", { appid, title }),
     onRepairProgress: (cb: Cb) => on("uc:repair-progress", cb),
   }

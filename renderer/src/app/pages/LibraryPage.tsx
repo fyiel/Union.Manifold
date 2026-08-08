@@ -8,7 +8,7 @@ import { useRunningGame } from "@/hooks/use-running-games"
 import { useDownloadsSelector } from "@/context/downloads-context"
 import { useTabVisible } from "@/context/tab-visibility"
 import { hasInstalledVersionUpdate, proxyImageUrl } from "@/lib/utils"
-import { rememberGames, rememberGameAs, getRememberedGame, resolveInstalledGame, getDownloadArt, hydrateDownloadArt, steamCoverUrl, forgetRememberedGame, setSourceEnabled, loadDisabledSources, saveDisabledSources } from "@/lib/sources"
+import { rememberGames, rememberGameAs, getRememberedGame, resolveInstalledGame, getDownloadArt, hydrateDownloadArt, steamCoverUrl, forgetRememberedGame } from "@/lib/sources"
 import { MONO, COVER_LINES, gbLabel, SearchIcon, CenterState, SmartImage, gameImageCandidates } from "@/app/manifold/ui"
 import { GameMenu, LaunchOptionsDialog, EditDetailsDialog, LinuxConfigDialog, AddGamesDialog, SteamIdDialog, type MenuGame } from "@/app/manifold/library-overlays"
 import { WandTrainerModal } from "@/components/WandTrainerModal"
@@ -218,19 +218,18 @@ export function LibraryPage() {
     const load = async () => {
       try {
         await hydrateDownloadArt()
-        const [value, gcValue, sourcesValue] = await Promise.all([
+        const [value, gcValue, ofStatus] = await Promise.all([
           window.ucSettings?.get?.("libraryGameMeta"),
           window.ucSettings?.get?.(GAME_CACHE_KEY),
-          window.ucSources?.list?.(),
+          window.ucSources?.onlinefixStatus?.(),
         ])
         const m = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, LibraryGameMeta>) : {}
         const gc = gcValue && typeof gcValue === "object" && !Array.isArray(gcValue) ? (gcValue as Record<string, CachedGame>) : {}
         gameCacheRef.current = gc
         if (!alive) return
         setMeta(m)
-        const onlineFix = sourcesValue?.sources?.find((source) => source.id === "onlinefix")
-        setOnlineFixReady(Boolean(onlineFix?.available))
-        setOnlineFixEnabled(Boolean(onlineFix?.enabled))
+        setOnlineFixReady(Boolean(ofStatus?.available))
+        setOnlineFixEnabled(Boolean(ofStatus?.enabled))
         const [installedList, installingList] = await Promise.all([
           window.ucDownloads?.listInstalledGlobal?.() || window.ucDownloads?.listInstalled?.() || [],
           window.ucDownloads?.listInstallingGlobal?.() || window.ucDownloads?.listInstalling?.() || [],
@@ -460,19 +459,10 @@ export function LibraryPage() {
   const toggleOnlineFix = async () => {
     const next = !onlineFixEnabled
     setOnlineFixEnabled(next)
-    try {
-      const disabled = await loadDisabledSources()
-      const nextDisabled = next
-        ? disabled.filter((id) => id !== "onlinefix")
-        : [...new Set([...disabled, "onlinefix"])]
-      await Promise.all([
-        setSourceEnabled("onlinefix", next),
-        saveDisabledSources(nextDisabled),
-      ])
-    } catch {  }
-    const res = await window.ucSources?.list?.()
-    const of = res?.sources?.find((source) => source.id === "onlinefix")
-    setOnlineFixReady(Boolean(of?.available))
+    try { await window.ucSources?.onlinefixSetEnabled?.(next) } catch { }
+    const status = await window.ucSources?.onlinefixStatus?.()
+    setOnlineFixEnabled(Boolean(status?.enabled))
+    setOnlineFixReady(Boolean(status?.available))
   }
 
   const subtitle = [
