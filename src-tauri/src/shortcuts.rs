@@ -4,6 +4,12 @@ fn desktop_dir() -> Option<std::path::PathBuf> {
     dirs::desktop_dir()
 }
 
+fn desktop_entry_escape(value: &str) -> String {
+    // Desktop-entry spec: backslash escapes the next character, so a quote
+    // or backslash in a path cannot break out of the Exec/Path quoting.
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 #[tauri::command(async)]
 pub fn create_desktop_shortcut(
     game_name: String,
@@ -18,6 +24,9 @@ pub fn create_desktop_shortcut(
         Some(e) if !e.is_empty() => e,
         _ => return json!({ "ok": false, "error": "no executable set" }),
     };
+    if exe.contains(['\r', '\n']) {
+        return json!({ "ok": false, "error": "executable path contains a newline" });
+    }
     let safe = crate::downloads::safe_folder_name(&game_name);
 
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -30,8 +39,13 @@ pub fn create_desktop_shortcut(
             .parent()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default();
+        // A newline in Name would inject arbitrary keys into the entry;
+        // quotes in Exec/Path would break out of the quoting.
+        let name = game_name.replace(['\r', '\n'], " ");
         let content = format!(
-            "[Desktop Entry]\nType=Application\nName={game_name}\nExec=\"{exe}\"\nPath={cwd}\nTerminal=false\nCategories=Game;\n"
+            "[Desktop Entry]\nType=Application\nName={name}\nExec=\"{}\"\nPath={}\nTerminal=false\nCategories=Game;\n",
+            desktop_entry_escape(&exe),
+            desktop_entry_escape(&cwd),
         );
         match std::fs::write(&file, content) {
             Ok(_) => {
@@ -52,11 +66,20 @@ pub fn create_desktop_shortcut(
         if lnk.exists() {
             return json!({ "ok": true, "existed": true });
         }
+        // PowerShell single-quoted strings escape a quote by doubling it;
+        // without this a game title or path containing ' would break out of
+        // the script string.
+        let ps_quote = |value: &str| value.replace('\'', "''");
         let script = format!(
             "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{}');$s.TargetPath='{}';$s.WorkingDirectory='{}';$s.Save()",
-            lnk.display(),
-            exe,
-            std::path::Path::new(&exe).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default()
+            ps_quote(&lnk.display().to_string()),
+            ps_quote(&exe),
+            ps_quote(
+                &std::path::Path::new(&exe)
+                    .parent()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_default()
+            ),
         );
         use std::os::windows::process::CommandExt;
         match std::process::Command::new("powershell")
@@ -90,4 +113,15 @@ pub fn delete_desktop_shortcut(game_name: String) -> Value {
     let file = desktop.join(format!("{safe}.{ext}"));
     std::fs::remove_file(&file).ok();
     json!({ "ok": true })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn desktop_entry_escape_neutralizes_quotes_and_backslashes() {
+        assert_eq!(desktop_entry_escape(r#"a"b\c"#), r#"a\"b\\c"#);
+        assert_eq!(desktop_entry_escape("plain"), "plain");
+    }
 }
