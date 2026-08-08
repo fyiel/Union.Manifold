@@ -648,8 +648,8 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       try {
         const uc = window.ucDownloads
         if (!uc) return
-        const listInstalling = uc.listInstallingGlobal || uc.listInstalling
-        const getInstalled = uc.getInstalledGlobal || uc.getInstalled
+        const listInstalling = uc.listInstalling
+        const getInstalled = uc.getInstalled
         if (!listInstalling) return
 
         const manifests = await listInstalling()
@@ -1426,10 +1426,9 @@ const startGameDownload = useCallback(async (game: Game, preferredHostOverride?:
           downloadLogger.info("Resume Level 2 resolved", { data: { resolvedUrl: resolved?.url, resolvedOk: resolved?.resolved } })
           const freshUrl = resolved?.resolved ? resolved.url : target.url
 
-          let resumedFromDisk = false
-          if (window.ucDownloads.resumeWithFreshUrl && target.savePath) {
+          if (target.savePath) {
             try {
-              const resumeRes = await window.ucDownloads.resumeWithFreshUrl({
+              const res = await window.ucDownloads.start({
                 downloadId,
                 url: freshUrl,
                 filename: resolved?.filename || target.filename,
@@ -1441,32 +1440,12 @@ const startGameDownload = useCallback(async (game: Game, preferredHostOverride?:
                 totalBytes: resolved?.size || target.totalBytes,
                 update: target.update,
                 installMetadata: target.installMetadata,
-              })
-              downloadLogger.info("Resume Level 2 resumeWithFreshUrl result", { data: resumeRes })
-              if (resumeRes && typeof resumeRes === "object" && resumeRes.ok) {
-                resumedFromDisk = true
-                ok = true
-              }
+              } as Parameters<typeof window.ucDownloads.start>[0])
+              downloadLogger.info("Resume Level 2 start result", { data: res })
+              ok = true
             } catch (e) {
-              downloadLogger.warn("Resume Level 2 resumeWithFreshUrl failed, falling back to fresh start", { data: e })
+              downloadLogger.warn("Resume Level 2 start failed", { data: e })
             }
-          }
-
-          if (!resumedFromDisk) {
-            const res = await window.ucDownloads.start({
-              downloadId,
-              url: freshUrl,
-              filename: resolved?.filename || target.filename,
-              appid: target.appid,
-              gameName: target.gameName,
-              partIndex: target.partIndex,
-              partTotal: target.partTotal,
-              savePath: target.savePath,
-              update: target.update,
-              installMetadata: target.installMetadata,
-            } as Parameters<typeof window.ucDownloads.start>[0])
-            downloadLogger.info("Resume Level 2 start result", { data: res })
-            ok = true
           }
 
           setDownloads((prev) =>

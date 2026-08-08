@@ -132,7 +132,7 @@ export function SourceGamePage() {
     const sync = async () => {
       const currentRequest = ++request
       try {
-        const list = (await window.ucDownloads?.listInstalledGlobal?.()) || (await window.ucDownloads?.listInstalled?.()) || []
+        const list = (await window.ucDownloads?.listInstalled?.()) || []
         if (!alive || currentRequest !== request) return
         const found = list.find(
           (entry) => String(entry?.appid || entry?.metadata?.appid || "") === dlAppid,

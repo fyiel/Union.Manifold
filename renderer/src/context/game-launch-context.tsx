@@ -304,7 +304,7 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
       if (g.appid.startsWith("steam-")) {
         const globalLaunchSettingKeys = IS_LINUX ? LINUX_GLOBAL_LAUNCH_SETTINGS : []
         const [manifest, launchArgs, linuxConfigResult, closeOnLaunch, ...globalLaunchSettings] = await Promise.all([
-          window.ucDownloads?.getInstalledGlobal?.(g.appid),
+          window.ucDownloads?.getInstalled?.(g.appid),
           window.ucSettings?.get?.("gameLaunchArgs"),
           IS_LINUX ? window.ucLinux?.getGameConfig?.(g.appid) : undefined,
           window.ucSettings?.get?.("closeOnGameLaunch"),

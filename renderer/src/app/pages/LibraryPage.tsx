@@ -231,8 +231,8 @@ export function LibraryPage() {
         setOnlineFixReady(Boolean(ofStatus?.available))
         setOnlineFixEnabled(Boolean(ofStatus?.enabled))
         const [installedList, installingList] = await Promise.all([
-          window.ucDownloads?.listInstalledGlobal?.() || window.ucDownloads?.listInstalled?.() || [],
-          window.ucDownloads?.listInstallingGlobal?.() || window.ucDownloads?.listInstalling?.() || [],
+          window.ucDownloads?.listInstalled?.() || [],
+          window.ucDownloads?.listInstalling?.() || [],
         ])
         if (!alive) return
         const now = Date.now()

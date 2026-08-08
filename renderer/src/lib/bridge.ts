@@ -34,7 +34,6 @@ export function installBridge(): void {
 
   w.ucDownloads = {
     start: (payload: any) => call("download_start", { payload }),
-    resumeWithFreshUrl: (payload: any) => call("download_start", { payload }),
     cancel: (downloadId: string) => call("download_cancel", { downloadId }),
     pause: (downloadId: string) => call("download_pause", { downloadId }),
     resume: (downloadId: string) => call("download_resume", { downloadId }),
@@ -49,9 +48,6 @@ export function installBridge(): void {
     getInstalled: (appid: string) => call("installed_get", { appid }),
     listInstalling: () => call("installing_list"),
     getInstalling: (appid: string) => call("installing_get", { appid }),
-    listInstalledGlobal: () => call("installed_list"),
-    getInstalledGlobal: (appid: string) => call("installed_get", { appid }),
-    listInstallingGlobal: () => call("installing_list"),
     listGameExecutables: (appid: string) => call("game_exe_list", { appid }),
     findGameSubfolder: (folder: string) => call("game_subfolder_find", { folder }),
     preflightGameLaunch: (appid: string, exePath: string) =>
