@@ -1,0 +1,16 @@
+name: Discord push notification
+
+on: push
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Discord webhook
+        env:
+          WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          summary=$(jq -r '"Push to " + .repository.full_name + " by " + (.pusher.name // "unknown") + " (" + (.commits | length | tostring) + " commits)"' "$GITHUB_EVENT_PATH")
+          subject=$(jq -r '(.head_commit.message // .ref) | split("\n")[0]' "$GITHUB_EVENT_PATH")
+          body=$(jq -nc --arg summary "$summary" --arg subject "$subject" '{content: ("**" + $summary + "**\n" + $subject)}')
+          curl -fsS -H 'Content-Type: application/json' -d "$body" "$WEBHOOK_URL"
