@@ -280,7 +280,19 @@ impl DownloadEngine {
         } else {
             default_dir
         };
-        if update && !preserve_existing && part_index.unwrap_or(1) == 1 {
+        // Wipe stale partials only when no other part of this update is
+        // still downloading, queued or paused: removing the shared .updates
+        // dir out from under an in-flight aria2 part unlinks its save file,
+        // and the completed part is then lost with on_complete's readiness
+        // check never satisfiable. Checked against the lock already held
+        // here (enqueue holds it for its whole body, and the mutex is not
+        // reentrant — appid_active would self-deadlock). With a sibling part
+        // active, --continue=true dedupes instead.
+        let sibling_part_active = st.by_id.values().any(|d| {
+            d.appid == appid
+                && (d.status == "downloading" || d.status == "queued" || d.status == "paused")
+        });
+        if update && !preserve_existing && part_index.unwrap_or(1) == 1 && !sibling_part_active {
             std::fs::remove_dir_all(&dir).ok();
         }
         std::fs::create_dir_all(&dir).ok();
