@@ -544,7 +544,6 @@ pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Resul
     // a backup the deploy actually creates.
     fn plan_backup(
         old_journal: &Journal,
-        backup_root: &Path,
         target: &Path,
         rel: &str,
         src: &Path,
@@ -579,7 +578,7 @@ pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Resul
         journal.files.remove(rel);
     }
     for (rel, (src, owner)) in &desired {
-        let backup = plan_backup(&old_journal, &backup_root, target, rel, src);
+        let backup = plan_backup(&old_journal, target, rel, src);
         journal.files.insert(
             rel.clone(),
             JournalEntry {
@@ -670,7 +669,7 @@ pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Resul
             };
             let mut backup_created = false;
             let backup: Option<PathBuf> =
-                plan_backup(&old_journal, &backup_root, target, rel, src)
+                plan_backup(&old_journal, target, rel, src)
                     .map(|b| -> Result<PathBuf, String> {
                         let bpath = rel_to_path(&backup_root, &b);
                         // The plan says the target held a file worth
