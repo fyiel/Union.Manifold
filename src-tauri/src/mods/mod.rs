@@ -2043,8 +2043,12 @@ pub(crate) async fn finalize_install(
     let size = crate::install::dir_size(&final_dir);
     upsert_mod(&mut cfg, spec, size, &plan);
     cfg.deployment_plan_version = DEPLOYMENT_PLAN_VERSION;
-    save_config(&state.paths, &spec.appid, &cfg);
+    // Deploy before persisting: a failed install must not show up as
+    // installed with nothing on disk. The failed deploy_to has already
+    // reconciled the journal with the game directory, and the staging
+    // folder is replaced on the next attempt.
     let n = redeploy(&state, &spec.appid, &cfg)?;
+    save_config(&state.paths, &spec.appid, &cfg);
     emit_changed(app, &spec.appid);
     Ok(n)
 }
@@ -2475,8 +2479,13 @@ pub async fn mods_toggle(
         return Ok(json!({ "ok": false, "error": format!("mod {mod_id} not found") }));
     };
     m.enabled = enabled;
-    save_config(&state.paths, &appid, &cfg);
     let res = redeploy(&state, &appid, &cfg);
+    if res.is_ok() {
+        // Persist only after the files actually moved, so a failed deploy
+        // leaves both the config and the game directory describing the
+        // previous state.
+        save_config(&state.paths, &appid, &cfg);
+    }
     emit_changed(&app, &appid);
     Ok(fold(res.map(|_| json!({ "ok": true }))))
 }
@@ -2501,8 +2510,10 @@ pub async fn mods_reorder(
     for (i, m) in cfg.mods.iter_mut().enumerate() {
         m.order = i as u32;
     }
-    save_config(&state.paths, &appid, &cfg);
     let res = redeploy(&state, &appid, &cfg);
+    if res.is_ok() {
+        save_config(&state.paths, &appid, &cfg);
+    }
     emit_changed(&app, &appid);
     Ok(fold(res.map(|_| json!({ "ok": true }))))
 }
@@ -2522,10 +2533,14 @@ pub async fn mods_uninstall(
     if cfg.mods.len() == before {
         return Ok(json!({ "ok": false, "error": format!("mod {mod_id} not found") }));
     }
-    save_config(&state.paths, &appid, &cfg);
     let res = redeploy(&state, &appid, &cfg);
-    let dir = game_mods_dir(&state.paths, &appid);
-    std::fs::remove_dir_all(dir.join("staging").join(&mod_id)).ok();
+    if res.is_ok() {
+        // Only forget the mod once its files are actually gone; a failed
+        // redeploy keeps the config so the UI can retry.
+        save_config(&state.paths, &appid, &cfg);
+        let dir = game_mods_dir(&state.paths, &appid);
+        std::fs::remove_dir_all(dir.join("staging").join(&mod_id)).ok();
+    }
     emit_changed(&app, &appid);
     Ok(fold(res.map(|_| json!({ "ok": true }))))
 }
