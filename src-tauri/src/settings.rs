@@ -79,6 +79,14 @@ impl SettingsStore {
         if let Ok(text) = serde_json::to_string_pretty(map) {
             let tmp = self.path.with_extension("json.tmp");
             if std::fs::write(&tmp, text).is_ok() {
+                // settings.json holds the Slipgate token, the Nexus session
+                // cookie and proxy credentials; keep it readable only by the
+                // owning user on multi-user machines.
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600)).ok();
+                }
                 std::fs::rename(&tmp, &self.path).ok();
             }
         }

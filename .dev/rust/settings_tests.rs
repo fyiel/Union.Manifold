@@ -129,3 +129,15 @@ fn onlinefix_enabled_matrix_covers_unset_legacy_and_garbage_values() {
     store.set("onlineFixEnabled", json!({}));
     assert!(!onlinefix_enabled_in(&store));
 }
+
+#[cfg(unix)]
+#[test]
+fn persisted_settings_are_only_readable_by_the_owner() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("settings.json");
+    let store = SettingsStore::load(path.clone());
+    store.set("slipgateKey", json!("secret-token"));
+    let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o600);
+}
