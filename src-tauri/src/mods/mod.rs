@@ -65,7 +65,7 @@ struct JournalEntry {
     backup: Option<String>,
 }
 
-#[derive(Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
 struct Journal {
     #[serde(default)]
     files: BTreeMap<String, JournalEntry>,
@@ -204,6 +204,32 @@ fn rel_to_path(base: &Path, rel: &str) -> PathBuf {
         out.push(comp);
     }
     out
+}
+
+/// Whether the journal entry claims a backup that is not on disk. Such an
+/// entry may describe a deploy that crashed between the journal write and
+/// the file move, so the target file is not verifiably replaceable.
+fn claimed_backup_missing(entry: &JournalEntry, backup_root: &Path) -> bool {
+    entry
+        .backup
+        .as_ref()
+        .map(|b| !rel_to_path(backup_root, b).is_file())
+        .unwrap_or(false)
+}
+
+/// Byte comparison used to tell a previous deploy's own content from a
+/// user- or game-written file at the same path.
+fn same_file(a: &Path, b: &Path) -> bool {
+    let (Ok(am), Ok(bm)) = (std::fs::metadata(a), std::fs::metadata(b)) else {
+        return false;
+    };
+    if am.len() != bm.len() {
+        return false;
+    }
+    match (std::fs::read(a), std::fs::read(b)) {
+        (Ok(ac), Ok(bc)) => ac == bc,
+        _ => false,
+    }
 }
 
 fn remove_empty_parents(path: &Path, stop: &Path) {
@@ -501,6 +527,7 @@ pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Resul
     }
 
     let mut journal = load_journal(game_dir);
+    let old_journal = journal.clone();
 
     let stale: Vec<String> = journal
         .files
@@ -508,54 +535,51 @@ pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Resul
         .filter(|k| !desired.contains_key(*k))
         .cloned()
         .collect();
-    for rel in stale {
-        let entry = match journal.files.remove(&rel) {
-            Some(e) => e,
-            None => continue,
-        };
-        let dst = rel_to_path(target, &rel);
-        std::fs::remove_file(&dst).ok();
-        if let Some(b) = entry.backup {
-            let bpath = rel_to_path(&backup_root, &b);
-            if bpath.is_file() {
-                if let Some(parent) = dst.parent() {
-                    std::fs::create_dir_all(parent).ok();
+
+    // Where an original is preserved when deploying a rel over an existing
+    // file: the prior journal's backup path, or a fresh backup at
+    // backup_root/<rel> when the target currently holds a file that is not
+    // this mod's own previous content. Used by both the journal computation
+    // and the mutation loop so the persisted journal can never under-claim
+    // a backup the deploy actually creates.
+    fn plan_backup(
+        old_journal: &Journal,
+        backup_root: &Path,
+        target: &Path,
+        rel: &str,
+        src: &Path,
+    ) -> Option<String> {
+        match old_journal.files.get(rel) {
+            Some(prior) => match &prior.backup {
+                Some(b) => Some(b.clone()),
+                None => {
+                    let dst = rel_to_path(target, rel);
+                    // With no prior backup the target should hold this mod's
+                    // own previous deploy; a plain redeploy must not back up
+                    // managed content or a later removal would restore stale
+                    // mod files. Different content means the user or the
+                    // game wrote over it — preserve that before overwriting.
+                    if dst.exists() && !same_file(&dst, src) {
+                        Some(rel.to_string())
+                    } else {
+                        None
+                    }
                 }
-                std::fs::rename(&bpath, &dst).map_err(|e| format!("restore {rel}: {e}"))?;
-                remove_empty_parents(&bpath, &backup_root);
-            }
+            },
+            None => rel_to_path(target, rel)
+                .exists()
+                .then(|| rel.to_string()),
         }
-        remove_empty_parents(&dst, target);
     }
 
+    // First compute the complete new journal in memory, without touching
+    // the game directory. Backup references come from the prior journal or
+    // from the file currently at the target path.
+    for rel in &stale {
+        journal.files.remove(rel);
+    }
     for (rel, (src, owner)) in &desired {
-        let dst = rel_to_path(target, rel);
-        if let Some(parent) = dst.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("deploy {rel}: {e}"))?;
-        }
-        let backup = match journal.files.get(rel) {
-            Some(prior) => prior.backup.clone(),
-            None => {
-                if dst.exists() {
-                    let bpath = rel_to_path(&backup_root, rel);
-                    if !bpath.is_file() {
-                        if let Some(parent) = bpath.parent() {
-                            std::fs::create_dir_all(parent)
-                                .map_err(|e| format!("backup {rel}: {e}"))?;
-                        }
-                        if std::fs::rename(&dst, &bpath).is_err() {
-                            std::fs::copy(&dst, &bpath)
-                                .map_err(|e| format!("backup {rel}: {e}"))?;
-                            std::fs::remove_file(&dst).ok();
-                        }
-                    }
-                    Some(rel.clone())
-                } else {
-                    None
-                }
-            }
-        };
-        std::fs::copy(src, &dst).map_err(|e| format!("deploy {rel}: {e}"))?;
+        let backup = plan_backup(&old_journal, &backup_root, target, rel, src);
         journal.files.insert(
             rel.clone(),
             JournalEntry {
@@ -565,19 +589,181 @@ pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Resul
         );
     }
 
+    // Persist the new journal before mutating anything. undeploy/disable
+    // only ever delete a file whose claimed backup exists on disk, so a
+    // crash between this write and the mutations below cannot destroy an
+    // original that was never backed up.
     save_journal(game_dir, &journal)?;
-    let marker = game_dir.join(MEWGENICS_DEPLOY_MARKER);
-    if cfg.steam_appid == Some(MEWGENICS_STEAM_APPID) {
-        if mewgenics_paths.is_empty() {
-            std::fs::remove_file(marker).ok();
-        } else {
-            std::fs::write(marker, b"enabled\n")
-                .map_err(|e| format!("Mewgenics deploy marker: {e}"))?;
+    drop(journal);
+
+    // Apply the mutations, tracking every applied op. On failure the game
+    // directory is rolled back and a journal matching what is actually on
+    // disk is persisted instead of the old one verbatim: a consumed backup
+    // restore cannot be undone, so the restored file stays in place and its
+    // entry is dropped from the journal (the same drop covers stale files
+    // that were deleted outright or left alone because their backup was
+    // missing).
+    enum AppliedOp {
+        Restored { rel: String },
+        Deployed {
+            rel: String,
+            dst: PathBuf,
+            src: PathBuf,
+            backup: Option<PathBuf>,
+            prior: bool,
+            backup_created: bool,
+        },
+        MarkerWritten { path: PathBuf },
+        MarkerCleared { path: PathBuf },
+    }
+    let mut applied: Vec<AppliedOp> = Vec::new();
+    let result = (|| {
+        for rel in &stale {
+            let entry = match old_journal.files.get(rel) {
+                Some(e) => e,
+                None => continue,
+            };
+            if claimed_backup_missing(entry, &backup_root) {
+                // The claimed backup is gone, so the file at the target may
+                // be the unbacked-up original (crash between journal write
+                // and mutation) or an already-restored original. Leave it
+                // alone and unmanage it.
+                applied.push(AppliedOp::Restored { rel: rel.clone() });
+                continue;
+            }
+            let dst = rel_to_path(target, rel);
+            if let Some(b) = &entry.backup {
+                let bpath = rel_to_path(&backup_root, b);
+                if let Some(parent) = dst.parent() {
+                    std::fs::create_dir_all(parent).ok();
+                }
+                // Rename the backup over the target first so a failed rename
+                // (locked path, directory in the way) leaves the previous
+                // file in place and the journal still matching disk.
+                if std::fs::rename(&bpath, &dst).is_err() {
+                    std::fs::remove_file(&dst).ok();
+                    std::fs::rename(&bpath, &dst).map_err(|e| format!("restore {rel}: {e}"))?;
+                }
+                remove_empty_parents(&bpath, &backup_root);
+            } else {
+                std::fs::remove_file(&dst).ok();
+            }
+            remove_empty_parents(&dst, target);
+            applied.push(AppliedOp::Restored { rel: rel.clone() });
         }
+
+        for (rel, (src, _)) in &desired {
+            let dst = rel_to_path(target, rel);
+            if let Some(parent) = dst.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| format!("deploy {rel}: {e}"))?;
+            }
+            let prior = old_journal.files.contains_key(rel);
+            let back_up = |dst: &Path, bpath: &Path| -> Result<(), String> {
+                if let Some(parent) = bpath.parent() {
+                    std::fs::create_dir_all(parent).map_err(|e| format!("backup {rel}: {e}"))?;
+                }
+                if std::fs::rename(dst, bpath).is_err() {
+                    std::fs::copy(dst, bpath).map_err(|e| format!("backup {rel}: {e}"))?;
+                    std::fs::remove_file(dst).ok();
+                }
+                Ok(())
+            };
+            let mut backup_created = false;
+            let backup: Option<PathBuf> =
+                plan_backup(&old_journal, &backup_root, target, rel, src)
+                    .map(|b| -> Result<PathBuf, String> {
+                        let bpath = rel_to_path(&backup_root, &b);
+                        // The plan says the target held a file worth
+                        // preserving. Materialize the backup unless it
+                        // already exists; a claimed backup that is missing
+                        // with the target still holding a file means that
+                        // file may be the unbacked original (crash between
+                        // journal write and mutation).
+                        if !bpath.is_file() && dst.exists() {
+                            back_up(&dst, &bpath)?;
+                            backup_created = true;
+                        }
+                        Ok(bpath)
+                    })
+                    .transpose()?;
+            // Record the op before the copy so a copy failure still rolls
+            // the backup move back.
+            applied.push(AppliedOp::Deployed {
+                rel: rel.clone(),
+                dst: dst.clone(),
+                src: src.clone(),
+                backup,
+                prior,
+                backup_created,
+            });
+            std::fs::copy(src, &dst).map_err(|e| format!("deploy {rel}: {e}"))?;
+        }
+
+        let marker = game_dir.join(MEWGENICS_DEPLOY_MARKER);
+        if cfg.steam_appid == Some(MEWGENICS_STEAM_APPID) {
+            if mewgenics_paths.is_empty() {
+                std::fs::remove_file(&marker).ok();
+                applied.push(AppliedOp::MarkerCleared { path: marker });
+            } else {
+                std::fs::write(&marker, b"enabled\n")
+                    .map_err(|e| format!("Mewgenics deploy marker: {e}"))?;
+                applied.push(AppliedOp::MarkerWritten { path: marker });
+            }
+        }
+        Ok(())
+    })();
+    if let Err(error) = result {
+        let mut reconciled = old_journal.clone();
+        for op in applied.iter().rev() {
+            match op {
+                AppliedOp::Restored { rel } => {
+                    reconciled.files.remove(rel);
+                }
+                AppliedOp::Deployed {
+                    rel,
+                    dst,
+                    src,
+                    backup,
+                    prior,
+                    backup_created,
+                } => {
+                    if *prior {
+                        // The old journal claimed this rel deployed; restore
+                        // that content from staging, which is immutable for
+                        // the duration of the deploy.
+                        std::fs::copy(src, dst).ok();
+                        if *backup_created {
+                            // A user- or game-written file was materialized
+                            // as the claimed backup; claim it so a later
+                            // undeploy restores it instead of stranding it.
+                            if let Some(entry) = reconciled.files.get_mut(rel) {
+                                entry.backup = Some(rel.clone());
+                            }
+                        }
+                    } else {
+                        std::fs::remove_file(dst).ok();
+                        if let Some(b) = backup {
+                            std::fs::rename(b, dst).ok();
+                        }
+                    }
+                }
+                AppliedOp::MarkerWritten { path } => {
+                    std::fs::remove_file(path).ok();
+                }
+                AppliedOp::MarkerCleared { path } => {
+                    std::fs::write(path, b"enabled\n").ok();
+                }
+            }
+        }
+        save_journal(game_dir, &reconciled).ok();
+        return Err(error);
+    }
+
+    if cfg.steam_appid == Some(MEWGENICS_STEAM_APPID) {
         Ok(mewgenics_paths.len())
     } else {
-        std::fs::remove_file(marker).ok();
-        Ok(journal.files.len())
+        std::fs::remove_file(game_dir.join(MEWGENICS_DEPLOY_MARKER)).ok();
+        Ok(desired.len())
     }
 }
 
@@ -585,6 +771,13 @@ pub(crate) fn undeploy_from(game_dir: &Path, target: &Path) -> Result<(), String
     let backup_root = game_dir.join("backup");
     let journal = load_journal(game_dir);
     for (rel, entry) in &journal.files {
+        if claimed_backup_missing(entry, &backup_root) {
+            // The claimed backup is gone, so the file at the target may be
+            // the unbacked-up original (a deploy crashed between writing the
+            // journal and moving the file) or an already-restored original.
+            // Never delete a file whose original cannot be restored.
+            continue;
+        }
         let dst = rel_to_path(target, rel);
         std::fs::remove_file(&dst).ok();
         if let Some(b) = &entry.backup {

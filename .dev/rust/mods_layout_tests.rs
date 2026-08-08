@@ -586,3 +586,299 @@ fn fluffy_package_drops_manager_metadata_before_deploy() {
     assert!(target.join("natives/stm/example.user.2").is_file());
     assert!(!target.join("modinfo.ini").exists());
 }
+
+fn mk_entry(id: &str) -> ModEntry {
+    ModEntry {
+        id: id.to_string(),
+        provider: "test".to_string(),
+        remote_id: id.to_string(),
+        name: id.to_string(),
+        enabled: true,
+        ..Default::default()
+    }
+}
+
+fn mk_cfg(entries: Vec<ModEntry>) -> GameMods {
+    GameMods {
+        appid: "g1".to_string(),
+        deploy_target: "Data".to_string(),
+        mods: entries,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn deploy_to_rolls_back_game_dir_and_journal_on_mid_deploy_failure() {
+    let tmp = tempdir().unwrap();
+    let game_dir = tmp.path().join("game");
+    let target = game_dir.join("Data");
+    let staging = game_dir.join("staging");
+    write_file(&staging.join("mod1/file.txt"), "v1");
+
+    let one = mk_cfg(vec![mk_entry("mod1")]);
+    assert_eq!(deploy_to(&game_dir, &target, &one).unwrap(), 1);
+    assert_eq!(
+        std::fs::read_to_string(target.join("file.txt")).unwrap(),
+        "v1"
+    );
+
+    write_file(&staging.join("mod2/deep/c.txt"), "v2");
+    write_file(&target.join("deep"), "blocker");
+    let two = mk_cfg(vec![mk_entry("mod1"), mk_entry("mod2")]);
+    assert!(deploy_to(&game_dir, &target, &two).is_err());
+
+    assert_eq!(
+        std::fs::read_to_string(target.join("file.txt")).unwrap(),
+        "v1"
+    );
+    assert_eq!(
+        std::fs::read_to_string(target.join("deep")).unwrap(),
+        "blocker"
+    );
+    assert!(!target.join("c.txt").exists());
+    let journal = load_journal(&game_dir);
+    assert_eq!(journal.files.len(), 1);
+    assert_eq!(journal.files["file.txt"].mod_id, "mod1");
+
+    undeploy_from(&game_dir, &target).unwrap();
+    assert!(!target.join("file.txt").exists());
+    assert!(load_journal(&game_dir).files.is_empty());
+}
+
+#[test]
+fn deploy_to_restores_backed_up_original_when_a_later_file_fails() {
+    let tmp = tempdir().unwrap();
+    let game_dir = tmp.path().join("game");
+    let target = game_dir.join("Data");
+    let staging = game_dir.join("staging");
+    write_file(&staging.join("mod1/a.txt"), "mod");
+    write_file(&target.join("a.txt"), "original");
+    write_file(&staging.join("mod1/deep/b.txt"), "mod");
+    write_file(&target.join("deep"), "blocker");
+
+    let one = mk_cfg(vec![mk_entry("mod1")]);
+    assert!(deploy_to(&game_dir, &target, &one).is_err());
+
+    assert_eq!(
+        std::fs::read_to_string(target.join("a.txt")).unwrap(),
+        "original"
+    );
+    assert_eq!(
+        std::fs::read_to_string(target.join("deep")).unwrap(),
+        "blocker"
+    );
+    assert!(!game_dir.join("backup/a.txt").exists());
+    assert!(load_journal(&game_dir).files.is_empty());
+}
+
+#[test]
+fn undeploy_from_keeps_file_when_claimed_backup_is_missing() {
+    let tmp = tempdir().unwrap();
+    let game_dir = tmp.path().join("game");
+    let target = game_dir.join("Data");
+    write_file(&target.join("file.txt"), "original");
+
+    let mut j = Journal::default();
+    j.files.insert(
+        "file.txt".to_string(),
+        JournalEntry {
+            mod_id: "mod1".to_string(),
+            backup: Some("file.txt".to_string()),
+        },
+    );
+    save_journal(&game_dir, &j).unwrap();
+
+    undeploy_from(&game_dir, &target).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(target.join("file.txt")).unwrap(),
+        "original"
+    );
+    assert!(load_journal(&game_dir).files.is_empty());
+}
+
+#[test]
+fn disable_path_keeps_unbacked_file_when_backup_is_missing() {
+    let tmp = tempdir().unwrap();
+    let game_dir = tmp.path().join("game");
+    let target = game_dir.join("Data");
+    write_file(&target.join("file.txt"), "original");
+
+    let mut j = Journal::default();
+    j.files.insert(
+        "file.txt".to_string(),
+        JournalEntry {
+            mod_id: "mod1".to_string(),
+            backup: Some("file.txt".to_string()),
+        },
+    );
+    save_journal(&game_dir, &j).unwrap();
+
+    let none = mk_cfg(vec![]);
+    assert!(deploy_to(&game_dir, &target, &none).is_ok());
+    assert_eq!(
+        std::fs::read_to_string(target.join("file.txt")).unwrap(),
+        "original"
+    );
+    assert!(load_journal(&game_dir).files.is_empty());
+}
+
+#[test]
+fn failed_deploy_reconciles_journal_after_restored_stale_file() {
+    let tmp = tempdir().unwrap();
+    let game_dir = tmp.path().join("game");
+    let target = game_dir.join("Data");
+    let staging = game_dir.join("staging");
+    write_file(&staging.join("mod1/deep/c.txt"), "mod");
+    write_file(&target.join("deep/c.txt"), "original");
+
+    let one = mk_cfg(vec![mk_entry("mod1")]);
+    assert_eq!(deploy_to(&game_dir, &target, &one).unwrap(), 1);
+    assert_eq!(
+        std::fs::read_to_string(target.join("deep/c.txt")).unwrap(),
+        "mod"
+    );
+
+    write_file(&staging.join("mod2/blocked/b.txt"), "mod2");
+    write_file(&target.join("blocked"), "blocker");
+    let two = mk_cfg(vec![mk_entry("mod2")]);
+    assert!(deploy_to(&game_dir, &target, &two).is_err());
+
+    assert_eq!(
+        std::fs::read_to_string(target.join("deep/c.txt")).unwrap(),
+        "original"
+    );
+    assert!(!game_dir.join("backup/deep/c.txt").exists());
+    assert!(load_journal(&game_dir).files.is_empty());
+
+    undeploy_from(&game_dir, &target).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(target.join("deep/c.txt")).unwrap(),
+        "original"
+    );
+}
+
+#[test]
+fn retry_deploy_preserves_unbacked_original_when_claimed_backup_missing() {
+    let tmp = tempdir().unwrap();
+    let game_dir = tmp.path().join("game");
+    let target = game_dir.join("Data");
+    let staging = game_dir.join("staging");
+    write_file(&target.join("file.txt"), "original");
+    write_file(&staging.join("mod1/file.txt"), "mod");
+
+    let mut j = Journal::default();
+    j.files.insert(
+        "file.txt".to_string(),
+        JournalEntry {
+            mod_id: "mod1".to_string(),
+            backup: Some("file.txt".to_string()),
+        },
+    );
+    save_journal(&game_dir, &j).unwrap();
+
+    let one = mk_cfg(vec![mk_entry("mod1")]);
+    assert_eq!(deploy_to(&game_dir, &target, &one).unwrap(), 1);
+    assert_eq!(
+        std::fs::read_to_string(target.join("file.txt")).unwrap(),
+        "mod"
+    );
+    assert_eq!(
+        std::fs::read_to_string(game_dir.join("backup/file.txt")).unwrap(),
+        "original"
+    );
+
+    undeploy_from(&game_dir, &target).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(target.join("file.txt")).unwrap(),
+        "original"
+    );
+}
+
+#[test]
+fn failed_deploy_drops_deleted_backup_less_stale_entry() {
+    let tmp = tempdir().unwrap();
+    let game_dir = tmp.path().join("game");
+    let target = game_dir.join("Data");
+    let staging = game_dir.join("staging");
+    write_file(&staging.join("mod1/file.txt"), "mod");
+    write_file(&staging.join("mod2/blocked/b.txt"), "mod2");
+
+    let one = mk_cfg(vec![mk_entry("mod1")]);
+    assert_eq!(deploy_to(&game_dir, &target, &one).unwrap(), 1);
+    assert!(target.join("file.txt").is_file());
+
+    write_file(&target.join("blocked"), "blocker");
+    let two = mk_cfg(vec![mk_entry("mod2")]);
+    assert!(deploy_to(&game_dir, &target, &two).is_err());
+
+    assert!(!target.join("file.txt").exists());
+    assert!(load_journal(&game_dir).files.is_empty());
+}
+
+#[test]
+fn stale_restore_rename_failure_leaves_disk_matching_journal() {
+    let tmp = tempdir().unwrap();
+    let game_dir = tmp.path().join("game");
+    let target = game_dir.join("Data");
+    let staging = game_dir.join("staging");
+    write_file(&staging.join("mod1/deep/c.txt"), "mod");
+    write_file(&target.join("deep/c.txt"), "original");
+
+    let one = mk_cfg(vec![mk_entry("mod1")]);
+    assert_eq!(deploy_to(&game_dir, &target, &one).unwrap(), 1);
+
+    std::fs::remove_file(target.join("deep/c.txt")).unwrap();
+    std::fs::create_dir_all(target.join("deep/c.txt")).unwrap();
+    let none = mk_cfg(vec![]);
+    assert!(deploy_to(&game_dir, &target, &none).is_err());
+
+    assert!(target.join("deep/c.txt").is_dir());
+    assert_eq!(
+        std::fs::read_to_string(game_dir.join("backup/deep/c.txt")).unwrap(),
+        "original"
+    );
+    let journal = load_journal(&game_dir);
+    assert_eq!(journal.files.len(), 1);
+    assert!(journal.files["deep/c.txt"].backup.is_some());
+
+    std::fs::remove_dir_all(target.join("deep/c.txt")).unwrap();
+    undeploy_from(&game_dir, &target).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(target.join("deep/c.txt")).unwrap(),
+        "original"
+    );
+}
+
+#[test]
+fn redeploy_over_existing_file_claims_backup_in_journal() {
+    let tmp = tempdir().unwrap();
+    let game_dir = tmp.path().join("game");
+    let target = game_dir.join("Data");
+    let staging = game_dir.join("staging");
+    write_file(&staging.join("mod1/file.txt"), "mod");
+
+    let one = mk_cfg(vec![mk_entry("mod1")]);
+    assert_eq!(deploy_to(&game_dir, &target, &one).unwrap(), 1);
+    assert!(load_journal(&game_dir).files["file.txt"].backup.is_none());
+
+    write_file(&target.join("file.txt"), "user-file");
+    assert_eq!(deploy_to(&game_dir, &target, &one).unwrap(), 1);
+    assert_eq!(
+        std::fs::read_to_string(target.join("file.txt")).unwrap(),
+        "mod"
+    );
+    assert_eq!(
+        load_journal(&game_dir).files["file.txt"].backup.as_deref(),
+        Some("file.txt")
+    );
+    assert_eq!(
+        std::fs::read_to_string(game_dir.join("backup/file.txt")).unwrap(),
+        "user-file"
+    );
+
+    undeploy_from(&game_dir, &target).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(target.join("file.txt")).unwrap(),
+        "user-file"
+    );
+}
