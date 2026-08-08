@@ -1391,13 +1391,36 @@ fn clean_ini_value(value: &str) -> String {
         .to_string()
 }
 
+/// Resolve a game-config path against its settings directory. Absolute
+/// values are honored unchanged: games legitimately keep saves in e.g.
+/// ~/Documents outside the install root. Relative values have their `.` and
+/// `..` segments collapsed before joining, so no relative value can climb
+/// out of the base directory (a sibling reference like `../saves` resolves
+/// inside the base; the value is attacker-influenced game data steering
+/// which appid-named state files get read).
 fn absolute_or_join(root: &Path, value: &str) -> PathBuf {
+    use std::path::Component;
+    use std::ffi::OsString;
     let path = PathBuf::from(value.replace('\\', std::path::MAIN_SEPARATOR_STR));
     if path.is_absolute() {
-        path
-    } else {
-        root.join(path)
+        return path;
     }
+    let mut parts: Vec<OsString> = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                parts.pop();
+            }
+            Component::Normal(part) => parts.push(part.to_os_string()),
+            _ => {}
+        }
+    }
+    let mut normalized = root.to_path_buf();
+    for part in parts {
+        normalized.push(part);
+    }
+    normalized
 }
 
 fn humanize_api_name(value: &str) -> String {
@@ -2071,6 +2094,32 @@ mod tests {
         };
         let scanned = scan_discovery(&context, &discovery).unwrap();
         assert!(!scanned.state_loaded);
+    }
+
+
+    #[test]
+    fn absolute_or_join_clamps_relative_climbs_and_keeps_absolute_paths() {
+        let root = std::path::Path::new("/games/title/settings");
+        assert_eq!(
+            absolute_or_join(root, "saves"),
+            std::path::PathBuf::from("/games/title/settings/saves")
+        );
+        assert_eq!(
+            absolute_or_join(root, "../saves"),
+            std::path::PathBuf::from("/games/title/settings/saves")
+        );
+        assert_eq!(
+            absolute_or_join(root, "../../../../etc/passwd"),
+            std::path::PathBuf::from("/games/title/settings/etc/passwd")
+        );
+        assert_eq!(
+            absolute_or_join(root, "./a/../b"),
+            std::path::PathBuf::from("/games/title/settings/b")
+        );
+        assert_eq!(
+            absolute_or_join(root, "/home/user/Documents/saves"),
+            std::path::PathBuf::from("/home/user/Documents/saves")
+        );
     }
 
 }
