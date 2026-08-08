@@ -198,6 +198,30 @@ pub(crate) fn which_extractor() -> Option<String> {
     None
 }
 
+/// Post-extraction containment check: every entry must resolve inside the
+/// target directory. The bundled 7z (23.01) and libarchive collapse
+/// traversal entries themselves, but this keeps a future sidecar regression
+/// or a symlink pointing outside the target from escaping the extract dir.
+pub(crate) fn verify_contained(out_dir: &Path) -> std::result::Result<(), String> {
+    let root = std::fs::canonicalize(out_dir)
+        .map_err(|e| format!("resolve extract dir: {e}"))?;
+    for entry in walkdir::WalkDir::new(out_dir).into_iter().flatten() {
+        let Ok(canonical) = std::fs::canonicalize(entry.path()) else {
+            return Err(format!(
+                "extracted entry cannot be resolved: {}",
+                entry.path().display()
+            ));
+        };
+        if !canonical.starts_with(&root) {
+            return Err(format!(
+                "extracted entry escapes the target: {}",
+                entry.path().display()
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) async fn run_libarchive(bin: &str, archive: &Path, out_dir: &Path) -> Result<()> {
     std::fs::create_dir_all(out_dir).ok();
     let mut cmd = tokio::process::Command::new(bin);
@@ -219,6 +243,8 @@ pub(crate) async fn run_libarchive(bin: &str, archive: &Path, out_dir: &Path) ->
         .await
         .map_err(|e| crate::error::AppError::msg(format!("libarchive spawn: {e}")))?;
     if out.status.success() {
+        verify_contained(out_dir)
+            .map_err(crate::error::AppError::msg)?;
         Ok(())
     } else {
         Err(crate::error::AppError::msg(format!(
@@ -315,6 +341,7 @@ pub(crate) async fn run_7z_pw(
             err_text.trim()
         )));
     }
+    verify_contained(out_dir).map_err(crate::error::AppError::msg)?;
     on_progress(100);
     Ok(())
 }
@@ -1004,4 +1031,30 @@ mod tests {
         assert_eq!(part_base("readme.txt"), None);
         assert_eq!(part_base("game.partial.zip"), None);
     }
+
+    #[test]
+    fn verify_contained_accepts_normal_trees_and_rejects_escapes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tmp.path().join("out");
+        std::fs::create_dir_all(out.join("deep")).unwrap();
+        std::fs::write(out.join("deep/a.txt"), "a").unwrap();
+        assert!(verify_contained(&out).is_ok());
+
+        let outside = tmp.path().join("outside.txt");
+        std::fs::write(&outside, "secret").unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&outside, out.join("escape.txt")).unwrap();
+            assert!(verify_contained(&out).is_err());
+
+            std::fs::remove_file(out.join("escape.txt")).unwrap();
+            std::os::unix::fs::symlink(out.join("deep/a.txt"), out.join("inside.txt")).unwrap();
+            assert!(verify_contained(&out).is_ok());
+
+            std::fs::remove_file(out.join("inside.txt")).unwrap();
+            std::os::unix::fs::symlink(out.join("missing"), out.join("dangling.txt")).unwrap();
+            assert!(verify_contained(&out).is_err());
+        }
+    }
+
 }
