@@ -1,6 +1,6 @@
 import { apiFetch } from "@/lib/api"
 import { gameLogger } from "@/lib/logger"
-import type { Game, GameStats } from "@/lib/types"
+import type { Game } from "@/lib/types"
 
 export type CatalogGame = Game & {
   searchText?: string

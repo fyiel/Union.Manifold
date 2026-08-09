@@ -23,8 +23,6 @@ fn is_archive(path: &Path) -> bool {
     ARCHIVE_EXTS.iter().any(|e| name.ends_with(e)) || has_part_marker(&name)
 }
 
-/// Extract an archive into `out_dir`, clearing the engine's extracting
-/// flag in both outcomes.
 /// Install-concurrency guard: returns the error payload when the app
 /// already has an active download or another install holds the lock.
 fn install_guard(downloads: &std::sync::Arc<DownloadEngine>, appid: &str) -> Option<Value> {
@@ -41,6 +39,8 @@ fn archive_download_id(appid: &str, existing: Option<String>) -> String {
     existing.unwrap_or_else(|| format!("{appid}-archive-{}", now_ms()))
 }
 
+/// Extract an archive into `out_dir`, clearing the engine's extracting
+/// flag in both outcomes.
 async fn extract_archive(
     downloads: &std::sync::Arc<DownloadEngine>,
     app: &AppHandle,
