@@ -62,7 +62,7 @@ static ANCHOR_RE: LazyLock<Regex> =
 static HTTP_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^https?://").unwrap());
 static FILE_HOSTS_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?i)(gofile\.io|bzzhr\.to|buzzheavier\.com|megadb\.net|datanodes\.to|1fichier\.com|akirabox\.com|pixeldrain\.com|mega\.nz|mediafire\.com|fileditch|filecrypt\.cc|qiwi\.gg)",
+        r"(?i)(gofile\.io|bzzhr\.(?:to|co)|buzzheavier\.com|megadb\.net|datanodes\.to|1fichier\.com|akirabox\.com|pixeldrain\.com|mega\.nz|mediafire\.com|fileditch|filecrypt\.cc|qiwi\.gg)",
     )
     .unwrap()
 });
@@ -550,5 +550,21 @@ mod tests {
         assert_eq!(v, "1.12");
         let (t, _) = clean_title("Regalia: Of Men and Monarchs (Royal Edition)");
         assert_eq!(t, "Regalia: Of Men and Monarchs (Royal Edition)");
+    }
+
+    #[test]
+    fn extracts_buzzheavier_short_domain_buttons() {
+        let options = extract_download_options(
+            r#"
+                <a class="shortc-button" href="https://bzzhr.to/AbCd1234">Download</a>
+                <a class="shortc-button" href="https://bzzhr.co/EfGh5678">Download</a>
+            "#,
+        );
+
+        assert_eq!(options.len(), 2);
+        assert!(options
+            .iter()
+            .all(|option| option.host_type == "buzzheavier"));
+        assert!(options.iter().all(|option| option.resolvable));
     }
 }

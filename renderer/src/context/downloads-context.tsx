@@ -855,8 +855,6 @@ const resolveWithTimeout = useCallback(async (host: string, targetUrl: string) =
         .sort(compareQueuePosition)
       if (!queued.length) return
       const next = queued[0]
-      const pausedAppids = new Set(downloadsRef.current.filter((i) => i.status === "paused").map((i) => i.appid))
-      if (pausedAppids.size > 0 && !pausedAppids.has(next.appid)) return
 
       sequenceLocksRef.current.add(next.appid)
 
@@ -1088,11 +1086,6 @@ const resolveWithTimeout = useCallback(async (host: string, targetUrl: string) =
     if (hasActive) return
     const hasQueued = downloads.some((item) => item.status === "queued")
     if (!hasQueued) return
-
-    const hasPausedDownload = downloads.some(
-      (item) => item.status === "paused"
-    )
-    if (hasPausedDownload) return
 
     queueMicrotask(() => {
       void startNextQueuedPart()

@@ -18,7 +18,7 @@ const PROJECT: &str = "union-manifold-slipgate";
 // comes from SLIPGATE_BUILD_CONTEXT, not a digest.
 const SLIPGATE_IMAGE: &str = "union-manifold/slipgate:0.5.1";
 const SLIPGATE_BUILD_CONTEXT: &str =
-    "https://github.com/fyiel/Slipgate.git#b5eb9da6f1e45b6f2858699ad418980d416510b9";
+    "https://github.com/fyiel/Slipgate.git#2c1a801e63b362d6c5ddaa23a097878b09773983";
 // Pinned by digest so a republished tag cannot silently change what runs
 // with the user's API key. Bump deliberately when upgrading FlareSolverr
 // (source tag v3.5.0).

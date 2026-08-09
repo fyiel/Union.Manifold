@@ -338,7 +338,7 @@ impl DownloadEngine {
         Ok(id)
     }
 
-    pub fn pause(&self, id: &str) -> bool {
+    pub fn pause(self: &Arc<Self>, id: &str) -> bool {
         let mut st = self.state.lock();
         let (snap, gid, was_downloading) = match st.by_id.get_mut(id) {
             Some(dl) if dl.status == "queued" => {
@@ -363,30 +363,38 @@ impl DownloadEngine {
         write_manifest(&snap);
         if was_downloading {
             if let Some(gid) = gid {
+                let engine = self.clone();
                 let aria2 = self.aria2.clone();
-                tauri::async_runtime::spawn(async move { aria2.pause(&gid).await });
+                tauri::async_runtime::spawn(async move {
+                    aria2.pause(&gid).await;
+                    engine.maybe_start_next();
+                });
+            } else {
+                self.maybe_start_next();
             }
         }
         true
     }
 
     pub fn resume(self: &Arc<Self>, id: &str) -> bool {
+        let limit = self.max_concurrent();
         let mut st = self.state.lock();
-        let dl = match st.by_id.get_mut(id) {
-            Some(d) => d,
+        let (status, existing_gid) = match st.by_id.get(id) {
+            Some(d) => (d.status.clone(), d.gid.clone()),
             None => return false,
         };
-        if dl.status == "downloading" || dl.status == "queued" {
-            let snap = dl.clone();
+        if status == "downloading" || status == "queued" {
+            let snap = st.by_id.get(id).unwrap().clone();
             self.emit(&snap);
             return true;
         }
-        if dl.status != "paused" && dl.status != "failed" && dl.status != "cancelled" {
+        if status != "paused" && status != "failed" && status != "cancelled" {
             return false;
         }
-        if dl.status == "paused" {
-            if let Some(gid) = dl.gid.clone() {
-                if self.aria2.is_ready() {
+        if status == "paused" {
+            if let Some(gid) = existing_gid {
+                if self.aria2.is_ready() && st.active.len() < limit {
+                    let dl = st.by_id.get_mut(id).unwrap();
                     dl.status = "downloading".to_string();
                     let snap = dl.clone();
                     st.active.insert(id.to_string());
@@ -396,8 +404,22 @@ impl DownloadEngine {
                     tauri::async_runtime::spawn(async move { aria2.unpause(&gid).await });
                     return true;
                 }
+                if self.aria2.is_ready() {
+                    let dl = st.by_id.get_mut(id).unwrap();
+                    dl.status = "queued".to_string();
+                    let snap = dl.clone();
+                    if !st.queue.iter().any(|queued| queued == id) {
+                        st.queue.insert(0, id.to_string());
+                    }
+                    self.emit(&snap);
+                    drop(st);
+                    write_manifest(&snap);
+                    self.maybe_start_next();
+                    return true;
+                }
             }
         }
+        let dl = st.by_id.get_mut(id).unwrap();
         let taken_gid = dl.gid.take();
         dl.status = "queued".to_string();
         dl.error = None;
@@ -533,6 +555,7 @@ impl DownloadEngine {
     fn maybe_start_next(self: &Arc<Self>) {
         let limit = self.max_concurrent();
         let mut to_start = Vec::new();
+        let mut to_unpause = Vec::new();
         {
             let mut st = self.state.lock();
             while st.active.len() < limit {
@@ -551,7 +574,19 @@ impl DownloadEngine {
                 match chosen {
                     Some(id) => {
                         st.active.insert(id.clone());
-                        to_start.push(id);
+                        let existing_gid = st.by_id.get(&id).and_then(|dl| dl.gid.clone());
+                        if let Some(gid) = existing_gid {
+                            let snap = {
+                                let dl = st.by_id.get_mut(&id).unwrap();
+                                dl.status = "downloading".to_string();
+                                dl.speed_bps = 0;
+                                dl.eta_seconds = None;
+                                dl.clone()
+                            };
+                            to_unpause.push((gid, snap));
+                        } else {
+                            to_start.push(id);
+                        }
                     }
                     None => break,
                 }
@@ -560,6 +595,12 @@ impl DownloadEngine {
         for id in to_start {
             let engine = self.clone();
             tauri::async_runtime::spawn(async move { engine.kick_off(id).await });
+        }
+        for (gid, snap) in to_unpause {
+            self.emit(&snap);
+            write_manifest(&snap);
+            let aria2 = self.aria2.clone();
+            tauri::async_runtime::spawn(async move { aria2.unpause(&gid).await });
         }
     }
 
@@ -789,7 +830,12 @@ impl DownloadEngine {
                     let snap = {
                         let mut st = self.state.lock();
                         match st.by_id.get_mut(&id) {
-                            Some(dl) if !(dl.status == "paused" && s != "paused") => {
+                            Some(dl)
+                                if !(dl.status == "paused" && s != "paused")
+                                    && !(dl.status == "queued"
+                                        && dl.gid.is_some()
+                                        && s == "paused") =>
+                            {
                                 let status = if s == "paused" {
                                     "paused"
                                 } else {

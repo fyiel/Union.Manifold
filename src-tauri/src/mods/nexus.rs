@@ -339,7 +339,7 @@ async fn slipgate_resolve(
     domain: &str,
     mod_id: u64,
     file_id: u64,
-) -> Result<String, String> {
+) -> Result<crate::slipgate::ResolvedLink, String> {
     let session = nexus_session_value(state)
         .ok_or("set your nexusmods_session cookie under Settings > Mods so Slipgate can log in")?;
     let game_id = game_id_for_domain(key, domain)
@@ -352,9 +352,7 @@ async fn slipgate_resolve(
         "game_id": game_id.to_string(),
     });
     let cookies = json!([{ "name": "nexusmods_session", "value": session }]);
-    crate::slipgate::resolve(cfg, "nexusmods", "", params, cookies)
-        .await
-        .map(|link| link.url)
+    crate::slipgate::resolve(cfg, "nexusmods", "", params, cookies).await
 }
 
 #[tauri::command]
@@ -665,13 +663,13 @@ pub async fn nexus_install(
         if !premium {
             if let Some(sg) = crate::slipgate::cfg() {
                 match slipgate_resolve(&state, &sg, &key, &domain, mid, file_id).await {
-                    Ok(dl_url) => {
+                    Ok(link) => {
                         let spec = fetch_spec(&key, &appid, &domain, mid, Some(file_id)).await?;
                         tauri::async_runtime::spawn(run_archive_install(
                             app.clone(),
                             spec,
-                            dl_url,
-                            HashMap::new(),
+                            link.url,
+                            link.headers,
                         ));
                         return Ok(json!({ "ok": true, "started": true }));
                     }

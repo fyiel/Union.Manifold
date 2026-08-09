@@ -4,9 +4,9 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
+use super::not_resolvable;
 use crate::http::{self, FetchOpts, Jar};
 use crate::sources::ResolveResult;
-use super::not_resolvable;
 
 static HOST_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)(^|\.)datavaults\.co$").unwrap());
@@ -33,6 +33,10 @@ pub fn matches(url: &str) -> bool {
     super::host_matches(url, &HOST_RE)
 }
 
+fn absolute_redirect(base: &str, value: &str) -> Option<String> {
+    let url = url::Url::parse(base).ok()?.join(value).ok()?;
+    matches!(url.scheme(), "http" | "https").then(|| url.to_string())
+}
 
 fn form(pairs: &[(&str, &str)]) -> Vec<u8> {
     pairs
@@ -165,7 +169,9 @@ pub async fn resolve(url: &str) -> ResolveResult {
             .and_then(|v| v.to_str().ok())
             .filter(|s| !s.is_empty())
         {
-            return ok(loc, fname);
+            if let Some(direct) = absolute_redirect(url, loc) {
+                return ok(&direct, fname);
+            }
         }
     }
     let body = resp.text().await.unwrap_or_default();
@@ -233,5 +239,18 @@ mod tests {
         assert_eq!(wait_secs(r#"<div id="seconds">20</div>"#), 20);
         assert_eq!(wait_secs(r#"<div id="seconds">999</div>"#), MAX_WAIT);
         assert_eq!(wait_secs("no countdown"), MIN_WAIT);
+    }
+
+    #[test]
+    fn joins_relative_redirects_and_rejects_non_http() {
+        assert_eq!(
+            absolute_redirect("https://datavaults.co/file/game.zip", "/d/token/game.zip")
+                .as_deref(),
+            Some("https://datavaults.co/d/token/game.zip")
+        );
+        assert!(
+            absolute_redirect("https://datavaults.co/file/game.zip", "javascript:alert(1)")
+                .is_none()
+        );
     }
 }

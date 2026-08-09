@@ -1,18 +1,20 @@
-use crate::http::{self, FetchOpts};
+use super::not_resolvable;
+use crate::http::{self, FetchOpts, Jar};
 use crate::sources::schema::parse_size_to_bytes;
 use crate::sources::{ResolveResult, ResolvedFile};
-use std::sync::LazyLock;
 use regex::Regex;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 use std::time::Duration;
-use super::not_resolvable;
 
 static HOSTS_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)(^|\.)(buzzheavier\.com|bzzhr\.(?:to|co))$").unwrap());
 static TS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^ts\.").unwrap());
 static ID_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^/([A-Za-z0-9]{4,})").unwrap());
-static TITLE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)<title>([^<]+)</title>").unwrap());
-static SIZE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)[\d.]+\s*(?:TB|GB|MB|KB)\b").unwrap());
+static TITLE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)<title>([^<]+)</title>").unwrap());
+static SIZE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)[\d.]+\s*(?:TB|GB|MB|KB)\b").unwrap());
 static HXGET_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"hx-get="(/[A-Za-z0-9]+/download\?t=[^"]+)""#).unwrap());
 static ALT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[?&]alt=true").unwrap());
@@ -55,13 +57,48 @@ fn browser_headers() -> HashMap<String, String> {
     .collect()
 }
 
-async fn resolve_tokened_path(origin: &str, path: &str, referer: &str) -> Option<String> {
+fn absolute_redirect(base: &str, value: &str) -> Option<String> {
+    let url = url::Url::parse(base).ok()?.join(value).ok()?;
+    matches!(url.scheme(), "http" | "https").then(|| url.to_string())
+}
+
+fn replay_headers(page_url: &str, jar: &Jar) -> HashMap<String, String> {
+    let mut headers = HashMap::new();
+    headers.insert("Referer".to_string(), page_url.to_string());
+    headers.insert("User-Agent".to_string(), http::UA.to_string());
+    if let Some(host) = url::Url::parse(page_url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_owned))
+    {
+        if let Some(cookie) = jar.header_for(&host) {
+            headers.insert("Cookie".to_string(), cookie);
+        }
+    }
+    headers
+}
+
+fn is_challenge_status(status: reqwest::StatusCode) -> bool {
+    matches!(
+        status,
+        reqwest::StatusCode::FORBIDDEN
+            | reqwest::StatusCode::TOO_MANY_REQUESTS
+            | reqwest::StatusCode::SERVICE_UNAVAILABLE
+    )
+}
+
+async fn resolve_tokened_path(
+    origin: &str,
+    path: &str,
+    referer: &str,
+    jar: &Jar,
+) -> Option<String> {
     let mut headers = HashMap::new();
     headers.insert("Referer".to_string(), referer.to_string());
     headers.insert("hx-request".to_string(), "true".to_string());
     headers.insert("hx-current-url".to_string(), referer.to_string());
     let opts = FetchOpts {
         headers,
+        jar: Some(jar.clone()),
         manual_redirect: true,
         retries: Some(1),
         ..Default::default()
@@ -71,12 +108,12 @@ async fn resolve_tokened_path(origin: &str, path: &str, referer: &str) -> Option
     let h = resp.headers();
     if let Some(v) = h.get("hx-redirect").and_then(|v| v.to_str().ok()) {
         if !v.is_empty() {
-            return Some(v.to_string());
+            return absolute_redirect(&full, v);
         }
     }
     if let Some(v) = h.get("location").and_then(|v| v.to_str().ok()) {
         if !v.is_empty() {
-            return Some(v.to_string());
+            return absolute_redirect(&full, v);
         }
     }
     None
@@ -86,15 +123,12 @@ pub async fn resolve(url: &str) -> ResolveResult {
     if id_from(url).is_none() {
         return not_resolvable(url, None);
     }
-    let origin = match origin_of(url) {
-        Some(o) => o,
-        None => return not_resolvable(url, None),
-    };
-
     let mut file_name: Option<String> = None;
     let mut size_bytes: Option<u64> = None;
     let mut paths: Vec<String> = Vec::new();
     let mut challenged = false;
+    let mut page_url = url.to_string();
+    let jar = Jar::default();
 
     for attempt in 0..2 {
         if attempt > 0 {
@@ -102,6 +136,7 @@ pub async fn resolve(url: &str) -> ResolveResult {
         }
         let opts = FetchOpts {
             headers: browser_headers(),
+            jar: Some(jar.clone()),
             ..Default::default()
         };
         let resp = match http::fetch(url, &opts).await {
@@ -115,11 +150,18 @@ pub async fn resolve(url: &str) -> ResolveResult {
         };
         let status = resp.status();
         if !status.is_success() {
+            challenged |= is_challenge_status(status);
             if attempt > 0 {
-                return not_resolvable(url, Some(&format!("buzzheavier page {}", status.as_u16())));
+                let reason = if challenged {
+                    "buzzheavier is behind a cloudflare check, opening in browser".to_string()
+                } else {
+                    format!("buzzheavier page {}", status.as_u16())
+                };
+                return not_resolvable(url, Some(&reason));
             }
             continue;
         }
+        page_url = resp.url().to_string();
         let text = resp.text().await.unwrap_or_default();
 
         file_name = TITLE_RE
@@ -159,11 +201,14 @@ pub async fn resolve(url: &str) -> ResolveResult {
         return not_resolvable(url, Some(reason));
     }
 
-    let mut headers = HashMap::new();
-    headers.insert("Referer".to_string(), url.to_string());
+    let origin = match origin_of(&page_url) {
+        Some(origin) => origin,
+        None => return not_resolvable(url, Some("bad buzzheavier page url")),
+    };
+    let headers = replay_headers(&page_url, &jar);
 
     if paths.len() == 1 {
-        return match resolve_tokened_path(&origin, &paths[0], url).await {
+        return match resolve_tokened_path(&origin, &paths[0], &page_url, &jar).await {
             Some(direct) => ResolveResult {
                 resolvable: true,
                 url: Some(direct),
@@ -178,7 +223,7 @@ pub async fn resolve(url: &str) -> ResolveResult {
 
     let mut files: Vec<ResolvedFile> = Vec::new();
     for p in &paths {
-        if let Some(direct) = resolve_tokened_path(&origin, p, url).await {
+        if let Some(direct) = resolve_tokened_path(&origin, p, &page_url, &jar).await {
             files.push(ResolvedFile {
                 url: direct,
                 ..Default::default()
@@ -195,5 +240,53 @@ pub async fn resolve(url: &str) -> ResolveResult {
         files: Some(files),
         headers: Some(headers),
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn matches_both_short_domains() {
+        assert!(matches("https://bzzhr.to/AbCd1234"));
+        assert!(matches("https://bzzhr.co/EfGh5678"));
+    }
+
+    #[test]
+    fn joins_relative_redirects_and_rejects_non_http() {
+        assert_eq!(
+            absolute_redirect("https://bzzhr.co/AbCd/download?t=1", "/d/file.zip").as_deref(),
+            Some("https://bzzhr.co/d/file.zip")
+        );
+        assert!(
+            absolute_redirect("https://bzzhr.co/AbCd/download?t=1", "javascript:alert(1)")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn replays_page_session_material() {
+        let jar = Jar::default();
+        jar.set("buzzheavier.com", "cf_clearance", "fresh");
+        let headers = replay_headers("https://buzzheavier.com/AbCd1234", &jar);
+        assert_eq!(
+            headers.get("Cookie").map(String::as_str),
+            Some("cf_clearance=fresh")
+        );
+        assert_eq!(
+            headers.get("User-Agent").map(String::as_str),
+            Some(http::UA)
+        );
+    }
+
+    #[test]
+    fn challenge_statuses_are_classified() {
+        assert!(is_challenge_status(reqwest::StatusCode::FORBIDDEN));
+        assert!(is_challenge_status(reqwest::StatusCode::TOO_MANY_REQUESTS));
+        assert!(is_challenge_status(
+            reqwest::StatusCode::SERVICE_UNAVAILABLE
+        ));
+        assert!(!is_challenge_status(reqwest::StatusCode::NOT_FOUND));
     }
 }

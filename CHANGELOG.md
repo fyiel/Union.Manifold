@@ -3,6 +3,22 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.5.8
+
+### Fixed
+
+- Pausing a download now releases its concurrency slot immediately, and
+  resuming it respects the configured concurrency limit instead of either
+  stalling the queue or overfilling it.
+- SteamRIP recognizes both current Buzzheavier short domains. Buzzheavier now
+  carries its page cookies, User-Agent and referer into the download request,
+  follows the redirected origin safely, and reports challenge responses
+  explicitly.
+- DataVaults redirect targets are resolved safely, and Nexus downloads retain
+  the session headers returned by Slipgate.
+- Managed Slipgate is pinned to `0.5.2`, adding the DataNodes recipe and the
+  hardened DataVaults and Nexus flows.
+
 ## 3.5.7
 
 ### Added
