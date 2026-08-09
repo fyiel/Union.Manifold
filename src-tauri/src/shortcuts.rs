@@ -112,11 +112,11 @@ pub fn delete_desktop_shortcut(game_name: String) -> Value {
     json!({ "ok": true })
 }
 
+#[cfg(all(unix, not(target_os = "macos")))]
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[cfg(all(unix, not(target_os = "macos")))]
     #[test]
     fn desktop_entry_escape_neutralizes_quotes_and_backslashes() {
         assert_eq!(desktop_entry_escape(r#"a"b\c"#), r#"a\"b\\c"#);
