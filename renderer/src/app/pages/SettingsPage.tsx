@@ -682,7 +682,7 @@ function SourcesTab() {
           placeholder="X-Slipgate-Key (optional)"
           autoComplete="off"
           spellCheck={false}
-          style={{ width: "100%", height: 38, padding: "0 13px", marginTop: 10, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12, outline: "none", boxSizing: "border-box" }}
+          style={{ ...MONO_INPUT, width: "100%", marginTop: 10, boxSizing: "border-box" }}
         />
         {slipgateStatus ? (
           <div style={{ marginTop: 10, fontFamily: MONO, fontSize: 11.5, color: slipgateStatus.ok ? "var(--mf-t2)" : "var(--mf-danger)" }}>Slipgate {slipgateStatus.msg}</div>
