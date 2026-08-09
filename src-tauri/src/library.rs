@@ -236,8 +236,6 @@ pub(crate) fn merge_into_manifest(roots: &[PathBuf], appid: &str, updates: &Valu
             .and_then(|v| v.as_object().cloned())
             .unwrap_or_default();
         merge_manifest_updates(&mut manifest, updates);
-
-        merge_manifest_updates(&mut manifest, updates);
         manifest.insert("updatedAt".into(), json!(now_ms()));
         crate::downloads::write_manifest_atomic(&manifest_path, &Value::Object(manifest));
         invalidate_scan();
