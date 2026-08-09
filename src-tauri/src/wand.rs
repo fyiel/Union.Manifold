@@ -1045,7 +1045,6 @@ async fn start_host(
         .kill_on_drop(true);
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
         command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
     }
     let mut child = command

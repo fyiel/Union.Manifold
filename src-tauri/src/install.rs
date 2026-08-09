@@ -278,7 +278,6 @@ pub(crate) async fn run_libarchive(bin: &str, archive: &Path, out_dir: &Path) ->
         .stderr(std::process::Stdio::piped());
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
         cmd.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
     }
     let out = cmd
@@ -325,7 +324,6 @@ pub(crate) async fn run_7z_pw(
     }
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
         cmd.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
     }
     let mut child = cmd
@@ -402,7 +400,6 @@ pub(crate) async fn run_7z_list(archive: &Path, password: Option<&str>) -> Resul
     }
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
         cmd.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
     }
     let out = cmd

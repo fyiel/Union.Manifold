@@ -137,7 +137,6 @@ async fn run_steamcmd(
         .stderr(std::process::Stdio::piped());
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
         cmd.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
     }
     let out = tokio::time::timeout(timeout, cmd.output())

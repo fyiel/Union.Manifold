@@ -173,7 +173,6 @@ impl Aria2Manager {
             .stderr(std::process::Stdio::null());
         #[cfg(windows)]
         {
-            use std::os::windows::process::CommandExt;
             cmd.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
         }
         let child = match cmd.spawn() {
