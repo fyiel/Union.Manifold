@@ -59,6 +59,24 @@ const CHIP: CSSProperties = { display: "inline-flex", alignItems: "center", gap:
 const CHIP_INPUT: CSSProperties = { background: "transparent", border: "none", outline: "none", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 10.5, padding: 0 }
 const SEARCH_INPUT: CSSProperties = { width: "100%", height: 36, padding: "0 12px 0 34px", borderRadius: 9, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12, outline: "none" }
 const SELECT: CSSProperties = { ...SELECT_BASE, minWidth: 150, borderRadius: 9, fontSize: 12 }
+function SearchBox({ value, onChange, onSubmit, onClear, placeholder }: { value: string; onChange: (v: string) => void; onSubmit: (v: string) => void; onClear: () => void; placeholder: string }) {
+  return (
+    <div style={{ position: "relative", flex: 1, minWidth: 220, maxWidth: 340, marginLeft: "auto" }}>
+      <SearchIcon size={13} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onSubmit(value.trim())
+          if (e.key === "Escape") onClear()
+        }}
+        placeholder={placeholder}
+        style={SEARCH_INPUT}
+      />
+    </div>
+  )
+}
+
 const GRID: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 14, alignContent: "start" }
 
 function fmtBytes(n?: number | null): string {
@@ -821,19 +839,7 @@ export function GameModsPage() {
                 <button type="button" className="mf-ghost" onClick={() => setNxOrder((o) => (o === "asc" ? "desc" : "asc"))} title={nxOrder === "asc" ? "Ascending (lowest first)" : "Descending (highest first)"} aria-label="Toggle sort direction" style={{ ...GHOST_BTN, width: 40, padding: 0 }}>
                   {nxOrder === "asc" ? <ArrowUp size={14} strokeWidth={1.9} /> : <ArrowDown size={14} strokeWidth={1.9} />}
                 </button>
-                <div style={{ position: "relative", flex: 1, minWidth: 220, maxWidth: 340, marginLeft: "auto" }}>
-                  <SearchIcon size={13} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
-                  <input
-                    value={nxQuery}
-                    onChange={(e) => setNxQuery(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") setNxSubmitted(nxQuery.trim())
-                      if (e.key === "Escape") { setNxQuery(""); setNxSubmitted("") }
-                    }}
-                    placeholder={`search ${nexusDomain} mods… (Enter)`}
-                    style={SEARCH_INPUT}
-                  />
-                </div>
+                <SearchBox value={nxQuery} onChange={(v) => setNxQuery(v)} onSubmit={(v) => setNxSubmitted(v)} onClear={() => { setNxQuery(""); setNxSubmitted("") }} placeholder={`search ${nexusDomain} mods… (Enter)`} />
               </div>
 
               <BrowseResults
@@ -881,19 +887,7 @@ export function GameModsPage() {
                 >
                   {PERIODS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
                 </select>
-                <div style={{ position: "relative", flex: 1, minWidth: 220, maxWidth: 340, marginLeft: "auto" }}>
-                  <SearchIcon size={13} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
-                  <input
-                    value={wsQuery}
-                    onChange={(e) => setWsQuery(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") setWsSubmitted(wsQuery.trim())
-                      if (e.key === "Escape") { setWsQuery(""); setWsSubmitted("") }
-                    }}
-                    placeholder="search the workshop… (Enter)"
-                    style={SEARCH_INPUT}
-                  />
-                </div>
+                <SearchBox value={wsQuery} onChange={(v) => setWsQuery(v)} onSubmit={(v) => setWsSubmitted(v)} onClear={() => { setWsQuery(""); setWsSubmitted("") }} placeholder={"search the workshop… (Enter)"} />
               </div>
 
               <BrowseResults
@@ -946,19 +940,7 @@ export function GameModsPage() {
                 <select className="uc-select" value={tsPeriod} onChange={(e) => setTsPeriod(e.target.value as Period)} title="Time window" style={SELECT}>
                   {PERIODS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
                 </select>
-                <div style={{ position: "relative", flex: 1, minWidth: 220, maxWidth: 340, marginLeft: "auto" }}>
-                  <SearchIcon size={13} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
-                  <input
-                    value={tsQuery}
-                    onChange={(e) => setTsQuery(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") setTsSubmitted(tsQuery.trim())
-                      if (e.key === "Escape") { setTsQuery(""); setTsSubmitted("") }
-                    }}
-                    placeholder="search Thunderstore… (Enter)"
-                    style={SEARCH_INPUT}
-                  />
-                </div>
+                <SearchBox value={tsQuery} onChange={(v) => setTsQuery(v)} onSubmit={(v) => setTsSubmitted(v)} onClear={() => { setTsQuery(""); setTsSubmitted("") }} placeholder={"search Thunderstore… (Enter)"} />
               </div>
 
               <BrowseResults
