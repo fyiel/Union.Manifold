@@ -25,6 +25,23 @@ fn is_archive(path: &Path) -> bool {
 
 /// Install-concurrency guard: returns the error payload when the app
 /// already has an active download or another install holds the lock.
+fn sidecar_7z() -> Result<PathBuf> {
+    crate::bins::resolve_sidecar("7z")
+        .ok_or_else(|| crate::error::AppError::msg("7z binary not found, run bun run fetch-sidecars"))
+}
+
+fn fail_extract(
+    app: &AppHandle,
+    download_id: &str,
+    appid: &str,
+    game_name: &Option<String>,
+    dir: &Path,
+    message: &str,
+) {
+    mark_install_failed(dir, message);
+    emit_status(app, download_id, appid, game_name, "extract_failed", Some(message));
+}
+
 fn install_guard(downloads: &std::sync::Arc<DownloadEngine>, appid: &str) -> Option<Value> {
     if downloads.appid_active(appid) {
         return Some(json!({ "ok": false, "error": "download in progress for this app" }));
@@ -291,9 +308,7 @@ pub(crate) async fn run_7z_pw(
     on_progress: impl Fn(u8),
 ) -> Result<()> {
     use tokio::io::AsyncReadExt;
-    let bin = crate::bins::resolve_sidecar("7z").ok_or_else(|| {
-        crate::error::AppError::msg("7z binary not found, run bun run fetch-sidecars")
-    })?;
+    let bin = sidecar_7z()?;
     std::fs::create_dir_all(out_dir).ok();
     let mut cmd = tokio::process::Command::new(&bin);
     cmd.arg("x")
@@ -373,9 +388,7 @@ pub(crate) async fn run_7z_pw(
 }
 
 pub(crate) async fn run_7z_list(archive: &Path, password: Option<&str>) -> Result<Vec<String>> {
-    let bin = crate::bins::resolve_sidecar("7z").ok_or_else(|| {
-        crate::error::AppError::msg("7z binary not found, run bun run fetch-sidecars")
-    })?;
+    let bin = sidecar_7z()?;
     let mut cmd = tokio::process::Command::new(&bin);
     cmd.arg("l")
         .arg("-slt")
@@ -591,22 +604,14 @@ pub async fn auto_install(
     replace_dir: Option<PathBuf>,
 ) {
     let archive = extract_entry_point(&installing_dir, &save_path);
-    let display_name = game_name.clone().unwrap_or_else(|| appid.clone());
+    let display_name = game_name.as_deref().unwrap_or(&appid);
     if !is_archive(&archive) && !sniff_archive(&archive) {
         if let Err(error) =
             finalize_download_install(&installing_dir, &appid, &game_name, replace_dir.as_deref())
                 .await
         {
             let message = error.to_string();
-            mark_install_failed(&installing_dir, &message);
-            emit_status(
-                &app,
-                &download_id,
-                &appid,
-                &game_name,
-                "extract_failed",
-                Some(&message),
-            );
+            fail_extract(&app, &download_id, &appid, &game_name, &installing_dir, &message);
             return;
         }
         emit_status(&app, &download_id, &appid, &game_name, "extracted", None);
@@ -666,15 +671,7 @@ pub async fn auto_install(
                 Ok(dir) => dir,
                 Err(error) => {
                     let message = error.to_string();
-                    mark_install_failed(&installing_dir, &message);
-                    emit_status(
-                        &app,
-                        &download_id,
-                        &appid,
-                        &game_name,
-                        "extract_failed",
-                        Some(&message),
-                    );
+                    fail_extract(&app, &download_id, &appid, &game_name, &installing_dir, &message);
                     return;
                 }
             };
