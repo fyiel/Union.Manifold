@@ -221,11 +221,15 @@ pub(crate) fn merge_manifest_updates(manifest: &mut serde_json::Map<String, Valu
         if v.is_null() {
             manifest.remove(k);
         } else if k == "metadata" && v.is_object() {
-            let metadata = manifest
-                .entry(k.clone())
-                .or_insert_with(|| json!({}))
-                .as_object_mut()
-                .unwrap();
+            // Deep-merge only when the stored value is already an object; a
+            // legacy non-object metadata must not panic the merge.
+            let metadata = match manifest.get_mut(k) {
+                Some(Value::Object(m)) => m,
+                _ => {
+                    manifest.insert(k.clone(), v.clone());
+                    continue;
+                }
+            };
             for (nk, nv) in v.as_object().unwrap() {
                 if nv.is_null() {
                     metadata.remove(nk);
