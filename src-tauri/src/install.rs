@@ -732,8 +732,7 @@ pub async fn install_from_archive(
         return Ok(json!({ "ok": false, "error": "install already in progress" }));
     }
     let out = async {
-        let folder = safe_folder_name(game_name.as_deref().unwrap_or(&appid));
-        let dir = state.download_root().join(folder);
+        let dir = crate::downloads::install_dir_for(&state.download_root(), game_name.as_deref().unwrap_or(&appid));
         std::fs::create_dir_all(&dir).ok();
         let primary = archive_paths[0].clone();
         emit_status(&app, &download_id, &appid, &game_name, "extracting", None);
