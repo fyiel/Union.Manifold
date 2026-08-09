@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useLocation, useNavigate, useParams } from "react-router-dom"
 import { Bookmark, BookmarkCheck, Maximize2, TriangleAlert, X } from "lucide-react"
-import { SOURCE_PRIORITY, type StartResult, collectDownloadEntries, downloadAppidFor, getRememberedGame, rememberGames, rememberGameAs, getSourceDetail, resolveInstalledGame, hostFriendliness, loadSourcePriority, orderSourcesByPreference, pickPrimaryDownload, sourceName, sourceDirect, startSourceDownload, startBestDownload, type DownloadEntry, sortDownloadOptions } from "@/lib/sources"
+import { SOURCE_PRIORITY, type StartResult, collectDownloadEntries, downloadAppidFor, getRememberedGame, rememberGames, rememberGameAs, getSourceDetail, resolveInstalledGame, loadSourcePriority, orderSourcesByPreference, pickPrimaryDownload, sourceName, sourceDirect, startSourceDownload, startBestDownload, type DownloadEntry, sortDownloadOptions } from "@/lib/sources"
 import { isPlayLater, onPlayLaterChanged, togglePlayLater } from "@/lib/play-later"
 import { useDownloadsSelector } from "@/context/downloads-context"
 import { useGameLaunch } from "@/context/game-launch-context"

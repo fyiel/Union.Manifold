@@ -138,11 +138,7 @@ export function AdvancedSearchPage() {
     return sortUnifiedGames(arr, sort, { query, fallbackLatest: true })
   }, [games, directOnly, sort, query])
 
-  const sourceCounts = useMemo(() => {
-    const m: Record<string, number> = {}
-    for (const g of sorted) for (const s of g.sources) m[s.sourceId] = (m[s.sourceId] || 0) + 1
-    return m
-  }, [sorted])
+  const { perSource: sourceCounts } = useMemo(() => countMirrors(sorted), [sorted])
 
   const capBy = useMemo(() => {
     const m: Record<string, string[]> = {}

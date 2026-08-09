@@ -192,7 +192,7 @@ export function BrowsePage() {
     [games, sortMode, hasQuery, committed]
   )
 
-  const mirrors = useMemo(() => sorted.reduce((n, g) => n + g.sources.length, 0), [sorted])
+  const mirrors = useMemo(() => countMirrors(sorted).total, [sorted])
   const resultSummary = searching ? `${sorted.length} so far…` : `${sorted.length}${hasMore ? "+" : ""} titles · ${mirrors} mirrors`
   const sortLabel = sortModeLabel(sortMode, hasQuery)
 

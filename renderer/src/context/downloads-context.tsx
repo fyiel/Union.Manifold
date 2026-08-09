@@ -856,7 +856,7 @@ const resolveWithTimeout = useCallback(async (host: string, targetUrl: string) =
         return
       }
       const hasActive = downloadsRef.current.some((item) =>
-        ["downloading", "verifying", "retrying"].includes(item.status)
+        ["downloading"].includes(item.status)
       )
       if (hasActive) return
 
@@ -1093,7 +1093,7 @@ const resolveWithTimeout = useCallback(async (host: string, targetUrl: string) =
   useEffect(() => {
     if (!persistenceReady) return
     const hasActive = downloads.some((item) =>
-      ["downloading", "verifying", "retrying"].includes(item.status)
+      ["downloading"].includes(item.status)
     )
     if (hasActive) return
     const hasQueued = downloads.some((item) => item.status === "queued")
@@ -1144,7 +1144,7 @@ const startGameDownload = useCallback(async (game: Game, preferredHostOverride?:
     const existingActive = downloadsRef.current.filter(
       (item) =>
         item.appid === game.appid &&
-        ["queued", "downloading", "paused", "extracting", "installing", "verifying", "retrying"].includes(item.status)
+        ["queued", "downloading", "paused", "extracting", "installing"].includes(item.status)
     )
     if (existingActive.length > 0) {
       downloadLogger.warn(`startGameDownload skipped: active items exist for ${game.appid}`)
