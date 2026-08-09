@@ -6,8 +6,8 @@ import { slugify } from "@/lib/utils"
 const api = () => (typeof window !== "undefined" ? window.ucSources : undefined)
 
 export type SourceSortMode = "relevance" | "a-z" | "size" | "sources"
-export const SORT_MODES: readonly SourceSortMode[] = ["relevance", "a-z", "size", "sources"]
-export const SORT_LABELS: Record<SourceSortMode, string> = { relevance: "Relevance", "a-z": "A–Z", size: "Size", sources: "Most sources" }
+const SORT_MODES: readonly SourceSortMode[] = ["relevance", "a-z", "size", "sources"]
+const SORT_LABELS: Record<SourceSortMode, string> = { relevance: "Relevance", "a-z": "A–Z", size: "Size", sources: "Most sources" }
 export const SORT_NOUNS: Record<SourceSortMode, string> = { relevance: "relevance", "a-z": "A–Z", size: "size", sources: "mirror count" }
 
 export function nextSortMode(mode: SourceSortMode): SourceSortMode {
