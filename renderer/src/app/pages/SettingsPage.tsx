@@ -529,16 +529,13 @@ function SourcesTab() {
     return bits.join(" · ")
   }
 
-  const persistSlipgateUrl = async (value: string) => {
-    try { await window.ucSettings?.set?.("slipgateUrl", value.trim() || null) } catch {  }
-  }
-  const persistSlipgateKey = async (value: string) => {
-    try { await window.ucSettings?.set?.("slipgateKey", value.trim() || null) } catch {  }
+  const persistSlipgate = async (key: "slipgateUrl" | "slipgateKey", value: string) => {
+    try { await window.ucSettings?.set?.(key, value.trim() || null) } catch {  }
   }
   const testSlipgate = async () => {
     setSlipgateTesting(true); setSlipgateStatus(null)
     try {
-      await Promise.all([persistSlipgateUrl(slipgateUrl), persistSlipgateKey(slipgateKey)])
+      await Promise.all([persistSlipgate("slipgateUrl", slipgateUrl), persistSlipgate("slipgateKey", slipgateKey)])
       const r = await window.ucMods?.slipgateCheck?.(slipgateUrl.trim(), slipgateKey.trim())
       if (r?.ok) setSlipgateStatus({ ok: true, msg: `reachable (v${r.version || "?"}), FlareSolverr ${r.flaresolverrOk ? "up" : "DOWN"}` })
       else setSlipgateStatus({ ok: false, msg: r?.error || "unreachable" })
@@ -665,7 +662,7 @@ function SourcesTab() {
           <input
             value={slipgateUrl}
             onChange={(e) => setSlipgateUrl(e.target.value)}
-            onBlur={() => void persistSlipgateUrl(slipgateUrl)}
+            onBlur={() => void persistSlipgate("slipgateUrl", slipgateUrl)}
             placeholder="https://slipgate.example.com"
             autoComplete="off"
             spellCheck={false}
@@ -679,7 +676,7 @@ function SourcesTab() {
           type="password"
           value={slipgateKey}
           onChange={(e) => setSlipgateKey(e.target.value)}
-          onBlur={() => void persistSlipgateKey(slipgateKey)}
+          onBlur={() => void persistSlipgate("slipgateKey", slipgateKey)}
           placeholder="X-Slipgate-Key (optional)"
           autoComplete="off"
           spellCheck={false}
