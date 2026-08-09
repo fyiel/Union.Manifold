@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::downloads::{now_ms, safe_folder_name, MANIFEST_NAME};
+use crate::downloads::{now_ms, safe_folder_name, DownloadEngine, MANIFEST_NAME};
 use crate::error::Result;
 use crate::state::AppState;
 
@@ -21,6 +21,27 @@ fn is_archive(path: &Path) -> bool {
         .map(|n| n.to_string_lossy().to_lowercase())
         .unwrap_or_default();
     ARCHIVE_EXTS.iter().any(|e| name.ends_with(e)) || has_part_marker(&name)
+}
+
+/// Extract an archive into `out_dir`, clearing the engine's extracting
+/// flag in both outcomes.
+async fn extract_archive(
+    downloads: &std::sync::Arc<DownloadEngine>,
+    app: &AppHandle,
+    download_id: &str,
+    appid: &str,
+    game_name: &Option<String>,
+    archive: &Path,
+    out_dir: &Path,
+) -> Result<()> {
+    emit_status(app, download_id, appid, game_name, "extracting", None);
+    downloads.set_extracting(appid, true);
+    let mut result = run_7z(archive, out_dir, progress_emitter(app, download_id, appid, game_name)).await;
+    if result.is_ok() {
+        result = extract_leftover_tar(out_dir, archive).await;
+    }
+    downloads.set_extracting(appid, false);
+    result
 }
 
 fn sniff_archive(path: &Path) -> bool {
@@ -606,19 +627,16 @@ pub async fn auto_install(
         emit_status(&app, &download_id, &appid, &game_name, "failed", Some(&msg));
         return;
     }
-    let engine = app.state::<AppState>().downloads.clone();
-    emit_status(&app, &download_id, &appid, &game_name, "extracting", None);
-    engine.set_extracting(&appid, true);
-    let mut result = run_7z(
+    let result = extract_archive(
+        &app.state::<AppState>().downloads.clone(),
+        &app,
+        &download_id,
+        &appid,
+        &game_name,
         &archive,
         &installing_dir,
-        progress_emitter(&app, &download_id, &appid, &game_name),
     )
     .await;
-    if result.is_ok() {
-        result = extract_leftover_tar(&installing_dir, &archive).await;
-    }
-    engine.set_extracting(&appid, false);
     match result {
         Ok(_) => {
             let installed_dir = match finalize_download_install(
@@ -737,18 +755,16 @@ pub async fn install_from_archive(
         let dir = crate::downloads::install_dir_for(&state.download_root(), game_name.as_deref().unwrap_or(&appid));
         std::fs::create_dir_all(&dir).ok();
         let primary = archive_paths[0].clone();
-        emit_status(&app, &download_id, &appid, &game_name, "extracting", None);
-        state.downloads.set_extracting(&appid, true);
-        let mut result = run_7z(
+        let result = extract_archive(
+            &state.downloads,
+            &app,
+            &download_id,
+            &appid,
+            &game_name,
             &primary,
             &dir,
-            progress_emitter(&app, &download_id, &appid, &game_name),
         )
         .await;
-        if result.is_ok() {
-            result = extract_leftover_tar(&dir, &primary).await;
-        }
-        state.downloads.set_extracting(&appid, false);
         match result {
             Ok(_) => {
                 finalize_installed(&dir, &appid, &game_name, &dir, metadata.as_ref()).await;
@@ -815,19 +831,17 @@ pub async fn install_downloaded_archive(
         return Ok(json!({ "ok": false, "error": "install already in progress" }));
     }
     let out = async {
-        emit_status(&app, &download_id, &appid, &game_name, "extracting", None);
-        state.downloads.set_extracting(&appid, true);
         let entry = extract_entry_point(&dir, &save_path);
-        let mut result = run_7z(
+        let result = extract_archive(
+            &state.downloads,
+            &app,
+            &download_id,
+            &appid,
+            &game_name,
             &entry,
             &dir,
-            progress_emitter(&app, &download_id, &appid, &game_name),
         )
         .await;
-        if result.is_ok() {
-            result = extract_leftover_tar(&dir, &entry).await;
-        }
-        state.downloads.set_extracting(&appid, false);
         match result {
             Ok(_) => {
                 finalize_installed(&dir, &appid, &game_name, &dir, None).await;
