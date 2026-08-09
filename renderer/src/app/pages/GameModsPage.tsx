@@ -5,7 +5,7 @@ import {
   ArrowDown, ArrowUp, Check, Download, FolderOpen, Globe, Package, Pencil, Puzzle, RefreshCw, Rocket, Trash2, Undo2, X,
 } from "lucide-react"
 import { CenterState, COVER_LINES, MONO, SearchIcon, Spinner, SELECT_BASE } from "@/app/manifold/ui"
-import { formatNumber, proxyImageUrl } from "@/lib/utils"
+import { fmtBytes, formatNumber, proxyImageUrl } from "@/lib/utils"
 import { useToast } from "@/context/toast-context"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
@@ -79,12 +79,6 @@ function SearchBox({ value, onChange, onSubmit, onClear, placeholder }: { value:
 
 const GRID: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 14, alignContent: "start" }
 
-function fmtBytes(n?: number | null): string {
-  if (!n || n <= 0) return ""
-  const u = ["B", "KB", "MB", "GB"]
-  const i = Math.min(u.length - 1, Math.floor(Math.log(n) / Math.log(1024)))
-  return `${(n / 1024 ** i).toFixed(i ? 1 : 0)} ${u[i]}`
-}
 
 function fmtDate(ts?: number | null): string {
   if (!ts) return ""

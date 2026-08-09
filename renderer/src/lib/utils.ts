@@ -240,6 +240,18 @@ export function getUnambiguousExecutable(exes: GameExecutable[]): GameExecutable
   return candidates.length === 1 ? candidates[0] : null
 }
 
+export function fmtBytes(n?: number | null, empty = ""): string {
+  if (!n || !Number.isFinite(n) || n <= 0) return empty
+  const units = ["B", "KB", "MB", "GB", "TB"]
+  let v = n
+  let i = 0
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i += 1
+  }
+  return `${v.toFixed(i ? 1 : 0)} ${units[i]}`
+}
+
 export function slugify(value: string): string {
   return (value || "").toLowerCase().replace(/[^a-z0-9]+/g, "")
 }

@@ -8,6 +8,7 @@ import {
   type PreferredDownloadHost,
 } from "@/lib/downloads"
 import type { Game } from "@/lib/types"
+import { fmtBytes } from "@/lib/utils"
 import { apiFetch } from "@/lib/api"
 import {
   CheckCircle2,
@@ -578,13 +579,13 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
                     : `Not enough free space — short ${storageCheck.humanShortfall}`}
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-[11px]">
-                  <div><span className="opacity-70">Download:</span> {storageCheck.humanRequired ? formatBytes(storageCheck.downloadBytes) : "—"}</div>
-                  <div><span className="opacity-70">Extract:</span> {formatBytes(storageCheck.extractBytes)}</div>
+                  <div><span className="opacity-70">Download:</span> {storageCheck.humanRequired ? fmtBytes(storageCheck.downloadBytes) : "—"}</div>
+                  <div><span className="opacity-70">Extract:</span> {fmtBytes(storageCheck.extractBytes)}</div>
                   <div><span className="opacity-70">Free:</span> {storageCheck.humanAvailable}</div>
                 </div>
                 {storageCheck.alreadyReservedBytes > 0 && (
                   <div className="text-[10px] opacity-70">
-                    {formatBytes(storageCheck.alreadyReservedBytes)} already reserved by other in-flight downloads.
+                    {fmtBytes(storageCheck.alreadyReservedBytes)} already reserved by other in-flight downloads.
                   </div>
                 )}
               </div>
@@ -668,15 +669,3 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
   )
 }
 
-function formatBytes(bytes: number | null | undefined): string {
-  if (!bytes || !Number.isFinite(bytes)) return "—"
-  const units = ["B", "KB", "MB", "GB", "TB"]
-  let value = bytes
-  let unit = 0
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024
-    unit += 1
-  }
-  const digits = value >= 10 || unit === 0 ? 0 : 1
-  return `${value.toFixed(digits)} ${units[unit]}`
-}

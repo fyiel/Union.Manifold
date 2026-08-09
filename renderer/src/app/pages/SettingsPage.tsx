@@ -15,6 +15,7 @@ import {
 } from "@/lib/sources"
 import { BRAND } from "@/lib/brand"
 import { MONO, SELECT_BASE } from "@/app/manifold/ui"
+import { fmtBytes } from "@/lib/utils"
 import type { LinuxDetectionOption } from "@/lib/linux-presets"
 
 const IS_LINUX = typeof navigator !== "undefined" && /linux/i.test(navigator.userAgent)
@@ -1183,12 +1184,6 @@ function ToggleRow({ title, desc, on, onToggle, last }: { title: string; desc: s
   return <Row title={title} desc={desc} last={last}><Toggle on={on} onToggle={onToggle} /></Row>
 }
 
-function fmtBytes(n: number): string {
-  if (!n) return "0 B"
-  const u = ["B", "KB", "MB", "GB"]
-  const i = Math.min(u.length - 1, Math.floor(Math.log(n) / Math.log(1024)))
-  return `${(n / 1024 ** i).toFixed(i ? 1 : 0)} ${u[i]}`
-}
 
 function ClearAssetsRow() {
   const [bytes, setBytes] = useState<number | null>(null)
@@ -1199,7 +1194,7 @@ function ClearAssetsRow() {
     setBusy(true)
     try { await window.ucAssets?.clear?.() } finally { setBusy(false); refresh() }
   }
-  const desc = bytes == null ? "cached thumbnails & artwork" : `cached thumbnails & artwork — ${fmtBytes(bytes)} stored`
+  const desc = bytes == null ? "cached thumbnails & artwork" : `cached thumbnails & artwork — ${fmtBytes(bytes, "0 B")} stored`
   return (
     <Row title="Clear cached assets" desc={desc} last>
       <button
