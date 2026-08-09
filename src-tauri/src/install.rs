@@ -424,7 +424,6 @@ async fn finalize_installed(
     dir: &Path,
     appid: &str,
     game_name: &Option<String>,
-    install_path: &Path,
     metadata: Option<&Value>,
 ) {
     let manifest_path = dir.join(MANIFEST_NAME);
@@ -439,7 +438,7 @@ async fn finalize_installed(
         json!(game_name.clone().unwrap_or_else(|| appid.to_string())),
     );
     manifest.insert("installStatus".into(), json!("installed"));
-    manifest.insert("installPath".into(), json!(install_path.to_string_lossy()));
+    manifest.insert("installPath".into(), json!(dir.to_string_lossy()));
     let size = {
         let p = install_path.to_path_buf();
         tokio::task::spawn_blocking(move || dir_size(&p))
@@ -543,7 +542,7 @@ async fn finalize_download_install(
     game_name: &Option<String>,
     replace_dir: Option<&Path>,
 ) -> Result<PathBuf> {
-    finalize_installed(staging_dir, appid, game_name, staging_dir, None).await;
+    finalize_installed(staging_dir, appid, game_name, None).await;
     if let Some(target_dir) = replace_dir {
         commit_staged_update(staging_dir, target_dir)?;
         Ok(target_dir.to_path_buf())
@@ -777,7 +776,7 @@ pub async fn install_from_archive(
         .await;
         match result {
             Ok(_) => {
-                finalize_installed(&dir, &appid, &game_name, &dir, metadata.as_ref()).await;
+                finalize_installed(&dir, &appid, &game_name, metadata.as_ref()).await;
                 emit_status(&app, &download_id, &appid, &game_name, "extracted", None);
             }
             Err(e) => {
@@ -851,7 +850,7 @@ pub async fn install_downloaded_archive(
         .await;
         match result {
             Ok(_) => {
-                finalize_installed(&dir, &appid, &game_name, &dir, None).await;
+                finalize_installed(&dir, &appid, &game_name, None).await;
                 emit_status(&app, &download_id, &appid, &game_name, "extracted", None);
                 Ok(json!({ "ok": true, "downloadId": download_id, "extracted": 1 }))
             }
