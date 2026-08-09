@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import { X } from "lucide-react"
-import { querySources, rememberGames, sourcesAvailable, listSources, onSourcesChanged } from "@/lib/sources"
+import { querySources, rememberGames, sourcesAvailable, listSources, onSourcesChanged, mergeUnique, countMirrors } from "@/lib/sources"
 import { getBrowseCache, setBrowseCache, setBrowseScroll, consumeDiskRestore } from "@/lib/browse-cache"
 import { GameCard } from "@/app/manifold/GameCard"
 import { MONO, SearchIcon, SmartImage, Spinner, CenterState } from "@/app/manifold/ui"
@@ -11,11 +11,6 @@ const SORT_CYCLE: SortMode[] = ["relevance", "a-z", "size", "sources"]
 type SrcStatus = "idle" | "searching" | "done" | "failed"
 const PAGE = 48
 type ZoomedCover = { game: UnifiedSourceGame; candidates: string[] }
-
-function mergeUnique(prev: UnifiedSourceGame[], next: UnifiedSourceGame[]): UnifiedSourceGame[] {
-  const seen = new Set(prev.map((g) => g.dedupKey))
-  return [...prev, ...next.filter((g) => !seen.has(g.dedupKey))]
-}
 
 export function BrowsePage() {
   const cached = getBrowseCache()
@@ -106,9 +101,7 @@ export function BrowsePage() {
       offsetRef.current = startOffset + PAGE
       setTotal(append && res.games.length === 0 ? nextGames.length : res.total)
       setSourcesErrored("sourcesErrored" in res && res.sourcesErrored === true)
-      const counts: Record<string, number> = {}
-      for (const g of nextGames) for (const s of g.sources) counts[s.sourceId] = (counts[s.sourceId] || 0) + 1
-      setSourceCounts(counts)
+      setSourceCounts(countMirrors(nextGames).perSource)
       setStatus((prev) => {
         const next = { ...prev }
         for (const s of srcs) if (s.enabled) next[s.id] = "done"
@@ -173,9 +166,7 @@ export function BrowsePage() {
       rememberGames(payload.games)
       setGames(merged)
       setTotal(payload.total)
-      const counts: Record<string, number> = {}
-      for (const g of merged) for (const s of g.sources) counts[s.sourceId] = (counts[s.sourceId] || 0) + 1
-      setSourceCounts(counts)
+      setSourceCounts(countMirrors(merged).perSource)
       const done = new Set(payload.doneSources)
       setStatus((prev) => {
         const next = { ...prev }

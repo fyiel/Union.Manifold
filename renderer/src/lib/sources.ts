@@ -4,6 +4,23 @@ import { sourceLogger } from "@/lib/logger"
 
 const api = () => (typeof window !== "undefined" ? window.ucSources : undefined)
 
+export function mergeUnique<T extends { dedupKey: string }>(prev: T[], next: T[]): T[] {
+  const seen = new Set(prev.map((g) => g.dedupKey))
+  return [...prev, ...next.filter((g) => !seen.has(g.dedupKey))]
+}
+
+export function countMirrors(games: UnifiedSourceGame[]): { perSource: Record<string, number>; total: number } {
+  const perSource: Record<string, number> = {}
+  let total = 0
+  for (const g of games) {
+    for (const s of g.sources) {
+      perSource[s.sourceId] = (perSource[s.sourceId] || 0) + 1
+      total += 1
+    }
+  }
+  return { perSource, total }
+}
+
 export function sourcesAvailable(): boolean {
   return Boolean(api())
 }

@@ -1,14 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
-import {
-  querySources,
-  sourceCapabilities,
-  rememberGames,
-  sourcesAvailable,
-  listSources,
-  sourceDirect,
-  sourceIsDirect,
-} from "@/lib/sources"
+import { querySources, sourceCapabilities, rememberGames, sourcesAvailable, listSources, sourceDirect, sourceIsDirect, mergeUnique, countMirrors } from "@/lib/sources"
 import { getAdvancedCache, setAdvancedCache } from "@/lib/advanced-cache"
 import { GameCard } from "@/app/manifold/GameCard"
 import { MONO, SearchIcon, Spinner, CenterState } from "@/app/manifold/ui"
@@ -127,10 +119,7 @@ export function AdvancedSearchPage() {
       const res = await querySources(buildParams(offsetRef.current), id)
       if (id !== reqId.current) return
       rememberGames(res.games)
-      setGames((prev) => {
-        const seen = new Set(prev.map((g) => g.dedupKey))
-        return [...prev, ...res.games.filter((g) => !seen.has(g.dedupKey))]
-      })
+      setGames((prev) => mergeUnique(prev, res.games))
       setTotal(res.games.length === 0 ? 0 : res.total)
       offsetRef.current += ADV_PAGE
     } finally {
@@ -190,7 +179,7 @@ export function AdvancedSearchPage() {
   const yearLabel = yLo <= YEAR_MIN && yHi >= YEAR_MAX ? "Any" : `${yLo}–${yHi}`
   const genreHint = cats.size ? `${cats.size} selected` : "any"
   const sortLabel = { relevance: query.trim() ? "Relevance" : "Latest", "a-z": "A–Z", size: "Size", sources: "Most sources" }[sort]
-  const mirrors = useMemo(() => sorted.reduce((n, g) => n + g.sources.length, 0), [sorted])
+  const mirrors = countMirrors(sorted).total
   const hasMore = games.length < total
 
   const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
