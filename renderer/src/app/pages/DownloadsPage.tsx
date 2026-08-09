@@ -1,3 +1,4 @@
+import { DOWNLOAD_STATUS_LABEL } from "@/lib/downloads"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useDownloadsActions, useDownloadsSelector, type DownloadItem } from "@/context/downloads-context"
 import { useTabVisible } from "@/context/tab-visibility"
@@ -23,11 +24,7 @@ function repStatus(items: DownloadItem[]): DownloadItem["status"] {
   return items[0]?.status || "queued"
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  downloading: "Downloading", extracting: "Extracting", installing: "Installing", verifying: "Verifying",
-  retrying: "Retrying", paused: "Paused", install_ready: "Ready", queued: "Queued", completed: "Completed",
-  extracted: "Completed", failed: "Failed", extract_failed: "Failed",
-}
+const STATUS_LABEL = DOWNLOAD_STATUS_LABEL
 
 function aggregate(items: DownloadItem[]) {
   const received = items.reduce((n, i) => n + (i.receivedBytes || 0), 0)

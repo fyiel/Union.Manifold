@@ -1,3 +1,4 @@
+import { DOWNLOAD_STATUS_LABEL } from "@/lib/downloads"
 import { useEffect, useMemo, useState } from "react"
 import { useLocation, useNavigate, useParams } from "react-router-dom"
 import { Bookmark, BookmarkCheck, Maximize2, TriangleAlert, X } from "lucide-react"
@@ -11,9 +12,10 @@ import { WandTrainerModal } from "@/components/WandTrainerModal"
 
 
 const LIVE_LABEL: Record<string, string> = {
-  downloading: "Downloading", queued: "Queued", extracting: "Extracting", installing: "Installing",
-  verifying: "Verifying", retrying: "Retrying", paused: "Paused", install_ready: "Ready to install",
-  completed: "Installed", extracted: "Installed",
+  ...DOWNLOAD_STATUS_LABEL,
+  install_ready: "Ready to install",
+  completed: "Installed",
+  extracted: "Installed",
 }
 const LIVE_ORDER = ["downloading", "extracting", "installing", "verifying", "retrying", "paused", "install_ready", "queued", "completed", "extracted", "failed"]
 

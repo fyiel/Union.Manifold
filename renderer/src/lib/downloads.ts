@@ -50,6 +50,14 @@ export type DownloadConfig = {
 }
 
 const DOWNLOAD_HOST_STORAGE_KEY = "uc_direct_download_host"
+/// Base status labels shared by every download-status surface.
+/// Per-context wording overrides belong next to the consumer.
+export const DOWNLOAD_STATUS_LABEL: Record<string, string> = {
+  downloading: "Downloading", extracting: "Extracting", installing: "Installing", verifying: "Verifying",
+  retrying: "Retrying", paused: "Paused", install_ready: "Ready", queued: "Queued", completed: "Completed",
+  extracted: "Completed", failed: "Failed", extract_failed: "Failed",
+}
+
 export const SUPPORTED_DOWNLOAD_HOSTS: PreferredDownloadHost[] = ["ucfiles"]
 const UCFILES_404_MESSAGE = "UC.Files returned 404. The link appears to be dead."
 const UCFILES_IDENTIFIER_RE = /^[A-Za-z0-9_-]{1,64}$/
