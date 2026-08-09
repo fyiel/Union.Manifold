@@ -33,6 +33,7 @@ const SECTIONS: Array<{ id: Section; label: string; sub: string }> = [
 
 const SELECT: React.CSSProperties = { ...SELECT_BASE, borderRadius: 8, fontSize: 12.5 }
 const SECTION: React.CSSProperties = { padding: "16px 0", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }
+const PANEL: React.CSSProperties = { padding: "14px 16px", border: "1px solid var(--mf-line)", borderRadius: 11, background: "var(--mf-panel-2)" }
 const MONO_INPUT: React.CSSProperties = { height: 38, padding: "0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12, outline: "none" }
 const GAMESCOPE_NUM: React.CSSProperties = { width: 90, boxSizing: "border-box", height: 36, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", borderRadius: 8, padding: "0 12px", fontFamily: MONO, fontSize: 12.5, color: "var(--mf-t1)", textAlign: "center", outline: "none" }
 
@@ -591,7 +592,7 @@ function SourcesTab() {
         Enable the catalog sources you trust. Disabled sources are hidden from Browse and search.
       </p>
 
-      <div style={{ padding: "14px 16px", border: "1px solid var(--mf-line)", borderRadius: 11, background: "var(--mf-panel-2)", marginBottom: 18 }}>
+      <div style={{ ...PANEL, marginBottom: 18 }}>
         <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Slipgate resolver</div>
         <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)", marginTop: 4, lineHeight: 1.5 }}>
           Run Slipgate and FlareSolverr locally through Docker, or connect to a remote instance. Slipgate unlocks dependent sources and resolves browser-gated file hosts and free NexusMods files.
@@ -690,7 +691,7 @@ function SourcesTab() {
         ) : null}
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", border: "1px solid var(--mf-line)", borderRadius: 11, background: "var(--mf-panel-2)", marginBottom: 10 }}>
+      <div style={{ ...PANEL, display: "flex", alignItems: "center", gap: 14, marginBottom: 10 }}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Online-Fix repairs</div>
           <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)", marginTop: 3, lineHeight: 1.5 }}>Fetch Online-Fix repair archives for installed games from the Library right-click menu. Online-Fix is a torrent-only source, so it is never listed in Browse — this toggle only controls the repair feature.</div>
@@ -701,7 +702,7 @@ function SourcesTab() {
         <Toggle on={onlineFixOn} onToggle={() => void toggleOnlineFix()} />
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", border: "1px solid var(--mf-line)", borderRadius: 11, background: "var(--mf-panel-2)", marginBottom: 18 }}>
+      <div style={{ ...PANEL, display: "flex", alignItems: "center", gap: 14, marginBottom: 18 }}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Hide torrent sources</div>
           <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)", marginTop: 3, lineHeight: 1.5 }}>Hide GOG, EMPRESS, KaOsKrew and Online-Fix from Browse, search and the sidebar. They only surface magnet or torrent links, which Manifold can't download.</div>
@@ -716,7 +717,7 @@ function SourcesTab() {
           const gated = s.requiresSlipgate && !s.available && !torrentHidden
           const off = gated || torrentHidden
           return (
-            <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", border: "1px solid var(--mf-line)", borderRadius: 11, background: "var(--mf-panel-2)", opacity: off ? 0.65 : 1 }}>
+            <div key={s.id} style={{ ...PANEL, display: "flex", alignItems: "center", gap: 14, opacity: off ? 0.65 : 1 }}>
               <span style={{ width: 8, height: 8, borderRadius: 99, background: !off && on ? "var(--mf-t2)" : "var(--mf-t6)", flexShrink: 0 }} />
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, fontWeight: 600, color: "var(--mf-t0)" }}>
