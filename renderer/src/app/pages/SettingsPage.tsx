@@ -825,6 +825,10 @@ function LinuxSettingsTab() {
   }, [])
 
   const persist = (key: string, value: string | boolean) => { try { void window.ucSettings?.set?.(key, value) } catch {  } }
+  const setBool = (key: string, value: boolean, apply: (v: boolean) => void) => {
+    apply(value)
+    try { void window.ucSettings?.set?.(key, value) } catch {  }
+  }
   const pickPrefix = async () => {
     const r = await window.ucLinux?.pickPrefixDir?.()
     if (r?.ok && r.path) { setProtonPrefix(r.path); persist("linuxProtonPrefix", r.path) }
@@ -864,12 +868,12 @@ function LinuxSettingsTab() {
         </div>
       </div>
 
-      <ToggleRow title="GameMode" desc="Wrap launches in gamemoderun for CPU governor and priority tweaks, skipped when not installed" on={gamemode} onToggle={() => { const v = !gamemode; setGamemode(v); persist("linuxGamemode", v) }} />
-      <ToggleRow title="MangoHud" desc="Show the MangoHud performance overlay in game, skipped when not installed" on={mangohud} onToggle={() => { const v = !mangohud; setMangohud(v); persist("linuxMangohud", v) }} />
-      <ToggleRow title="Gamescope" desc="Run the session through Gamescope for FSR upscaling and framerate control, skipped when not installed" on={gamescope} onToggle={() => { const v = !gamescope; setGamescope(v); persist("linuxGamescope", v) }} />
+      <ToggleRow title="GameMode" desc="Wrap launches in gamemoderun for CPU governor and priority tweaks, skipped when not installed" on={gamemode} onToggle={() => setBool("linuxGamemode", !gamemode, setGamemode)} />
+      <ToggleRow title="MangoHud" desc="Show the MangoHud performance overlay in game, skipped when not installed" on={mangohud} onToggle={() => setBool("linuxMangohud", !mangohud, setMangohud)} />
+      <ToggleRow title="Gamescope" desc="Run the session through Gamescope for FSR upscaling and framerate control, skipped when not installed" on={gamescope} onToggle={() => setBool("linuxGamescope", !gamescope, setGamescope)} />
       {gamescope ? (
         <>
-          <ToggleRow title="FSR upscaling" desc="gamescope -F — AMD FidelityFX Super Resolution" on={gamescopeFsr} onToggle={() => { const v = !gamescopeFsr; setGamescopeFsr(v); persist("linuxGamescopeFsr", v) }} />
+          <ToggleRow title="FSR upscaling" desc="gamescope -F — AMD FidelityFX Super Resolution" on={gamescopeFsr} onToggle={() => setBool("linuxGamescopeFsr", !gamescopeFsr, setGamescopeFsr)} />
           <Row title="FSR sharpness" desc="gamescope --sharpness, 0-20, higher is sharper">
             <input
               value={gamescopeSharpness}
@@ -899,7 +903,7 @@ function LinuxSettingsTab() {
           </Row>
         </>
       ) : null}
-      <ToggleRow title="Steam compatibility fixes" desc="Repair known Steam API DLL issues and add local achievement files before Proton or Wine launches" on={steamFixes} onToggle={() => { const v = !steamFixes; setSteamFixes(v); persist("linuxSteamCompatibilityFixes", v) }} />
+      <ToggleRow title="Steam compatibility fixes" desc="Repair known Steam API DLL issues and add local achievement files before Proton or Wine launches" on={steamFixes} onToggle={() => setBool("linuxSteamCompatibilityFixes", !steamFixes, setSteamFixes)} />
 
       <div style={{ padding: "16px 0", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }}>
         <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)", marginBottom: 3 }}>Default WINEDLLOVERRIDES</div>
