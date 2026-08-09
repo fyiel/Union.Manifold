@@ -23,8 +23,6 @@ fn is_archive(path: &Path) -> bool {
     ARCHIVE_EXTS.iter().any(|e| name.ends_with(e)) || has_part_marker(&name)
 }
 
-/// Install-concurrency guard: returns the error payload when the app
-/// already has an active download or another install holds the lock.
 fn sidecar_7z() -> Result<PathBuf> {
     crate::bins::resolve_sidecar("7z")
         .ok_or_else(|| crate::error::AppError::msg("7z binary not found, run bun run fetch-sidecars"))
@@ -42,6 +40,8 @@ fn fail_extract(
     emit_status(app, download_id, appid, game_name, "extract_failed", Some(message));
 }
 
+/// Install-concurrency guard: returns the error payload when the app
+/// already has an active download or another install holds the lock.
 fn install_guard(downloads: &std::sync::Arc<DownloadEngine>, appid: &str) -> Option<Value> {
     if downloads.appid_active(appid) {
         return Some(json!({ "ok": false, "error": "download in progress for this app" }));
