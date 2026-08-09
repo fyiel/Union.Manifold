@@ -240,7 +240,9 @@ export function getUnambiguousExecutable(exes: GameExecutable[]): GameExecutable
   return candidates.length === 1 ? candidates[0] : null
 }
 
-const normalizeToken = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "")
+export function slugify(value: string): string {
+  return (value || "").toLowerCase().replace(/[^a-z0-9]+/g, "")
+}
 
 export function getExecutableRelativePath(fullPath: string, baseFolder?: string | null) {
   if (!baseFolder) return fullPath
@@ -281,7 +283,7 @@ export function matchAdminExecutable(
 function scoreGameExecutable(exe: GameExecutable, gameName: string, baseFolder?: string | null) {
   const nameLower = exe.name.toLowerCase()
   const pathLower = exe.path.toLowerCase()
-  const gameToken = normalizeToken(gameName)
+  const gameToken = slugify(gameName)
   const tokens = gameName
     .toLowerCase()
     .split(/[^a-z0-9]+/)

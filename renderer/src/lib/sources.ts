@@ -1,5 +1,6 @@
 import type { Game } from "@/lib/types"
 import { sourceLogger } from "@/lib/logger"
+import { slugify } from "@/lib/utils"
 
 
 const api = () => (typeof window !== "undefined" ? window.ucSources : undefined)
@@ -107,7 +108,7 @@ export async function getSourceDetail(
 }
 
 function normTitle(s: string): string {
-  return (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "")
+  return slugify(s)
 }
 
 export async function resolveInstalledGame(appid: string, title: string, knownSteamAppId?: number | null): Promise<UnifiedSourceGame | null> {
