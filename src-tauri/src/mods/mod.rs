@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::downloads::{now_ms, safe_folder_name, write_json_atomic, MANIFEST_NAME};
+use crate::downloads::{now_ms, safe_folder_name, write_json_atomic};
 use crate::http;
 use crate::library;
 use crate::paths::AppPaths;
@@ -1652,40 +1652,66 @@ fn wrap_in_mods_folder(staged: &Path, fallback_name: &str) -> Result<(), String>
     Ok(())
 }
 
-fn read_game_manifest(roots: &[PathBuf], appid: &str) -> Option<Value> {
-    let dir = library::find_dir(roots, appid)?;
-    let text = std::fs::read_to_string(dir.join(MANIFEST_NAME)).ok()?;
-    serde_json::from_str(&text).ok()
+#[derive(Default)]
+struct LocalGameMetadata {
+    title: Option<String>,
+    steam_appid: Option<u64>,
 }
 
-fn game_title(state: &AppState, appid: &str) -> Option<String> {
-    let roots = library::scan_roots(state);
-    let m = read_game_manifest(&roots, appid)?;
-    manifest_get(&m, "name").and_then(|v| v.as_str()).map(str::to_string)
-}
-
-fn local_steam_appid(state: &AppState, appid: &str) -> Option<u64> {
-    if let Some(id) = appid
+fn steam_appid_from_key(appid: &str) -> Option<u64> {
+    appid
         .strip_prefix("steam-")
         .and_then(|value| value.parse::<u64>().ok())
-    {
-        return Some(id);
-    }
-    let roots = library::scan_roots(state);
-    let manifest = read_game_manifest(&roots, appid)?;
-    manifest_get(&manifest, "steamAppId")
-        .and_then(Value::as_u64)
-        .filter(|id| *id > 0)
 }
 
-async fn detect_steam_appid(state: &AppState, appid: &str) -> Option<u64> {
-    if let Some(id) = local_steam_appid(state, appid) {
+fn local_game_metadata_with(
+    appid: &str,
+    needs_title: bool,
+    load_manifest: impl FnOnce() -> Option<Value>,
+) -> LocalGameMetadata {
+    let keyed_steam = steam_appid_from_key(appid);
+    if keyed_steam.is_some() && !needs_title {
+        return LocalGameMetadata {
+            steam_appid: keyed_steam,
+            ..Default::default()
+        };
+    }
+    let manifest = load_manifest();
+    LocalGameMetadata {
+        title: manifest
+            .as_ref()
+            .and_then(|value| manifest_get(value, "name"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        steam_appid: keyed_steam.or_else(|| {
+            manifest
+                .as_ref()
+                .and_then(|value| manifest_get(value, "steamAppId"))
+                .and_then(Value::as_u64)
+                .filter(|id| *id > 0)
+        }),
+    }
+}
+
+fn local_game_metadata(state: &AppState, appid: &str, needs_title: bool) -> LocalGameMetadata {
+    local_game_metadata_with(appid, needs_title, || library::installed_manifest(state, appid))
+}
+
+async fn detect_steam_appid(app: &AppHandle, appid: &str) -> Option<u64> {
+    if let Some(id) = steam_appid_from_key(appid) {
         return Some(id);
     }
-    let roots = library::scan_roots(state);
-    let manifest = read_game_manifest(&roots, appid)?;
-    let name = manifest_get(&manifest, "name").and_then(|v| v.as_str())?.to_string();
-    crate::sources::steam::search_app_id(&name).await
+    let app = app.clone();
+    let appid = appid.to_string();
+    let metadata = tokio::task::spawn_blocking(move || {
+        local_game_metadata(&app.state::<AppState>(), &appid, true)
+    })
+    .await
+    .ok()?;
+    if metadata.steam_appid.is_some() {
+        return metadata.steam_appid;
+    }
+    crate::sources::steam::search_app_id(metadata.title.as_deref()?).await
 }
 
 pub(crate) async fn download_to_file(
@@ -2183,8 +2209,7 @@ pub(crate) async fn finalize_install(
     staged_src: &Path,
     move_src: bool,
 ) -> Result<usize, String> {
-    let state = app.state::<AppState>();
-    let steam_appid = detect_steam_appid(&state, &spec.appid).await;
+    let steam_appid = detect_steam_appid(app, &spec.appid).await;
     blocking_game(app.clone(), spec.appid.clone(), {
         let spec = spec.clone();
         let staged_src = staged_src.to_path_buf();
@@ -2527,14 +2552,6 @@ fn game_state_value(state: &AppState, appid: &str, cfg: &GameMods) -> Value {
     })
 }
 
-fn discovery_needed(state: &AppState, cfg: &GameMods) -> bool {
-    let has_nexus_key = state
-        .settings
-        .get_string("nexusApiKey")
-        .is_some_and(|key| !key.trim().is_empty());
-    discovery_needed_for(cfg, has_nexus_key)
-}
-
 fn discovery_needed_for(cfg: &GameMods, has_nexus_key: bool) -> bool {
     cfg.steam_appid.is_none()
         || cfg.workshop_supported.is_none()
@@ -2544,14 +2561,34 @@ fn discovery_needed_for(cfg: &GameMods, has_nexus_key: bool) -> bool {
             && has_nexus_key)
 }
 
-fn load_local_game_state(state: &AppState, appid: &str) -> (Value, bool) {
+struct DiscoverySeed {
+    initial: GameMods,
+    title: Option<String>,
+    nexus_key: Option<String>,
+}
+
+fn load_local_game_state(state: &AppState, appid: &str) -> (Value, Option<DiscoverySeed>) {
     let existed = config_path(&game_mods_dir(&state.paths, appid)).is_file();
     let mut cfg = load_config(&state.paths, appid);
     let mut dirty = false;
     let mut steam_changed = false;
+    let nexus_key = state
+        .settings
+        .get_string("nexusApiKey")
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty());
+    let needs_title = !cfg.thunderstore_checked
+        || (cfg.nexus_domain.is_none()
+            && !cfg.nexus_domain_checked
+            && nexus_key.is_some());
+    let metadata = if cfg.steam_appid.is_none() || needs_title {
+        local_game_metadata(state, appid, needs_title)
+    } else {
+        LocalGameMetadata::default()
+    };
 
     if cfg.steam_appid.is_none() {
-        if let Some(id) = local_steam_appid(state, appid) {
+        if let Some(id) = metadata.steam_appid {
             cfg.steam_appid = Some(id);
             dirty = true;
             steam_changed = true;
@@ -2581,40 +2618,37 @@ fn load_local_game_state(state: &AppState, appid: &str) -> (Value, bool) {
             );
         }
     }
-    let discover = discovery_needed(state, &cfg);
-    (game_state_value(state, appid, &cfg), discover)
+    let discovery = discovery_needed_for(&cfg, nexus_key.is_some()).then(|| DiscoverySeed {
+        initial: cfg.clone(),
+        title: metadata.title,
+        nexus_key,
+    });
+    (game_state_value(state, appid, &cfg), discovery)
 }
 
-fn spawn_game_discovery(app: AppHandle, appid: String) {
+fn spawn_game_discovery(app: AppHandle, appid: String, seed: DiscoverySeed) {
     if !DISCOVERING_GAMES.lock().insert(appid.clone()) {
         return;
     }
     tauri::async_runtime::spawn(async move {
-        discover_game(app, &appid).await;
+        discover_game(app, &appid, seed).await;
         DISCOVERING_GAMES.lock().remove(&appid);
     });
 }
 
-async fn discover_game(app: AppHandle, appid: &str) {
-    let initial = blocking_game(app.clone(), appid.to_string(), |_, state, appid| {
-        let cfg = load_config(&state.paths, appid);
-        let title = game_title(state, appid);
-        let nexus_key = state
-            .settings
-            .get_string("nexusApiKey")
-            .map(|key| key.trim().to_string())
-            .filter(|key| !key.is_empty());
-        (cfg, title, nexus_key)
-    })
-    .await;
-    let Ok((initial, title, nexus_key)) = initial else {
-        return;
-    };
+async fn discover_game(app: AppHandle, appid: &str, seed: DiscoverySeed) {
+    let DiscoverySeed {
+        initial,
+        title,
+        nexus_key,
+    } = seed;
     let title_ref = title.as_deref();
     let steam = async {
         if initial.steam_appid.is_none() {
-            let state = app.state::<AppState>();
-            detect_steam_appid(&state, appid).await
+            match title_ref {
+                Some(title) => crate::sources::steam::search_app_id(title).await,
+                None => None,
+            }
         } else {
             None
         }
@@ -2731,12 +2765,12 @@ async fn discover_game(app: AppHandle, appid: &str) {
 
 #[tauri::command]
 pub async fn mods_game_get(app: AppHandle, appid: String) -> Result<Value, String> {
-    let (value, discover) = blocking_game(app.clone(), appid.clone(), |_, state, appid| {
+    let (value, discovery) = blocking_game(app.clone(), appid.clone(), |_, state, appid| {
         load_local_game_state(state, appid)
     })
     .await?;
-    if discover {
-        spawn_game_discovery(app, appid);
+    if let Some(seed) = discovery {
+        spawn_game_discovery(app, appid, seed);
     }
     Ok(value)
 }

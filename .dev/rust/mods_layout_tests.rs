@@ -1110,3 +1110,24 @@ fn completed_provider_discovery_does_not_repeat_local_snapshots() {
     cfg.nexus_domain_checked = true;
     assert!(!discovery_needed_for(&cfg, true));
 }
+
+#[test]
+fn discovery_identity_uses_at_most_one_manifest_snapshot() {
+    let calls = std::cell::Cell::new(0);
+    let metadata = local_game_metadata_with("custom-game", true, || {
+        calls.set(calls.get() + 1);
+        Some(json!({
+            "appid": "custom-game",
+            "metadata": { "name": "Portal 2", "steamAppId": 620 }
+        }))
+    });
+    assert_eq!(metadata.title.as_deref(), Some("Portal 2"));
+    assert_eq!(metadata.steam_appid, Some(620));
+    assert_eq!(calls.get(), 1);
+
+    let keyed = local_game_metadata_with("steam-620", false, || {
+        panic!("a Steam-keyed game does not need a manifest snapshot")
+    });
+    assert_eq!(keyed.steam_appid, Some(620));
+    assert!(keyed.title.is_none());
+}
