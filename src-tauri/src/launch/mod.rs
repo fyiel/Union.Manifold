@@ -123,15 +123,11 @@ fn install_dir_for(state: &AppState, appid: &str) -> Option<PathBuf> {
     crate::library::game_files_dir(&crate::library::scan_roots(state), appid)
 }
 
-fn executable_on_path(name: &str) -> Option<String> {
-    crate::launch::linux::which(name)
-}
-
 fn mod_engine_executable() -> Option<String> {
     if cfg!(windows) {
-        executable_on_path("me3.exe").or_else(|| executable_on_path("me3"))
+        crate::launch::linux::which("me3.exe").or_else(|| crate::launch::linux::which("me3"))
     } else {
-        executable_on_path("me3")
+        crate::launch::linux::which("me3")
     }
 }
 
