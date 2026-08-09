@@ -124,11 +124,7 @@ fn install_dir_for(state: &AppState, appid: &str) -> Option<PathBuf> {
 }
 
 fn mod_engine_executable() -> Option<String> {
-    if cfg!(windows) {
-        crate::launch::linux::which("me3.exe").or_else(|| crate::launch::linux::which("me3"))
-    } else {
-        crate::launch::linux::which("me3")
-    }
+    crate::launch::linux::which("me3.exe").or_else(|| crate::launch::linux::which("me3"))
 }
 
 fn mod_engine_launch_args(profile: &Path, exe_path: &str) -> Vec<String> {
