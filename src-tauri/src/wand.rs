@@ -882,7 +882,10 @@ async fn game_version(path: &Path) -> Result<u32> {
 
 fn resolve_trainer_host(resource_dir: Option<PathBuf>, source: PathBuf) -> Option<PathBuf> {
     let name = source.file_name()?.to_owned();
-    crate::bins::resolve_resource_file(&resource_dir?, &name.to_string_lossy()).or(Some(source))
+    resource_dir
+        .as_deref()
+        .and_then(|dir| crate::bins::resolve_resource_file(dir, &name.to_string_lossy()))
+        .or(Some(source))
 }
 
 fn trainer_host_path(app: &AppHandle, arch: &str) -> Result<PathBuf> {
