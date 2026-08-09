@@ -87,7 +87,7 @@ fn collapse(s: &str) -> String {
     WS.replace_all(s.trim(), " ").to_string()
 }
 
-fn clean_title(raw: &str) -> (String, Option<String>) {
+pub(crate) fn clean_title(raw: &str) -> (String, Option<String>) {
     let mut t = collapse(&http::decode_entities(raw));
     let mut version = None;
     if let Some(m) = PAREN_TAIL.find(&t) {
@@ -178,7 +178,7 @@ fn parse_from_disk(path: &std::path::Path) -> Option<Arc<Vec<Entry>>> {
     }
 }
 
-async fn attach_steam_art(mut g: SourceGame) -> SourceGame {
+pub(crate) async fn attach_steam_art(mut g: SourceGame) -> SourceGame {
     if let Some(id) = steam::search_app_id(&g.title).await {
         g.steam_app_id = Some(id);
         g.dedup_key = dedup_key_for(Some(id), &g.title);
@@ -218,7 +218,7 @@ async fn options_from_uris(uris: &[String]) -> Vec<DownloadOption> {
     options
 }
 
-async fn zeilink_options(slug: &str) -> Vec<DownloadOption> {
+pub(crate) async fn zeilink_options(slug: &str) -> Vec<DownloadOption> {
     let json: Value = match http::get_json(&format!("{ZEILINK_API}/{slug}")).await {
         Ok(v) => v,
         Err(_) => return Vec::new(),

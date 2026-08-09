@@ -15,21 +15,16 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use regex::Regex;
-use serde_json::Value;
 
 use crate::http;
 use crate::sources::cache::KeyedCache;
-use crate::sources::hosts;
 use crate::sources::parse::find_steam_app_id;
-use crate::sources::schema::{
-    dedup_key_for, parse_size_to_bytes, year_from, DownloadOption, SourceGame,
-};
+use crate::sources::schema::{dedup_key_for, year_from, SourceGame};
 use crate::sources::steam;
 use crate::sources::{Capabilities, QueryParams};
 
 const ID: &str = "zeigames";
 const ORIGIN: &str = "https://zeigames.com";
-const ZEILINK_API: &str = "https://zeilink.net/api/public/container";
 const SEARCH_CONCURRENCY: usize = 5;
 const POOL_TARGET: usize = 300;
 
@@ -73,16 +68,10 @@ static ZEILINK_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"https?://zeilink\.net/c/([A-Za-z0-9]+)").unwrap());
 static BREADCRUMB_FORUM: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"/forum/(\d+)-[a-z0-9-]+/").unwrap());
-static PAREN_TAIL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s*\([^()]*\)\s*$").unwrap());
-static FREE_DL: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)\s*free\s+download\s*").unwrap());
-static VER_IN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)(?:v\.?\s*)?(build\s*\d+|\d[\w.]*)").unwrap());
 static P_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<p[^>]*>(.*?)</p>").unwrap());
 static SKIP_TITLE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)^(how to|rules|read (?:this|before)|announcement|introducing|welcome|request|installer|\[)").unwrap()
 });
-static WS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").unwrap());
 
 static LISTING: LazyLock<KeyedCache<Vec<SourceGame>>> =
     LazyLock::new(|| KeyedCache::new(Duration::from_secs(600)));
@@ -112,30 +101,9 @@ fn enc(s: &str) -> String {
     crate::mods::urlenc(s)
 }
 
-fn collapse(s: &str) -> String {
-    WS.replace_all(s.trim(), " ").to_string()
-}
-
 /// Split "<Name> Free Download (<version/extras>)" into name + version. The
 /// trailing paren after "Free Download" is always version/DLC noise on this
 /// site, so peeling it is safe.
-fn clean_title(raw: &str) -> (String, Option<String>) {
-    let mut t = collapse(&http::decode_entities(raw));
-    let mut version = None;
-    if let Some(m) = PAREN_TAIL.find(&t) {
-        let inner = t[m.start()..].trim().trim_matches(|c| c == '(' || c == ')');
-        if let Some(cap) = VER_IN.captures(inner) {
-            let v = collapse(&cap[1]);
-            if v.chars().any(|c| c.is_ascii_digit()) {
-                version = Some(v);
-            }
-        }
-        t = t[..m.start()].trim().to_string();
-    }
-    t = collapse(&FREE_DL.replace(&t, " "));
-    (t, version)
-}
-
 /// One label's value from the flat og:description "Game Details" block, cut at
 /// the next known label so multi-word values (publishers, dates) stay intact.
 fn meta_field(desc: &str, label: &str) -> Option<String> {
@@ -206,7 +174,7 @@ fn parse_listing(html: &str, genre: &str) -> Vec<SourceGame> {
         if !seen.insert(slug.clone()) {
             continue;
         }
-        let (title, version) = clean_title(&cap[2]);
+        let (title, version) = crate::sources::adapters::hydralinks::clean_title(&cap[2]);
         if title.is_empty() || SKIP_TITLE.is_match(&title) {
             continue;
         }
@@ -255,16 +223,6 @@ async fn fetch_forum_page(forum_id: u32, genre: &str, page: usize) -> Vec<Source
 /// the other sources. `search_app_id` caches to disk with no TTL, so this is
 /// one Steam search per new title and free thereafter. Titles Steam does not
 /// carry (console-only, unreleased) keep the landscape header as a fallback.
-async fn attach_steam_art(mut g: SourceGame) -> SourceGame {
-    if let Some(id) = steam::search_app_id(&g.title).await {
-        g.steam_app_id = Some(id);
-        g.dedup_key = dedup_key_for(Some(id), &g.title);
-        g.image = Some(crate::sources::steam::steam_image(id, "library_600x900.jpg"));
-        g.hero_image = Some(crate::sources::steam::steam_image(id, "library_hero.jpg"));
-    }
-    g
-}
-
 pub async fn query(params: &QueryParams) -> Option<Vec<SourceGame>> {
     if let Some(q) = params
         .text
@@ -313,7 +271,7 @@ pub async fn query(params: &QueryParams) -> Option<Vec<SourceGame>> {
             }
         }
     }
-    Some(http::map_limit(pool, 8, |g| async move { Some(attach_steam_art(g).await) }).await)
+    Some(http::map_limit(pool, 8, |g| async move { Some(super::hydralinks::attach_steam_art(g).await) }).await)
 }
 
 pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
@@ -339,7 +297,7 @@ pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
     let mut slugs: Vec<String> = Vec::new();
     let mut seen = HashSet::new();
     for cap in SEARCH_ROW.captures_iter(&html) {
-        let title = clean_title(&http::strip_tags(&cap[2])).0.to_lowercase();
+        let title = crate::sources::adapters::hydralinks::clean_title(&http::strip_tags(&cap[2])).0.to_lowercase();
         if !terms.iter().all(|t| title.contains(t.as_str())) {
             continue;
         }
@@ -360,55 +318,6 @@ pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
 
 /// Read the ZeiLink container JSON and turn every active mirror into a
 /// download option, resolvable-first so the UI surfaces the easy hosts.
-async fn zeilink_options(slug: &str) -> Vec<DownloadOption> {
-    let json: Value = match http::get_json(&format!("{ZEILINK_API}/{slug}")).await {
-        Ok(v) => v,
-        Err(_) => return Vec::new(),
-    };
-    let mut options = Vec::new();
-    let hosts_arr = json.get("hosts").and_then(|h| h.as_array());
-    for host in hosts_arr.into_iter().flatten() {
-        let host_label = host.get("name").and_then(|v| v.as_str()).unwrap_or("");
-        let links = host.get("links").and_then(|l| l.as_array());
-        for link in links.into_iter().flatten() {
-            if !link
-                .get("isActive")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(true)
-            {
-                continue;
-            }
-            let Some(url) = link
-                .get("url")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-            else {
-                continue;
-            };
-            let host_type = hosts::detect_host_type(url);
-            let size_text = link
-                .get("fileSize")
-                .and_then(|v| v.as_str())
-                .map(str::to_string);
-            options.push(DownloadOption {
-                label: if host_label.is_empty() {
-                    host_type.clone()
-                } else {
-                    host_label.to_string()
-                },
-                host_type,
-                url: Some(url.to_string()),
-                size_bytes: size_text.as_deref().and_then(parse_size_to_bytes),
-                size_text,
-                resolvable: hosts::is_resolvable(url),
-                ..Default::default()
-            });
-        }
-    }
-    options.sort_by_key(|x| std::cmp::Reverse(x.resolvable as u8));
-    options
-}
-
 pub async fn get_detail(slug: &str) -> Option<SourceGame> {
     let clean = slug.trim_matches('/').to_string();
     let key = clean.clone();
@@ -421,7 +330,7 @@ pub async fn get_detail(slug: &str) -> Option<SourceGame> {
                 .captures(&html)
                 .map(|c| c[1].split(" - ").next().unwrap_or(&c[1]).to_string())
                 .unwrap_or_default();
-            let (fallback_title, version) = clean_title(&raw_title);
+            let (fallback_title, version) = crate::sources::adapters::hydralinks::clean_title(&raw_title);
             let desc_block = OG_DESC
                 .captures(&html)
                 .map(|c| http::decode_entities(&c[1]));
@@ -473,7 +382,7 @@ pub async fn get_detail(slug: &str) -> Option<SourceGame> {
             let genres = genre.map(|g| vec![g.to_string()]).unwrap_or_default();
 
             let download_options = match ZEILINK_RE.captures(&html) {
-                Some(c) => zeilink_options(&c[1]).await,
+                Some(c) => super::hydralinks::zeilink_options(&c[1]).await,
                 None => Vec::new(),
             };
             let size_bytes = download_options.iter().filter_map(|o| o.size_bytes).max();
@@ -508,13 +417,13 @@ mod tests {
     use super::*;
     #[test]
     fn clean_title_strips_free_download_and_version() {
-        let (t, v) = clean_title("Broforce Free Download (Build 12964083 + Online)");
+        let (t, v) = crate::sources::adapters::hydralinks::clean_title("Broforce Free Download (Build 12964083 + Online)");
         assert_eq!(t, "Broforce");
         assert_eq!(v.as_deref(), Some("Build 12964083"));
-        let (t, v) = clean_title("Arma Reforger Free Download (v1.7.0.41 + Supporter Pack DLC)");
+        let (t, v) = crate::sources::adapters::hydralinks::clean_title("Arma Reforger Free Download (v1.7.0.41 + Supporter Pack DLC)");
         assert_eq!(t, "Arma Reforger");
         assert_eq!(v.as_deref(), Some("1.7.0.41"));
-        let (t, _) = clean_title("Don&#8217;t Starve Free Download");
+        let (t, _) = crate::sources::adapters::hydralinks::clean_title("Don&#8217;t Starve Free Download");
         assert_eq!(t, "Don\u{2019}t Starve");
     }
 
