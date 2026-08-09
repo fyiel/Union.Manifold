@@ -1,15 +1,15 @@
 use crate::http::{self, FetchOpts};
 use crate::sources::ResolveResult;
 use base64::Engine;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use regex::Regex;
 use super::not_resolvable;
 
-static HOST_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)(^|\.)mediafire\.com$").unwrap());
-static DIRECT_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r#"https://download\d+\.mediafire\.com/[^"'\s<>\\]+"#).unwrap());
-static SCRAMBLED_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r#"data-scrambled-url="([^"]+)""#).unwrap());
+static HOST_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)(^|\.)mediafire\.com$").unwrap());
+static DIRECT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"https://download\d+\.mediafire\.com/[^"'\s<>\\]+"#).unwrap());
+static SCRAMBLED_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"data-scrambled-url="([^"]+)""#).unwrap());
 
 pub fn matches(url: &str) -> bool {
     super::host_matches(url, &HOST_RE)

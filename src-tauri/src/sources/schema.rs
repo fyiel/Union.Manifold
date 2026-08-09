@@ -1,4 +1,4 @@
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use unicode_normalization::UnicodeNormalization;
@@ -105,13 +105,13 @@ static EDITION_NOISE: &[&str] = &[
     "digital",
 ];
 
-static COMBINING: Lazy<regex::Regex> =
-    Lazy::new(|| regex::Regex::new(r"[\u{0300}-\u{036f}]").unwrap());
-static PARENS: Lazy<regex::Regex> = Lazy::new(|| {
+static COMBINING: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"[\u{0300}-\u{036f}]").unwrap());
+static PARENS: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"(?i)\s*\((?:v[\d.]+|build\s+\d+|update\s+\d+)[^)]*\)").unwrap()
 });
-static PUNCT: Lazy<regex::Regex> = Lazy::new(|| regex::Regex::new(r"[^\w\s]").unwrap());
-static WS: Lazy<regex::Regex> = Lazy::new(|| regex::Regex::new(r"\s+").unwrap());
+static PUNCT: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"[^\w\s]").unwrap());
+static WS: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"\s+").unwrap());
 
 pub fn normalize_title(title: &str) -> String {
     let lowered = title.to_lowercase();

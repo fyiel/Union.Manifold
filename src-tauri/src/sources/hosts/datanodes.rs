@@ -1,11 +1,11 @@
 use crate::http::{self, FetchOpts};
 use crate::sources::ResolveResult;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use regex::Regex;
 use std::collections::HashMap;
 use super::not_resolvable;
 
-static HOST_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)(^|\.)datanodes\.to$").unwrap());
+static HOST_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)(^|\.)datanodes\.to$").unwrap());
 
 const BOUNDARY: &str = "----UnionManifoldBoundary7kJ2xQ9vRt3mWp";
 

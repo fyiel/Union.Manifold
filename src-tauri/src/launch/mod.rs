@@ -4,7 +4,7 @@ mod steam_api;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use parking_lot::Mutex;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -20,7 +20,7 @@ struct RunHandle {
     process_handle: Option<std::sync::Arc<std::os::windows::io::OwnedHandle>>,
 }
 
-static RUNNING: Lazy<Mutex<HashMap<String, RunHandle>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static RUNNING: LazyLock<Mutex<HashMap<String, RunHandle>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn close_on_launch_enabled(settings: &crate::settings::SettingsStore) -> bool {
     settings.get("closeOnGameLaunch").as_bool().unwrap_or(false)

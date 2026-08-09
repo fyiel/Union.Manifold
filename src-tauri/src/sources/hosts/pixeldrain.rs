@@ -1,13 +1,13 @@
 use crate::http::{self, FetchOpts};
 use crate::sources::{ResolveResult, ResolvedFile};
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use regex::Regex;
 use serde_json::Value;
 
-static ID_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^[A-Za-z0-9_-]{4,40}$").unwrap());
-static PATH_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"/(u|l|api/file|api/list)/([A-Za-z0-9_-]+)").unwrap());
-static HOST_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)(^|\.)pixeldrain\.com$").unwrap());
+static ID_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Za-z0-9_-]{4,40}$").unwrap());
+static PATH_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"/(u|l|api/file|api/list)/([A-Za-z0-9_-]+)").unwrap());
+static HOST_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)(^|\.)pixeldrain\.com$").unwrap());
 
 pub fn matches(url: &str) -> bool {
     super::host_matches(url, &HOST_RE)

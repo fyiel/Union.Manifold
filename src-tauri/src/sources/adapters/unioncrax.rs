@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use serde_json::{json, Value};
 
 use crate::http::{self, FetchOpts};
@@ -16,11 +16,11 @@ use crate::sources::{Capabilities, QueryParams, ResolveResult, ResolvedFile};
 const ID: &str = "unioncrax";
 const ORIGIN: &str = "https://union-crax.xyz";
 
-static CATALOG: Lazy<Cached<Vec<Value>>> = Lazy::new(|| Cached::new(Duration::from_secs(60 * 30)));
-static DETAIL_CACHE: Lazy<KeyedCache<SourceGame>> =
-    Lazy::new(|| KeyedCache::new(Duration::from_secs(60 * 60 * 6)));
-static STEAM_APPID: Lazy<Mutex<HashMap<String, Option<u64>>>> =
-    Lazy::new(|| Mutex::new(metacache::load("unioncrax-appids.json")));
+static CATALOG: LazyLock<Cached<Vec<Value>>> = LazyLock::new(|| Cached::new(Duration::from_secs(60 * 30)));
+static DETAIL_CACHE: LazyLock<KeyedCache<SourceGame>> =
+    LazyLock::new(|| KeyedCache::new(Duration::from_secs(60 * 60 * 6)));
+static STEAM_APPID: LazyLock<Mutex<HashMap<String, Option<u64>>>> =
+    LazyLock::new(|| Mutex::new(metacache::load("unioncrax-appids.json")));
 
 
 fn opt(s: String) -> Option<String> {

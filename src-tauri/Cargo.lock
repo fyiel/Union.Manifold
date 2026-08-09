@@ -4977,7 +4977,6 @@ dependencies = [
  "fs4",
  "futures",
  "hex",
- "once_cell",
  "parking_lot",
  "percent-encoding",
  "rand 0.8.6",

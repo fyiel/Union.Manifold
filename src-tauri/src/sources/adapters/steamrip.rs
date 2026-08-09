@@ -1,8 +1,7 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::LazyLock;
 use std::time::Duration;
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use regex::Regex;
 use serde_json::Value;
 
@@ -43,43 +42,43 @@ async fn fetch_json(url: &str) -> Result<Value, String> {
     }
 }
 
-static VERSION_RE: Lazy<Regex> = Lazy::new(|| {
+static VERSION_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\(\s*(?:v\.?\s*)?([\w.\-]+(?:\s*build\s*\d+)?)\s*\)\s*$").unwrap()
 });
-static JUNK_PARENS_RE: Lazy<Regex> = Lazy::new(|| {
+static JUNK_PARENS_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\s*\(\s*(?:v\.?\s*)?[^()]*(?:build\s*\d+|v?\d+(?:\.\d+)+|\+\s*(?:online|multiplayer|co-?op)|all\s+dlc|update\s*\d*)[^()]*\)\s*$").unwrap()
 });
-static V_STRIP_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)^v\.?\s*").unwrap());
-static TITLE_SUFFIX_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)\s*free\s+download\s*$").unwrap());
-static P_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?is)<p[^>]*>(.*?)</p>").unwrap());
-static BOILERPLATE_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)^(?:how to|click the|note:)").unwrap());
-static SIZE1_RE: Lazy<Regex> = Lazy::new(|| {
+static V_STRIP_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^v\.?\s*").unwrap());
+static TITLE_SUFFIX_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\s*free\s+download\s*$").unwrap());
+static P_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<p[^>]*>(.*?)</p>").unwrap());
+static BOILERPLATE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)^(?:how to|click the|note:)").unwrap());
+static SIZE1_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(?:game\s*size|size)\s*[:\-]?\s*([\d.]+\s*(?:TB|GB|MB))").unwrap()
 });
-static ANCHOR_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r#"(?is)<a\b([^>]*)href="([^"]+)"([^>]*)>(.*?)</a>"#).unwrap());
-static HTTP_PREFIX_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)^https?://").unwrap());
-static FILE_HOSTS_RE: Lazy<Regex> = Lazy::new(|| {
+static ANCHOR_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?is)<a\b([^>]*)href="([^"]+)"([^>]*)>(.*?)</a>"#).unwrap());
+static HTTP_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^https?://").unwrap());
+static FILE_HOSTS_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?i)(gofile\.io|bzzhr\.to|buzzheavier\.com|megadb\.net|datanodes\.to|1fichier\.com|akirabox\.com|pixeldrain\.com|mega\.nz|mediafire\.com|fileditch|filecrypt\.cc|qiwi\.gg)",
     )
     .unwrap()
 });
-static BUTTON_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?i)shortc-button|btn|download").unwrap());
-static DOWNLOAD_TEXT_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)download").unwrap());
-static EXCLUDE_HOST_RE: Lazy<Regex> = Lazy::new(|| {
+static BUTTON_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)shortc-button|btn|download").unwrap());
+static DOWNLOAD_TEXT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)download").unwrap());
+static EXCLUDE_HOST_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)steamrip\.com$|steampowered|steamstatic|youtu|discord|reddit|t\.me|patreon")
         .unwrap()
 });
-static STEAMRIP_HOST_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)steamrip\.com$").unwrap());
-static SHARD_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"<loc>\s*([^<]*wp-sitemap-posts-post-\d+\.xml)\s*</loc>").unwrap());
-static SITEMAP_SLUG_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"<loc>\s*https?://[^/]+/([^</]+)/?\s*</loc>").unwrap());
-static STATIC_SKIP_RE: Lazy<Regex> = Lazy::new(|| {
+static STEAMRIP_HOST_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)steamrip\.com$").unwrap());
+static SHARD_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"<loc>\s*([^<]*wp-sitemap-posts-post-\d+\.xml)\s*</loc>").unwrap());
+static SITEMAP_SLUG_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"<loc>\s*https?://[^/]+/([^</]+)/?\s*</loc>").unwrap());
+static STATIC_SKIP_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)^(?:about|contact|privacy|terms|dmca|faq|how-to|request)").unwrap()
 });
 
@@ -89,13 +88,13 @@ struct Cats {
     by_name: HashMap<String, u64>,
 }
 
-static CATS: Lazy<Cached<Cats>> = Lazy::new(|| Cached::new(Duration::from_secs(6 * 60 * 60)));
-static SLUGS: Lazy<Cached<Vec<String>>> =
-    Lazy::new(|| Cached::new(Duration::from_secs(6 * 60 * 60)));
-static POSTS: Lazy<KeyedCache<Vec<SourceGame>>> =
-    Lazy::new(|| KeyedCache::new(Duration::from_secs(600)));
-static DETAIL_CACHE: Lazy<KeyedCache<SourceGame>> =
-    Lazy::new(|| KeyedCache::new(Duration::from_secs(60 * 60 * 6)));
+static CATS: LazyLock<Cached<Cats>> = LazyLock::new(|| Cached::new(Duration::from_secs(6 * 60 * 60)));
+static SLUGS: LazyLock<Cached<Vec<String>>> =
+    LazyLock::new(|| Cached::new(Duration::from_secs(6 * 60 * 60)));
+static POSTS: LazyLock<KeyedCache<Vec<SourceGame>>> =
+    LazyLock::new(|| KeyedCache::new(Duration::from_secs(600)));
+static DETAIL_CACHE: LazyLock<KeyedCache<SourceGame>> =
+    LazyLock::new(|| KeyedCache::new(Duration::from_secs(60 * 60 * 6)));
 
 pub fn capabilities() -> Capabilities {
     Capabilities {

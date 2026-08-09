@@ -1,22 +1,22 @@
 use crate::http::{self, FetchOpts};
 use crate::sources::cache::Cached;
 use crate::sources::{ResolveResult, ResolvedFile};
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use regex::Regex;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::time::Duration;
 use super::not_resolvable;
 
-static HOST_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)(^|\.)gofile\.io$").unwrap());
-static ID_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?:/d/|/)([A-Za-z0-9]{4,})").unwrap());
+static HOST_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)(^|\.)gofile\.io$").unwrap());
+static ID_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?:/d/|/)([A-Za-z0-9]{4,})").unwrap());
 
 const BROWSER_LANG: &str = "en-US";
 const WT_SALT: &str = "9844d94d963d30";
 const WT_WINDOW_SECS: u64 = 14400;
 
-static GUEST_TOKEN: Lazy<Cached<String>> =
-    Lazy::new(|| Cached::new(Duration::from_secs(12 * 60 * 60)));
+static GUEST_TOKEN: LazyLock<Cached<String>> =
+    LazyLock::new(|| Cached::new(Duration::from_secs(12 * 60 * 60)));
 
 pub fn matches(url: &str) -> bool {
     super::host_matches(url, &HOST_RE)

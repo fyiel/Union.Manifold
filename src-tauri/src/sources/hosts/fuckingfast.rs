@@ -1,13 +1,13 @@
 use crate::http::{self, FetchOpts};
 use crate::sources::ResolveResult;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use regex::Regex;
 use std::time::Duration;
 use super::not_resolvable;
 
-static HOST_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)(^|\.)fuckingfast\.co$").unwrap());
-static LINK_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r#"window\.open\("(https://fuckingfast\.co/dl/[^"]*)"\)"#).unwrap());
+static HOST_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)(^|\.)fuckingfast\.co$").unwrap());
+static LINK_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"window\.open\("(https://fuckingfast\.co/dl/[^"]*)"\)"#).unwrap());
 
 pub fn matches(url: &str) -> bool {
     super::host_matches(url, &HOST_RE)

@@ -1,15 +1,15 @@
 use crate::http::{self, FetchOpts};
 use crate::sources::ResolveResult;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use regex::Regex;
 use serde_json::Value;
 use std::collections::HashMap;
 use super::not_resolvable;
 
-static HOST_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)(^|\.)rootz\.so$").unwrap());
-static ID_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"/d/([A-Za-z0-9_-]+)").unwrap());
-static TOKEN_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r#""pageToken"\s*:\s*"([^"\\]+)""#).unwrap());
+static HOST_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)(^|\.)rootz\.so$").unwrap());
+static ID_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"/d/([A-Za-z0-9_-]+)").unwrap());
+static TOKEN_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#""pageToken"\s*:\s*"([^"\\]+)""#).unwrap());
 
 pub fn matches(url: &str) -> bool {
     super::host_matches(url, &HOST_RE)

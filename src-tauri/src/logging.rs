@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use parking_lot::Mutex;
 use regex::Regex;
 use serde_json::Value;
 
-static LOG_PATH: Lazy<Mutex<Option<PathBuf>>> = Lazy::new(|| Mutex::new(None));
-static REDACT: Lazy<Vec<(Regex, &'static str)>> = Lazy::new(|| {
+static LOG_PATH: LazyLock<Mutex<Option<PathBuf>>> = LazyLock::new(|| Mutex::new(None));
+static REDACT: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
     vec![
         (
             Regex::new(

@@ -1,7 +1,7 @@
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use regex::Regex;
 
-static APPID_RES: Lazy<Vec<Regex>> = Lazy::new(|| {
+static APPID_RES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     [
         r"store\.steampowered\.com/app/(\d+)",
         r"steamdb\.info/app/(\d+)",
