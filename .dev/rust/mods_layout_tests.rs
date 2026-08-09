@@ -1015,17 +1015,19 @@ fn redeploy_over_existing_file_claims_backup_in_journal() {
     let game_dir = tmp.path().join("game");
     let target = game_dir.join("Data");
     let staging = game_dir.join("staging");
-    write_file(&staging.join("mod1/file.txt"), "mod");
+    write_file(&staging.join("mod1/file.txt"), "mod-value");
 
     let one = mk_cfg(vec![mk_entry("mod1")]);
     assert_eq!(deploy_to(&game_dir, &target, &one).unwrap(), 1);
     assert!(load_journal(&game_dir).files["file.txt"].backup.is_none());
+    // Warm the verified-comparison cache before simulating a user edit.
+    assert_eq!(deploy_to(&game_dir, &target, &one).unwrap(), 1);
 
     write_file(&target.join("file.txt"), "user-file");
     assert_eq!(deploy_to(&game_dir, &target, &one).unwrap(), 1);
     assert_eq!(
         std::fs::read_to_string(target.join("file.txt")).unwrap(),
-        "mod"
+        "mod-value"
     );
     assert_eq!(
         load_journal(&game_dir).files["file.txt"].backup.as_deref(),
@@ -1080,6 +1082,27 @@ fn unchanged_redeploy_does_not_rewrite_target_or_journal() {
 }
 
 #[test]
+fn verified_comparison_detects_same_size_staging_changes() {
+    let tmp = tempdir().unwrap();
+    let game_dir = tmp.path().join("game");
+    let target = game_dir.join("Data");
+    let staged = game_dir.join("staging/mod1/file.txt");
+    write_file(&staged, "old");
+
+    let cfg = mk_cfg(vec![mk_entry("mod1")]);
+    assert_eq!(deploy_to(&game_dir, &target, &cfg).unwrap(), 1);
+    assert_eq!(deploy_to(&game_dir, &target, &cfg).unwrap(), 1);
+
+    std::thread::sleep(std::time::Duration::from_millis(25));
+    write_file(&staged, "new");
+    assert_eq!(deploy_to(&game_dir, &target, &cfg).unwrap(), 1);
+    assert_eq!(
+        std::fs::read_to_string(target.join("file.txt")).unwrap(),
+        "new"
+    );
+}
+
+#[test]
 fn download_progress_is_rate_limited_but_completion_is_immediate() {
     assert!(!should_emit_download_progress(
         Some(20),
@@ -1130,4 +1153,47 @@ fn discovery_identity_uses_at_most_one_manifest_snapshot() {
     });
     assert_eq!(keyed.steam_appid, Some(620));
     assert!(keyed.title.is_none());
+}
+
+#[test]
+#[ignore = "manual representative deployment benchmark"]
+fn benchmark_large_tree_noop_redeploy() {
+    const FILES: usize = 512;
+    const FILE_BYTES: usize = 128 * 1024;
+
+    let tmp = tempdir().unwrap();
+    let game_dir = tmp.path().join("mods");
+    let target = tmp.path().join("game");
+    let staged = game_dir.join("staging/large-mod");
+    let mut payload = vec![0x5a; FILE_BYTES];
+    for index in 0..FILES {
+        payload[0] = index as u8;
+        let path = staged.join(format!("chunk-{}/file-{index}.bin", index % 16));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &payload).unwrap();
+    }
+    let cfg = mk_cfg(vec![mk_entry("large-mod")]);
+    assert_eq!(deploy_to(&game_dir, &target, &cfg).unwrap(), FILES);
+
+    reset_comparison_metrics();
+    let first = std::time::Instant::now();
+    assert_eq!(deploy_to(&game_dir, &target, &cfg).unwrap(), FILES);
+    let first = first.elapsed();
+    let first_bytes = comparison_bytes_read();
+    COMPARISON_BYTES_READ.store(0, std::sync::atomic::Ordering::Relaxed);
+    let second = std::time::Instant::now();
+    assert_eq!(deploy_to(&game_dir, &target, &cfg).unwrap(), FILES);
+    let second = second.elapsed();
+    let second_bytes = comparison_bytes_read();
+
+    eprintln!(
+        "large-tree no-op: files={FILES} bytes={} first_ms={} first_read={} second_ms={} second_read={}",
+        FILES * FILE_BYTES,
+        first.as_millis(),
+        first_bytes,
+        second.as_millis(),
+        second_bytes
+    );
+    assert_eq!(first_bytes, 2 * (FILES * FILE_BYTES) as u64);
+    assert_eq!(second_bytes, 0);
 }

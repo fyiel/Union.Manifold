@@ -267,18 +267,125 @@ fn claimed_backup_missing(entry: &JournalEntry, backup_root: &Path) -> bool {
 }
 
 /// Byte comparison used to tell a previous deploy's own content from a
-/// user- or game-written file at the same path.
+/// user- or game-written file at the same path. A bounded process-local
+/// cache skips bytes only after an equal comparison and exact metadata match.
+#[derive(Clone, PartialEq, Eq)]
+struct FileStamp {
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+    #[cfg(unix)]
+    device: u64,
+    #[cfg(unix)]
+    inode: u64,
+    #[cfg(unix)]
+    changed_secs: i64,
+    #[cfg(unix)]
+    changed_nanos: i64,
+    #[cfg(windows)]
+    created: u64,
+    #[cfg(windows)]
+    last_write: u64,
+    #[cfg(windows)]
+    attributes: u32,
+}
+
+impl FileStamp {
+    fn from_metadata(metadata: &std::fs::Metadata) -> Self {
+        #[cfg(unix)]
+        use std::os::unix::fs::MetadataExt;
+        #[cfg(windows)]
+        use std::os::windows::fs::MetadataExt;
+
+        Self {
+            len: metadata.len(),
+            modified: metadata.modified().ok(),
+            #[cfg(unix)]
+            device: metadata.dev(),
+            #[cfg(unix)]
+            inode: metadata.ino(),
+            #[cfg(unix)]
+            changed_secs: metadata.ctime(),
+            #[cfg(unix)]
+            changed_nanos: metadata.ctime_nsec(),
+            #[cfg(windows)]
+            created: metadata.creation_time(),
+            #[cfg(windows)]
+            last_write: metadata.last_write_time(),
+            #[cfg(windows)]
+            attributes: metadata.file_attributes(),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct VerifiedComparison {
+    target: PathBuf,
+    source: FileStamp,
+    deployed: FileStamp,
+}
+
+const VERIFIED_COMPARISONS_MAX: usize = 8192;
+static VERIFIED_COMPARISONS: LazyLock<parking_lot::Mutex<HashMap<PathBuf, VerifiedComparison>>> =
+    LazyLock::new(|| parking_lot::Mutex::new(HashMap::new()));
+
+fn read_comparison_file(path: &Path) -> std::io::Result<Vec<u8>> {
+    let bytes = std::fs::read(path)?;
+    #[cfg(test)]
+    COMPARISON_BYTES_READ.fetch_add(bytes.len() as u64, std::sync::atomic::Ordering::Relaxed);
+    Ok(bytes)
+}
+
 fn same_file(a: &Path, b: &Path) -> bool {
     let (Ok(am), Ok(bm)) = (std::fs::metadata(a), std::fs::metadata(b)) else {
+        VERIFIED_COMPARISONS.lock().remove(b);
         return false;
     };
     if am.len() != bm.len() {
+        VERIFIED_COMPARISONS.lock().remove(b);
         return false;
     }
-    match (std::fs::read(a), std::fs::read(b)) {
+    let deployed = FileStamp::from_metadata(&am);
+    let source = FileStamp::from_metadata(&bm);
+    if VERIFIED_COMPARISONS.lock().get(b).is_some_and(|verified| {
+        verified.target == a && verified.source == source && verified.deployed == deployed
+    }) {
+        return true;
+    }
+    let same = match (read_comparison_file(a), read_comparison_file(b)) {
         (Ok(ac), Ok(bc)) => ac == bc,
         _ => false,
+    };
+    let mut verified = VERIFIED_COMPARISONS.lock();
+    if same {
+        if verified.contains_key(b) || verified.len() < VERIFIED_COMPARISONS_MAX {
+            verified.insert(
+                b.to_path_buf(),
+                VerifiedComparison {
+                    target: a.to_path_buf(),
+                    source,
+                    deployed,
+                },
+            );
+        }
+    } else {
+        verified.remove(b);
     }
+    same
+}
+
+#[cfg(test)]
+static COMPARISON_BYTES_READ: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+#[cfg(test)]
+fn reset_comparison_metrics() {
+    VERIFIED_COMPARISONS.lock().clear();
+    COMPARISON_BYTES_READ.store(0, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[cfg(test)]
+fn comparison_bytes_read() -> u64 {
+    COMPARISON_BYTES_READ.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 fn remove_empty_parents(path: &Path, stop: &Path) {
