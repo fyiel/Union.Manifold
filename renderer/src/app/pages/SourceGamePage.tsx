@@ -547,25 +547,38 @@ function LiveButton({ status, onClick }: { status: string; onClick: () => void }
   )
 }
 
-function PrimaryButton({ state, resolvable, sourceLabel, sizeText, label, onClick }: { state: OptState; resolvable: boolean; sourceLabel: string; sizeText?: string; label?: string; onClick: () => void }) {
+function optAppearance(state: OptState, resolvable: boolean, errorBorderAlpha = "0.45") {
   const queued = state === "queued"
   const error = state === "error"
-  const opened = state === "opened"
   const working = state === "working"
+  const opened = state === "opened"
+  const border = queued
+    ? "rgba(127,207,155,0.4)"
+    : error
+      ? `rgba(221,138,138,${errorBorderAlpha})`
+      : resolvable
+        ? "color-mix(in srgb, var(--mf-t0) 16%, transparent)"
+        : "var(--mf-line-2)"
+  const color = queued ? "#7fcf9b" : error ? "#dd8a8a" : resolvable ? "var(--mf-t1)" : "var(--mf-t3)"
+  return { queued, error, working, opened, border, color, disabled: working || queued }
+}
+
+function PrimaryButton({ state, resolvable, sourceLabel, sizeText, label, onClick }: { state: OptState; resolvable: boolean; sourceLabel: string; sizeText?: string; label?: string; onClick: () => void }) {
+  const { queued, error, opened, working, border, disabled } = optAppearance(state, resolvable)
   const filled = !queued && !error
   const actionLabel = queued ? "Queued" : opened ? "Opened in browser" : error ? "Failed" : label || (resolvable ? "Download" : "Open download page")
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={working || queued}
+      disabled={disabled}
       className="mf-ghost"
       style={{
         display: "flex", alignItems: "center", gap: 9, padding: "12px 22px", borderRadius: 9,
-        border: queued ? "1px solid rgba(127,207,155,0.4)" : error ? "1px solid rgba(221,138,138,0.45)" : "none",
+        border: queued || error ? `1px solid ${border}` : "none",
         background: filled ? "var(--mf-accent)" : "transparent",
         color: filled ? "var(--mf-accent-ink)" : queued ? "#7fcf9b" : "#dd8a8a",
-        fontSize: 14, fontWeight: 600, cursor: working || queued ? "default" : "pointer",
+        fontSize: 14, fontWeight: 600, cursor: disabled ? "default" : "pointer",
       }}
     >
       {working ? <Spinner size={15} stroke="var(--mf-accent-ink)" />
@@ -581,15 +594,10 @@ function PrimaryButton({ state, resolvable, sourceLabel, sizeText, label, onClic
 }
 
 function OptionButton({ state, resolvable, onClick }: { state: OptState; resolvable: boolean; onClick: () => void }) {
-  const queued = state === "queued"
-  const working = state === "working"
-  const opened = state === "opened"
-  const error = state === "error"
-  const label = queued ? "queued" : working ? "…" : opened ? "opened" : error ? "failed" : resolvable ? "download" : "open"
-  const color = queued ? "#7fcf9b" : error ? "#dd8a8a" : resolvable ? "var(--mf-t1)" : "var(--mf-t3)"
-  const border = queued ? "rgba(127,207,155,0.4)" : error ? "rgba(221,138,138,0.4)" : resolvable ? "color-mix(in srgb, var(--mf-t0) 16%, transparent)" : "var(--mf-line-2)"
+  const { queued, working, opened, border, color, disabled } = optAppearance(state, resolvable, "0.4")
+  const label = queued ? "queued" : working ? "…" : opened ? "opened" : state === "error" ? "failed" : resolvable ? "download" : "open"
   return (
-    <button type="button" onClick={onClick} disabled={working || queued} className="mf-ghost" style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 15px", borderRadius: 8, border: `1px solid ${border}`, background: "transparent", color, fontFamily: MONO, fontSize: 11, fontWeight: 500, cursor: working || queued ? "default" : "pointer", whiteSpace: "nowrap" }}>
+    <button type="button" onClick={onClick} disabled={disabled} className="mf-ghost" style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 15px", borderRadius: 8, border: `1px solid ${border}`, background: "transparent", color, fontFamily: MONO, fontSize: 11, fontWeight: 500, cursor: disabled ? "default" : "pointer", whiteSpace: "nowrap" }}>
       {queued ? <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><polyline points="3 8.5 6.5 12 13 4" /></svg>
         : resolvable ? <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="2.5" x2="8" y2="10" /><polyline points="4.5 7 8 10.5 11.5 7" /><line x1="3" y1="13.5" x2="13" y2="13.5" /></svg>
         : <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round"><path d="M6 3.5H4a1.5 1.5 0 0 0-1.5 1.5v6A1.5 1.5 0 0 0 4 12.5h6a1.5 1.5 0 0 0 1.5-1.5V9" /><polyline points="9 2.5 13 2.5 13 6.5" /><line x1="7" y1="9" x2="13" y2="2.5" /></svg>}
