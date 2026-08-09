@@ -194,6 +194,19 @@ function normalizePersistedDownloads(parsed: unknown, sourceLabel: string): Down
         }
       }
 
+      // Statuses from pre-sweep builds (e.g. "verifying"/"retrying") are no
+      // longer part of the union; park them as paused so the row stays
+      // visible and resumable instead of vanishing from every UI section.
+      const status = String(safeItem.status || "")
+      const known = ["queued", "paused", "extracting", "installing", "install_ready", "completed", "extracted", "extract_failed", "cancelled"]
+      if (!known.includes(status)) {
+        return {
+          ...(safeItem as DownloadItem),
+          status: "paused" as DownloadStatus,
+          error: "App restarted",
+        }
+      }
+
       return {
         ...(safeItem as DownloadItem),
       }
