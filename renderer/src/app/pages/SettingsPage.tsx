@@ -477,7 +477,7 @@ function SourcesTab() {
     const next = !enabled[id]
     setEnabled((e) => ({ ...e, [id]: next }))
     await setSourceEnabled(id, next)
-    const disabled = sources.filter((s) => (s.id === id ? !next : !{ ...enabled, [id]: next }[s.id])).map((s) => s.id)
+    const disabled = sources.filter((s) => (s.id === id ? !next : !enabled[s.id])).map((s) => s.id)
     await saveDisabledSources(disabled)
   }
 
