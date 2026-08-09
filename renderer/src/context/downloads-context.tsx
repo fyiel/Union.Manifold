@@ -302,68 +302,6 @@ function createSyntheticDownloadFromUpdate(update: DownloadUpdate): DownloadItem
   }
 }
 
-function createSyntheticDownloadFromInstallingManifest(
-  manifest: any,
-  activeStatus?: { extracting: boolean; downloading: boolean }
-): DownloadItem | null {
-  const appid = typeof manifest?.appid === "string" && manifest.appid ? manifest.appid : null
-  if (!appid) return null
-
-  const rawStatus = typeof manifest?.installStatus === "string" ? manifest.installStatus : "installing"
-  const status: DownloadStatus = activeStatus?.downloading
-    ? "downloading"
-    : activeStatus?.extracting
-      ? "extracting"
-      : rawStatus === "paused"
-        ? "paused"
-      : rawStatus === "downloaded"
-        ? "install_ready"
-      : rawStatus === "failed"
-        ? "failed"
-        : rawStatus === "cancelled"
-          ? "cancelled"
-        : rawStatus === "queued"
-          ? "queued"
-          : "failed"
-  const metadata = manifest?.metadata || {}
-
-  const snapshot = manifest?.downloadSnapshot && typeof manifest.downloadSnapshot === "object"
-    ? manifest.downloadSnapshot
-    : null
-
-  const safeUrl = typeof snapshot?.url === "string" ? snapshot.url : ""
-  const safeSavePath = typeof snapshot?.savePath === "string" ? snapshot.savePath : undefined
-  const safeFilename = typeof snapshot?.filename === "string" && snapshot.filename
-    ? snapshot.filename
-    : `${safeGameFilename(metadata.name || manifest?.name || appid)}.archive`
-  const safeDownloadId = typeof snapshot?.downloadId === "string" && snapshot.downloadId
-    ? snapshot.downloadId
-    : `installing:${appid}`
-  const safeTotalBytes = Number.isFinite(Number(snapshot?.totalBytes)) ? Number(snapshot.totalBytes) : 0
-  const safeReceivedBytes = Number.isFinite(Number(snapshot?.receivedBytes)) ? Number(snapshot.receivedBytes) : 0
-  const safeHost = typeof snapshot?.host === "string" && snapshot.host ? snapshot.host : "local"
-
-  return {
-    id: safeDownloadId,
-    appid,
-    gameName: metadata.name || manifest?.name || appid,
-    host: safeHost,
-    url: safeUrl,
-    originalUrl: safeUrl || undefined,
-    filename: safeFilename,
-    status,
-    receivedBytes: safeReceivedBytes,
-    totalBytes: safeTotalBytes,
-    speedBps: 0,
-    etaSeconds: null,
-    extractProgress: null,
-    savePath: safeSavePath,
-    startedAt: manifest?.updatedAt || Date.now(),
-    error: manifest?.installError || (status === "failed" ? "Installation was interrupted. Start it again." : null),
-  }
-}
-
-
 function resolveArchiveFolderPath(archivePaths: string[]): string | null {
   const firstPath = Array.isArray(archivePaths) ? archivePaths.find((value) => typeof value === "string" && value.length > 0) : null
   if (!firstPath) return null
@@ -644,103 +582,54 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     if (!persistenceReady) return
     if (!window.ucDownloads) return
     let cancelled = false
+    let started = false
+    let idleHandle: number | null = null
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null
 
-    void (async () => {
-      try {
-        const uc = window.ucDownloads
-        if (!uc) return
-        const listInstalling = uc.listInstalling
-        const getInstalled = uc.getInstalled
-        if (!listInstalling) return
+    const isDownloadsRoute = () => window.location.hash.replace(/^#/, "").split("?")[0] === "/downloads"
+    const clearScheduled = () => {
+      if (idleHandle !== null && typeof cancelIdleCallback === "function") cancelIdleCallback(idleHandle)
+      if (timeoutHandle !== null) clearTimeout(timeoutHandle)
+      idleHandle = null
+      timeoutHandle = null
+    }
+    const run = () => {
+      if (started || cancelled) return
+      started = true
+      clearScheduled()
+      window.removeEventListener("hashchange", onHashChange)
+      void (async () => {
+        try {
+          const recovery = await import("@/context/downloads-recovery")
+          const hydrated = await recovery.loadInstallingDownloads()
+          if (cancelled) return
+          const current = downloadsRef.current
+          const next = recovery.mergeInstallingDownloads(current, hydrated)
+          if (next === current) return
+          downloadsRef.current = next
+          setDownloads(next)
+        } catch {}
+      })()
+    }
+    const onHashChange = () => {
+      if (isDownloadsRoute()) run()
+    }
 
-        const manifests = await listInstalling()
-        if (cancelled || !Array.isArray(manifests) || manifests.length === 0) return
-
-        const hydrated = await Promise.all(
-          manifests
-            .filter((manifest) => manifest?.appid)
-            .map(async (manifest) => {
-              const appid = String(manifest.appid)
-              const [installed, activeStatus] = await Promise.all([
-                getInstalled?.(appid).catch(() => null) || Promise.resolve(null),
-                window.ucDownloads?.getActiveStatus?.(appid).catch(() => ({ extracting: false, downloading: false })) || Promise.resolve({ extracting: false, downloading: false }),
-              ])
-
-              if (installed) return null
-
-              const rawStatus = typeof manifest.installStatus === "string" ? manifest.installStatus : null
-              if (!activeStatus.extracting && !activeStatus.downloading && rawStatus) {
-                if (["downloading", "verifying", "retrying", "paused"].includes(rawStatus)) {
-                  try {
-                    await window.ucDownloads?.setInstallingStatus?.(appid, "paused", manifest.installError || "App closed. Resume to continue downloading.")
-                    manifest = { ...manifest, installStatus: "paused", installError: manifest.installError || "App closed. Resume to continue downloading." }
-                  } catch {}
-                } else if (["installing", "extracting"].includes(rawStatus)) {
-                  try {
-                    await window.ucDownloads?.setInstallingStatus?.(appid, "failed", "Installation was interrupted when the app closed.")
-                    manifest = { ...manifest, installStatus: "failed", installError: "Installation was interrupted when the app closed." }
-                  } catch {}
-                }
-              }
-
-              return createSyntheticDownloadFromInstallingManifest(manifest, activeStatus)
-            })
-        )
-
-        if (cancelled) return
-
-        const prev = downloadsRef.current
-        const byAppid = new Map<string, DownloadItem>()
-        for (const item of prev) {
-          if (item.appid) byAppid.set(item.appid, item)
-        }
-        const next = [...prev]
-        for (const item of hydrated) {
-          if (!item || !item.appid) continue
-          const existing = byAppid.get(item.appid)
-          if (!existing) {
-            next.unshift(item)
-            byAppid.set(item.appid, item)
-            continue
-          }
-          const shouldPromoteUrl = Boolean(item.url) && !existing.url
-          const shouldPromoteSavePath = Boolean(item.savePath) && !existing.savePath
-          const shouldPromoteHost = item.host && item.host !== "local" && existing.host === "local"
-          const shouldPromoteId = item.id && !item.id.startsWith("installing:") && existing.id.startsWith("installing:")
-          const shouldPromoteTotal = Number(item.totalBytes) > 0 && !(Number(existing.totalBytes) > 0)
-          const shouldPromoteReceived = Number(item.receivedBytes) > Number(existing.receivedBytes || 0)
-          if (
-            !shouldPromoteUrl &&
-            !shouldPromoteSavePath &&
-            !shouldPromoteHost &&
-            !shouldPromoteId &&
-            !shouldPromoteTotal &&
-            !shouldPromoteReceived
-          ) {
-            continue
-          }
-          const merged: DownloadItem = {
-            ...existing,
-            ...(shouldPromoteUrl ? { url: item.url, originalUrl: item.originalUrl || item.url } : {}),
-            ...(shouldPromoteSavePath ? { savePath: item.savePath } : {}),
-            ...(shouldPromoteHost ? { host: item.host } : {}),
-            ...(shouldPromoteId ? { id: item.id } : {}),
-            ...(shouldPromoteTotal ? { totalBytes: item.totalBytes } : {}),
-            ...(shouldPromoteReceived ? { receivedBytes: item.receivedBytes } : {}),
-            filename: existing.filename || item.filename,
-          }
-          const idx = next.findIndex((entry) => entry.appid === item.appid)
-          if (idx >= 0) next[idx] = merged
-          byAppid.set(item.appid, merged)
-        }
-        downloadsRef.current = next
-        setDownloads(next)
-      } catch {
+    if (downloadsRef.current.length > 0 || isDownloadsRoute()) {
+      run()
+    } else {
+      window.addEventListener("hashchange", onHashChange)
+      if (typeof requestIdleCallback === "function") {
+        idleHandle = requestIdleCallback(run, { timeout: 1000 })
+      } else {
+        timeoutHandle = setTimeout(run, 0)
       }
-    })()
+    }
 
     return () => {
       cancelled = true
+      clearScheduled()
+      window.removeEventListener("hashchange", onHashChange)
     }
   }, [persistenceReady])
 
