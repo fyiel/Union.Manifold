@@ -429,7 +429,6 @@ export function SourceGamePage() {
                 <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 12 }}>
                   {ordered.map((src) => {
                     const opts = sortDownloadOptions(src.downloadOptions || [])
-    )
                     if (!opts.length) return null
                     const direct = sourceDirect(src.sourceId)
                     const upd = relTime(src.updatedAt)
