@@ -5,6 +5,10 @@ import { GameCard } from "@/app/manifold/GameCard"
 import { SourceGamePage, SourceGameRoute } from "@/app/pages/SourceGamePage"
 import { forgetRememberedGame } from "@/lib/sources"
 
+const preloadSourceGamePage = vi.hoisted(() => vi.fn())
+
+vi.mock("@/app/route-loaders", () => ({ preloadSourceGamePage }))
+
 vi.mock("@/context/downloads-context", () => ({
   useDownloadsSelector: <T,>(selector: (downloads: []) => T) => selector([]),
 }))
@@ -75,9 +79,10 @@ describe("Browse detail navigation", () => {
     )
 
     const link = screen.getByRole("link", { name: "Open Instant Game" })
-    fireEvent.mouseEnter(link)
+    fireEvent.pointerEnter(link)
     fireEvent.focus(link)
     expect(detail).not.toHaveBeenCalled()
+    expect(preloadSourceGamePage).toHaveBeenCalledTimes(2)
 
     fireEvent.click(link)
     expect(screen.getByRole("heading", { name: "Instant Game" })).toBeTruthy()

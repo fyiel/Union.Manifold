@@ -12,6 +12,7 @@ import { rememberGames, rememberGameAs, getRememberedGame, resolveInstalledGame,
 import { MONO, COVER_LINES, gbLabel, SearchIcon, CenterState, SmartImage, gameImageCandidates } from "@/app/manifold/ui"
 import { GameMenu, LaunchOptionsDialog, EditDetailsDialog, LinuxConfigDialog, AddGamesDialog, SteamIdDialog, type MenuGame } from "@/app/manifold/library-overlays"
 import { WandTrainerModal } from "@/components/WandTrainerModal"
+import { preloadGameModsPage, preloadSourceGamePage } from "@/app/route-loaders"
 
 const IS_LINUX = typeof navigator !== "undefined" && /linux/i.test(navigator.userAgent)
 const IS_WINDOWS = typeof navigator !== "undefined" && /windows/i.test(navigator.userAgent)
@@ -423,6 +424,7 @@ export function LibraryPage() {
   const play = useCallback((g: LibGame) => void requestLaunch({ appid: g.appid, name: g.name }), [requestLaunch])
   const onStop = useCallback((appid: string) => void stopGame(appid), [stopGame])
   const openDetail = useCallback((g: LibGame) => {
+    preloadSourceGamePage()
     const cached = getRememberedGame(g.appid)
     const game = cached?.fullyResolved
       ? cached
@@ -431,8 +433,14 @@ export function LibraryPage() {
     navigate(`/g/${encodeURIComponent(g.appid)}`, { state: { game, installed: true } })
   }, [navigate])
 
-  const openMenu = useCallback((g: LibGame, anchorEl: HTMLElement) => setMenu({ game: toMenuGame(g), anchor: anchorEl.getBoundingClientRect() }), [])
-  const openRowMenuAt = useCallback((g: LibGame, x: number, y: number) => setMenu({ game: toMenuGame(g), anchor: rectFromPoint(x, y) }), [])
+  const openMenu = useCallback((g: LibGame, anchorEl: HTMLElement) => {
+    preloadGameModsPage()
+    setMenu({ game: toMenuGame(g), anchor: anchorEl.getBoundingClientRect() })
+  }, [])
+  const openRowMenuAt = useCallback((g: LibGame, x: number, y: number) => {
+    preloadGameModsPage()
+    setMenu({ game: toMenuGame(g), anchor: rectFromPoint(x, y) })
+  }, [])
 
   const isFavorite = (appid: string) => (meta[appid]?.collections || []).some((c) => c.toLowerCase() === "favorites")
 

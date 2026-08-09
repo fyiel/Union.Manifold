@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties, type ReactNode } from "react"
 import { NavLink } from "react-router-dom"
 import { BRAND } from "@/lib/brand"
 import { listSources, loadDisabledSources, saveDisabledSources, setSourceEnabled, onSourcesChanged } from "@/lib/sources"
+import { preloadPrimaryPage } from "@/app/route-loaders"
 
 const NAV_KEY = "uc_nav_collapsed"
 
@@ -204,6 +205,8 @@ export function Sidebar() {
             key={item.to}
             to={item.to}
             end={item.end}
+            onPointerEnter={() => preloadPrimaryPage(item.to)}
+            onFocus={() => preloadPrimaryPage(item.to)}
             className={({ isActive }) => "mf-navitem" + (isActive ? " mf-navitem-active" : "")}
             style={({ isActive }) => ({
               ...navBase,
@@ -246,6 +249,8 @@ export function Sidebar() {
       <div style={{ marginTop: "auto", padding: 12 }}>
         <NavLink
           to="/settings"
+          onPointerEnter={() => preloadPrimaryPage("/settings")}
+          onFocus={() => preloadPrimaryPage("/settings")}
           className={({ isActive }) => "mf-navitem" + (isActive ? " mf-navitem-active" : "")}
           style={({ isActive }) => ({
             ...navBase,

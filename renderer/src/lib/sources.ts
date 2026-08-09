@@ -293,12 +293,21 @@ export async function loadSourcePriority(): Promise<string[]> {
   return [...SOURCE_PRIORITY]
 }
 
+let _disabledSourcesRequest: Promise<string[]> | null = null
 
-export async function loadDisabledSources(): Promise<string[]> {
-  try {
-    return migrateSourceIds(await window.ucSettings?.get?.(SOURCE_DISABLED_KEY))
-  } catch {  }
-  return []
+export function loadDisabledSources(): Promise<string[]> {
+  if (_disabledSourcesRequest) return _disabledSourcesRequest
+  const request = (async () => {
+    try {
+      return migrateSourceIds(await window.ucSettings?.get?.(SOURCE_DISABLED_KEY))
+    } catch {  }
+    return []
+  })()
+  _disabledSourcesRequest = request
+  void request.finally(() => {
+    if (_disabledSourcesRequest === request) _disabledSourcesRequest = null
+  })
+  return request
 }
 
 export async function saveDisabledSources(ids: string[]): Promise<void> {
@@ -326,7 +335,8 @@ export function onSourcesChanged(cb: () => void): () => void {
 export async function applySavedSourceSettings(): Promise<void> {
   try {
     const [disabled, all] = await Promise.all([loadDisabledSources(), listSources()])
-    await Promise.all(all.map((s) => setSourceEnabled(s.id, !disabled.includes(s.id))))
+    const changes = all.filter((source) => source.enabled === disabled.includes(source.id))
+    await Promise.all(changes.map((source) => setSourceEnabled(source.id, !source.enabled)))
   } catch {  }
 }
 

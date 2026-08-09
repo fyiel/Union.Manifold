@@ -9,6 +9,7 @@ import {
   pickPrimaryDownload,
   rememberGames,
   resolveInstalledGame,
+  applySavedSourceSettings,
   loadDisabledSources,
   loadSourcePriority,
   nextSourceRequestId,
@@ -141,6 +142,32 @@ describe("source settings migration", () => {
 
     expect((await loadSourcePriority()).slice(0, 3)).toEqual(["steamrip", "zeigames", "unioncrax"])
     expect(await loadDisabledSources()).toEqual(["zeigames"])
+  })
+
+  it("shares concurrent setting reads and skips already-applied source writes", async () => {
+    let release: (value: string[]) => void = () => {}
+    const get = vi.fn(() => new Promise<string[]>((resolve) => { release = resolve }))
+    const setEnabled = vi.fn(async () => ({ ok: true }))
+    window.ucSettings = { get } as any
+    window.ucSources = {
+      list: vi.fn(async () => ({
+        ok: true,
+        sources: [
+          { id: "steamrip", enabled: true },
+          { id: "zeigames", enabled: false },
+        ],
+      })),
+      setEnabled,
+    } as any
+
+    const first = loadDisabledSources()
+    const second = loadDisabledSources()
+    expect(first).toBe(second)
+    expect(get).toHaveBeenCalledTimes(1)
+    release(["zeigames"])
+    await Promise.all([first, second, applySavedSourceSettings()])
+
+    expect(setEnabled).not.toHaveBeenCalled()
   })
 })
 

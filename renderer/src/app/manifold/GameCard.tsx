@@ -3,6 +3,7 @@ import { Link } from "react-router-dom"
 import { ArrowDownToLine, Maximize2 } from "lucide-react"
 import { sourceAbbr, sourceName, sourceIsDirect } from "@/lib/sources"
 import { MONO, COVER_LINES, gbLabel, SmartImage, useGameImages } from "@/app/manifold/ui"
+import { preloadSourceGamePage } from "@/app/route-loaders"
 
 export const GameCard = memo(function GameCard({
   game,
@@ -31,6 +32,9 @@ export const GameCard = memo(function GameCard({
           to={detailUrl}
           state={detailState}
           aria-label={`Open ${game.title}`}
+          onPointerEnter={preloadSourceGamePage}
+          onFocus={preloadSourceGamePage}
+          onPointerDown={preloadSourceGamePage}
           style={{ position: "absolute", inset: 0, display: "flex", alignItems: "flex-end", padding: 12, color: "inherit", textDecoration: "none", cursor: "pointer" }}
         >
           {hasImg && (
@@ -57,7 +61,7 @@ export const GameCard = memo(function GameCard({
           </button>
         )}
       </div>
-      <Link to={detailUrl} state={detailState} style={{ padding: "11px 12px 12px", display: "flex", flexDirection: "column", gap: 8, color: "inherit", textDecoration: "none" }}>
+      <Link to={detailUrl} state={detailState} onPointerEnter={preloadSourceGamePage} onFocus={preloadSourceGamePage} onPointerDown={preloadSourceGamePage} style={{ padding: "11px 12px 12px", display: "flex", flexDirection: "column", gap: 8, color: "inherit", textDecoration: "none" }}>
         <span style={{ fontSize: 13, fontWeight: 600, color: "var(--mf-t1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{game.title}</span>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
           <span style={{ fontFamily: MONO, fontSize: 10, color: "var(--mf-t4)", letterSpacing: "0.02em", minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{meta || " "}</span>

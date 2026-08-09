@@ -8,13 +8,14 @@ import { ToastProvider } from "@/context/toast-context"
 import { Toaster } from "@/components/Toaster"
 import { ControllerNavigation } from "@/components/ControllerNavigation"
 import { ThemeBoundary } from "@/components/ThemeBoundary"
-import { SourceGameRoute } from "@/app/pages/SourceGamePage"
+import { loadGameModsPage, loadSourceGamePage } from "@/app/route-loaders"
 import { applySavedSourceSettings } from "@/lib/sources"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { AlertTriangle } from "@/components/icons"
 
-const GameModsPage = lazy(() => import("@/app/pages/GameModsPage").then((m) => ({ default: m.GameModsPage })))
+const SourceGameRoute = lazy(() => loadSourceGamePage().then((m) => ({ default: m.SourceGameRoute })))
+const GameModsPage = lazy(() => loadGameModsPage().then((m) => ({ default: m.GameModsPage })))
 const AchievementToastWindow = lazy(() => import("@/app/pages/AchievementToastWindow"))
 
 const ThemeEditorWindow = lazy(() => import("@/app/pages/settings/ThemeEditorWindow"))

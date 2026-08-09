@@ -1,20 +1,30 @@
 import { Outlet, useLocation, useNavigate } from "react-router-dom"
-import { Suspense, useEffect, useRef, type CSSProperties, type ReactNode } from "react"
+import { lazy, Suspense, useEffect, useRef, type CSSProperties, type ReactNode } from "react"
 import { Minus, Square, X } from "lucide-react"
 import { Sidebar } from "@/app/manifold/Sidebar"
-import { AdvancedSearchPage } from "@/app/pages/AdvancedSearchPage"
-import { AchievementsPage } from "@/app/pages/AchievementsPage"
 import { BrowsePage } from "@/app/pages/BrowsePage"
-import { DownloadsPage } from "@/app/pages/DownloadsPage"
-import { LibraryPage } from "@/app/pages/LibraryPage"
-import { PlayLaterPage } from "@/app/pages/PlayLaterPage"
-import { SettingsPage } from "@/app/pages/SettingsPage"
+import {
+  loadAchievementsPage,
+  loadAdvancedSearchPage,
+  loadDownloadsPage,
+  loadLibraryPage,
+  loadPlayLaterPage,
+  loadSettingsPage,
+  preloadPrimaryPage,
+} from "@/app/route-loaders"
 import { usePauseDownloadsWhilePlaying } from "@/hooks/use-pause-on-launch"
 import { TabVisibleProvider } from "@/context/tab-visibility"
 import { cn } from "@/lib/utils"
 
 const drag = { WebkitAppRegion: "drag" } as CSSProperties
 const noDrag = { WebkitAppRegion: "no-drag" } as CSSProperties
+
+const AdvancedSearchPage = lazy(() => loadAdvancedSearchPage().then((m) => ({ default: m.AdvancedSearchPage })))
+const AchievementsPage = lazy(() => loadAchievementsPage().then((m) => ({ default: m.AchievementsPage })))
+const DownloadsPage = lazy(() => loadDownloadsPage().then((m) => ({ default: m.DownloadsPage })))
+const LibraryPage = lazy(() => loadLibraryPage().then((m) => ({ default: m.LibraryPage })))
+const PlayLaterPage = lazy(() => loadPlayLaterPage().then((m) => ({ default: m.PlayLaterPage })))
+const SettingsPage = lazy(() => loadSettingsPage().then((m) => ({ default: m.SettingsPage })))
 
 const TABS: Record<string, ReactNode> = {
   "/": <BrowsePage />,
@@ -33,7 +43,11 @@ function TabHost({ path }: { path: string }) {
     <>
       {Object.keys(TABS).filter((p) => seen.current.has(p)).map((p) => (
         <div key={p} style={{ display: p === path ? "flex" : "none", flex: 1, minWidth: 0, minHeight: 0, flexDirection: "column" }}>
-          <TabVisibleProvider value={p === path}>{TABS[p]}</TabVisibleProvider>
+          <TabVisibleProvider value={p === path}>
+            <Suspense fallback={<PageFallback />}>
+              {TABS[p]}
+            </Suspense>
+          </TabVisibleProvider>
         </div>
       ))}
     </>
@@ -56,6 +70,7 @@ export function ForkLayout() {
         const sp = await window.ucSettings?.get?.("startPage")
         const route = window.location.hash.replace(/^#/, "").split("?")[0] || "/"
         if (sp === "library" && route === "/") {
+          preloadPrimaryPage("/library")
           navigate("/library", { replace: true })
         }
       } catch {  }
@@ -94,12 +109,27 @@ export function ForkLayout() {
         <div ref={scrollRef} style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", overflowX: "hidden" }}>
           <TabHost path={location.pathname} />
           {!TABS[location.pathname] && (
-            <Suspense fallback={<div style={{ flex: 1 }} aria-hidden />}>
+            <Suspense fallback={<DetailFallback />}>
               <Outlet />
             </Suspense>
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+function PageFallback() {
+  return <div style={{ flex: 1, background: "var(--mf-bg)" }} aria-hidden />
+}
+
+function DetailFallback() {
+  const location = useLocation()
+  const state = location.state as { game?: { title?: string; name?: string } } | null
+  const title = state?.game?.title || state?.game?.name
+  return (
+    <div style={{ flex: 1, padding: "64px 40px", background: "var(--mf-bg)" }} aria-hidden={!title}>
+      {title ? <h1 style={{ margin: 0, fontSize: 34, color: "var(--mf-t0)" }}>{title}</h1> : null}
     </div>
   )
 }
