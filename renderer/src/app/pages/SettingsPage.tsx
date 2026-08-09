@@ -14,7 +14,7 @@ import {
   onSourcesChanged,
 } from "@/lib/sources"
 import { BRAND } from "@/lib/brand"
-import { MONO } from "@/app/manifold/ui"
+import { MONO, SELECT_BASE } from "@/app/manifold/ui"
 import type { LinuxDetectionOption } from "@/lib/linux-presets"
 
 const IS_LINUX = typeof navigator !== "undefined" && /linux/i.test(navigator.userAgent)
@@ -31,7 +31,7 @@ const SECTIONS: Array<{ id: Section; label: string; sub: string }> = [
   { id: "about", label: "About", sub: "version, stats, and links" },
 ]
 
-const SELECT: React.CSSProperties = { height: 36, padding: "0 32px 0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontSize: 12.5, cursor: "pointer", WebkitAppearance: "none", appearance: "none" }
+const SELECT: React.CSSProperties = { ...SELECT_BASE, borderRadius: 8, fontSize: 12.5 }
 
 export function SettingsPage() {
   const [section, setSection] = useState<Section>("general")
@@ -768,7 +768,6 @@ function SourcesTab() {
     </>
   )
 }
-
 
 function LinuxSettingsTab() {
   const [launchMode, setLaunchMode] = useState("auto")

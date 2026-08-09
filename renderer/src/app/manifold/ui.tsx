@@ -4,6 +4,17 @@ import { proxyImageUrl } from "@/lib/utils"
 import { fetchSteamArt } from "@/lib/sources"
 
 export const MONO = "var(--mf-mono)"
+
+export const SELECT_BASE: CSSProperties = {
+  height: 36,
+  padding: "0 32px 0 13px",
+  border: "1px solid var(--mf-line-2)",
+  background: "var(--mf-panel)",
+  color: "var(--mf-t1)",
+  cursor: "pointer",
+  WebkitAppearance: "none",
+  appearance: "none",
+}
 export const COVER_LINES =
   "repeating-linear-gradient(135deg, color-mix(in srgb, var(--mf-t0) 4.5%, transparent) 0 1px, transparent 1px 11px), #131313"
 

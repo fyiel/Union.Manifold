@@ -4,7 +4,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom"
 import {
   ArrowDown, ArrowUp, Check, Download, FolderOpen, Globe, Package, Pencil, Puzzle, RefreshCw, Rocket, Trash2, Undo2, X,
 } from "lucide-react"
-import { CenterState, COVER_LINES, MONO, SearchIcon, Spinner } from "@/app/manifold/ui"
+import { CenterState, COVER_LINES, MONO, SearchIcon, Spinner, SELECT_BASE } from "@/app/manifold/ui"
 import { formatNumber, proxyImageUrl } from "@/lib/utils"
 import { useToast } from "@/context/toast-context"
 import { Button } from "@/components/ui/button"
@@ -58,7 +58,7 @@ const GHOST_BTN: CSSProperties = { display: "inline-flex", alignItems: "center",
 const CHIP: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 7, padding: "5px 11px", borderRadius: 999, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t3)" }
 const CHIP_INPUT: CSSProperties = { background: "transparent", border: "none", outline: "none", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 10.5, padding: 0 }
 const SEARCH_INPUT: CSSProperties = { width: "100%", height: 36, padding: "0 12px 0 34px", borderRadius: 9, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12, outline: "none" }
-const SELECT: CSSProperties = { height: 36, minWidth: 150, padding: "0 32px 0 13px", borderRadius: 9, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontSize: 12, cursor: "pointer", WebkitAppearance: "none", appearance: "none" }
+const SELECT: CSSProperties = { ...SELECT_BASE, minWidth: 150, borderRadius: 9, fontSize: 12 }
 const GRID: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 14, alignContent: "start" }
 
 function fmtBytes(n?: number | null): string {
