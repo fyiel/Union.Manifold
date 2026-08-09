@@ -852,20 +852,10 @@ pub async fn install_downloaded_archive(
     out
 }
 
-pub fn find_installing(root: &Path, appid: &str) -> Option<(PathBuf, Value)> {
-    let entries = std::fs::read_dir(root).ok()?;
-    for entry in entries.flatten() {
-        let dir = entry.path();
-        let manifest_path = dir.join(MANIFEST_NAME);
-        if let Ok(text) = std::fs::read_to_string(&manifest_path) {
-            if let Ok(v) = serde_json::from_str::<Value>(&text) {
-                if v.get("appid").and_then(|a| a.as_str()) == Some(appid) {
-                    return Some((dir, v));
-                }
-            }
-        }
-    }
-    None
+pub(crate) fn find_installing(root: &Path, appid: &str) -> Option<(PathBuf, Value)> {
+    crate::library::scan_root_manifests(root)
+        .into_iter()
+        .find(|(_, v)| v.get("appid").and_then(|a| a.as_str()) == Some(appid))
 }
 
 #[tauri::command(async)]

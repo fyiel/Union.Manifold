@@ -102,35 +102,24 @@ pub(crate) fn invalidate_scan() {
     *SCAN_CACHE.lock() = None;
 }
 
-fn load_all(roots: &[PathBuf]) -> Vec<(PathBuf, Value)> {
+/// Raw per-root manifest scan: every directory under `root` that parses as
+/// JSON with an `appid` field. Uncached — callers that need fresh state
+/// (right after a manifest write) must use this, not `load_all_cached`.
+pub(crate) fn scan_root_manifests(root: &std::path::Path) -> Vec<(PathBuf, Value)> {
     let mut out = Vec::new();
-    let mut seen: HashSet<String> = HashSet::new();
-    for root in roots {
-        let entries = match std::fs::read_dir(root) {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        for entry in entries.flatten() {
-            let dir = entry.path();
-            if !dir.is_dir() {
-                continue;
-            }
-            let manifest_path = dir.join(MANIFEST_NAME);
-            if let Ok(text) = std::fs::read_to_string(&manifest_path) {
-                if let Ok(mut v) = serde_json::from_str::<Value>(&text) {
-                    if let Some(obj) = v.as_object_mut() {
-                        if !obj.contains_key("installStatus") && obj.contains_key("appid") {
-                            obj.insert("installStatus".into(), json!("installed"));
-                        }
-                        obj.entry("installPath")
-                            .or_insert(json!(dir.to_string_lossy()));
-                        obj.insert("folder".into(), json!(dir.to_string_lossy()));
-                    }
-                    if let Some(id) = v.get("appid").and_then(|a| a.as_str()) {
-                        if !seen.insert(id.to_string()) {
-                            continue;
-                        }
-                    }
+    let entries = match std::fs::read_dir(root) {
+        Ok(e) => e,
+        Err(_) => return out,
+    };
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        let manifest_path = dir.join(MANIFEST_NAME);
+        if let Ok(text) = std::fs::read_to_string(&manifest_path) {
+            if let Ok(v) = serde_json::from_str::<Value>(&text) {
+                if v.get("appid").is_some() {
                     out.push((dir, v));
                 }
             }
@@ -139,6 +128,29 @@ fn load_all(roots: &[PathBuf]) -> Vec<(PathBuf, Value)> {
     out
 }
 
+fn load_all(roots: &[PathBuf]) -> Vec<(PathBuf, Value)> {
+    let mut out = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for root in roots {
+        for (dir, mut v) in scan_root_manifests(root) {
+            if let Some(obj) = v.as_object_mut() {
+                if !obj.contains_key("installStatus") && obj.contains_key("appid") {
+                    obj.insert("installStatus".into(), json!("installed"));
+                }
+                obj.entry("installPath")
+                    .or_insert(json!(dir.to_string_lossy()));
+                obj.insert("folder".into(), json!(dir.to_string_lossy()));
+            }
+            if let Some(id) = v.get("appid").and_then(|a| a.as_str()) {
+                if !seen.insert(id.to_string()) {
+                    continue;
+                }
+            }
+            out.push((dir, v));
+        }
+    }
+    out
+}
 fn status_of(v: &Value) -> String {
     v.get("installStatus")
         .and_then(|s| s.as_str())
