@@ -26,70 +26,8 @@ export function triggerHapticFeedback(intensity: "light" | "medium" | "heavy" = 
   }
 }
 
-export function levenshteinDistance(a: string, b: string): number {
-  const matrix = Array(b.length + 1)
-    .fill(null)
-    .map(() => Array(a.length + 1).fill(null))
-
-  for (let i = 0; i <= a.length; i++) matrix[0][i] = i
-  for (let j = 0; j <= b.length; j++) matrix[j][0] = j
-
-  for (let j = 1; j <= b.length; j++) {
-    for (let i = 1; i <= a.length; i++) {
-      const indicator = a[i - 1] === b[j - 1] ? 0 : 1
-      matrix[j][i] = Math.min(
-        matrix[j][i - 1] + 1,
-        matrix[j - 1][i] + 1,
-        matrix[j - 1][i - 1] + indicator
-      )
-    }
-  }
-
-  return matrix[b.length][a.length]
-}
-
-export function getSimilarSuggestions(
-  searchTerm: string,
-  candidates: string[],
-  maxDistance: number = 2,
-  limit: number = 3
-): string[] {
-  const suggestions = candidates
-    .map((candidate) => ({
-      term: candidate,
-      distance: levenshteinDistance(searchTerm.toLowerCase(), candidate.toLowerCase()),
-    }))
-    .filter((item) => item.distance <= maxDistance && item.distance > 0)
-    .sort((a, b) => a.distance - b.distance)
-    .slice(0, limit)
-    .map((item) => item.term)
-
-  return suggestions
-}
-
 export function hasOnlineMode(hasCoOp?: boolean): boolean {
   return Boolean(hasCoOp)
-}
-
-export function generateErrorCode(errorType: string, context?: string): string {
-  const timestamp = Date.now().toString().slice(-6)
-  const errorPrefix = errorType.slice(0, 3).toUpperCase()
-  const contextHash = context
-    ? context
-        .split("")
-        .reduce((acc, char) => acc + char.charCodeAt(0), 0) % 1000
-    : Math.floor(Math.random() * 1000)
-
-  return `${errorPrefix}-${contextHash}-${timestamp}`
-}
-
-const ErrorTypes = {
-  GAME_FETCH: "GAME",
-  SEARCH_FETCH: "SRCH",
-  STATS_FETCH: "STAT",
-  DOWNLOADS_FETCH: "DOWN",
-  VIEWS_FETCH: "VIEW",
-  RELATED_FETCH: "REL",
 }
 
 function normalizeHostname(raw: string): string {
@@ -445,17 +383,4 @@ export function hasInstalledVersionUpdate(
 }
 
 
-
-export function isGameVersionUpdate(game: { update_time?: string; release_time?: string; posted_time?: string }): boolean {
-  if (!game.update_time) return false
-  const updateDate = new Date(game.update_time)
-  if (isNaN(updateDate.getTime())) return false
-  const daysSinceUpdate = Math.floor((Date.now() - updateDate.getTime()) / (1000 * 60 * 60 * 24))
-  if (daysSinceUpdate > 14) return false
-  const postedOrReleased = game.posted_time || game.release_time
-  if (!postedOrReleased) return true
-  const postedDate = new Date(postedOrReleased)
-  if (isNaN(postedDate.getTime())) return false
-  return updateDate.getTime() > postedDate.getTime() + 60000
-}
 

@@ -2,12 +2,9 @@ import { describe, expect, it } from "vitest"
 import {
   filterGameExecutables,
   formatNumber,
-  generateErrorCode,
-  getSimilarSuggestions,
   getUnambiguousExecutable,
   getExecutableRelativePath,
   isHelperExecutableName,
-  levenshteinDistance,
   matchAdminExecutable,
   proxyImageUrl,
   proxyMediaUrl,
@@ -20,30 +17,6 @@ describe("formatNumber", () => {
     expect(formatNumber(1500)).toBe("1.5K")
     expect(formatNumber(2_300_000)).toBe("2.3M")
     expect(formatNumber(0)).toBe("0")
-  })
-})
-
-describe("levenshtein search suggestions", () => {
-  it("computes edit distance", () => {
-    expect(levenshteinDistance("kitten", "sitting")).toBe(3)
-    expect(levenshteinDistance("same", "same")).toBe(0)
-    expect(levenshteinDistance("", "abc")).toBe(3)
-  })
-
-  it("suggests near misses but never the exact term", () => {
-    const out = getSimilarSuggestions("portal", ["Portal", "portol", "hades", "portly"])
-    expect(out).toContain("portol")
-    expect(out).not.toContain("hades")
-    expect(out).not.toContain("Portal")
-  })
-})
-
-describe("generateErrorCode", () => {
-  it("is deterministic for the same context", () => {
-    const a = generateErrorCode("GAME", "ctx").split("-")
-    const b = generateErrorCode("GAME", "ctx").split("-")
-    expect(a[0]).toBe("GAM")
-    expect(a[1]).toBe(b[1])
   })
 })
 

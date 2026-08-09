@@ -1,7 +1,6 @@
 import type { Game } from "@/lib/types"
 import { sourceLogger } from "@/lib/logger"
 
-export type { }
 
 const api = () => (typeof window !== "undefined" ? window.ucSources : undefined)
 
