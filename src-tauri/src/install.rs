@@ -11,14 +11,16 @@ const ARCHIVE_EXTS: &[&str] = &[
     ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".001", ".r00",
 ];
 
+fn has_part_marker(name: &str) -> bool {
+    name.contains(".part1.") || name.contains(".part01.")
+}
+
 fn is_archive(path: &Path) -> bool {
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().to_lowercase())
         .unwrap_or_default();
-    ARCHIVE_EXTS.iter().any(|e| name.ends_with(e))
-        || name.contains(".part1.")
-        || name.contains(".part01.")
+    ARCHIVE_EXTS.iter().any(|e| name.ends_with(e)) || has_part_marker(&name)
 }
 
 fn sniff_archive(path: &Path) -> bool {
@@ -39,7 +41,7 @@ fn sniff_archive(path: &Path) -> bool {
 }
 
 fn is_first_part(name: &str) -> bool {
-    name.contains(".part1.") || name.contains(".part01.") || name.ends_with(".001")
+    has_part_marker(name) || name.ends_with(".001")
 }
 
 pub(crate) fn extract_entry_point(dir: &Path, fallback: &Path) -> PathBuf {
