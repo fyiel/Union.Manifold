@@ -1141,24 +1141,31 @@ fn deployment_plan(
     }
 }
 
-fn classification_root(staged: &Path) -> PathBuf {
-    let entries: Vec<PathBuf> = std::fs::read_dir(staged)
-        .ok()
-        .map(|rd| {
-            rd.flatten()
-                .map(|e| e.path())
-                .filter(|p| {
-                    !p.file_name()
-                        .map(|n| is_ts_meta(&n.to_string_lossy()))
-                        .unwrap_or(false)
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    if entries.len() != 1 || !entries[0].is_dir() {
-        return staged.to_path_buf();
+/// The single non-thunderstore-meta entry of `dir`, if it is a directory.
+fn single_payload_dir(dir: &Path) -> Option<PathBuf> {
+    let mut found: Option<PathBuf> = None;
+    for entry in std::fs::read_dir(dir).ok()?.flatten() {
+        let path = entry.path();
+        if path
+            .file_name()
+            .map(|n| is_ts_meta(&n.to_string_lossy()))
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        if found.is_some() {
+            return None;
+        }
+        found = Some(path);
     }
-    let name = entries[0]
+    found.filter(|p| p.is_dir())
+}
+
+fn classification_root(staged: &Path) -> PathBuf {
+    let Some(dir) = single_payload_dir(staged) else {
+        return staged.to_path_buf();
+    };
+    let name = dir
         .file_name()
         .unwrap_or_default()
         .to_string_lossy()
@@ -1166,7 +1173,7 @@ fn classification_root(staged: &Path) -> PathBuf {
     if MEANINGFUL_DIRS.contains(&name.as_str()) {
         staged.to_path_buf()
     } else {
-        entries[0].clone()
+        dir
     }
 }
 
@@ -1649,21 +1656,10 @@ fn bepinex_root(src: &Path) -> PathBuf {
     if src.join("BepInEx").is_dir() {
         return src.to_path_buf();
     }
-    let payload: Vec<PathBuf> = std::fs::read_dir(src)
-        .ok()
-        .map(|rd| {
-            rd.flatten()
-                .map(|e| e.path())
-                .filter(|p| {
-                    !p.file_name()
-                        .map(|n| is_ts_meta(&n.to_string_lossy()))
-                        .unwrap_or(false)
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    if payload.len() == 1 && payload[0].is_dir() && payload[0].join("BepInEx").is_dir() {
-        return payload[0].clone();
+    if let Some(payload) = single_payload_dir(src) {
+        if payload.join("BepInEx").is_dir() {
+            return payload;
+        }
     }
     src.to_path_buf()
 }
