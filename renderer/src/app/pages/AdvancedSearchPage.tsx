@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
-import { querySources, sourceCapabilities, rememberGames, sourcesAvailable, listSources, sourceDirect, sourceIsDirect, mergeUnique, countMirrors, nextSortMode, sortModeLabel, SORT_NOUNS, type SourceSortMode, sortUnifiedGames } from "@/lib/sources"
+import { querySources, nextSourceRequestId, sourceCapabilities, rememberGames, sourcesAvailable, listSources, sourceDirect, sourceIsDirect, mergeUnique, countMirrors, nextSortMode, sortModeLabel, SORT_NOUNS, type SourceSortMode, sortUnifiedGames } from "@/lib/sources"
 import { getAdvancedCache, setAdvancedCache } from "@/lib/advanced-cache"
 import { GameCard } from "@/app/manifold/GameCard"
 import { MONO, SearchIcon, Spinner, CenterState } from "@/app/manifold/ui"
@@ -13,9 +13,35 @@ function capKeyForSort(sort: AdvSort): "title" | "size" | null {
   if (sort === "a-z") return "title"
     return null
 }
-function toBackendSort(sort: AdvSort, hasText: boolean): SourceSortKey {
+export function advancedBackendSort(sort: AdvSort, hasText: boolean): SourceSortKey {
   if (sort === "a-z") return "title"
   return hasText ? "relevance" : "latest"
+}
+
+type AdvancedQuerySignatureInput = {
+  query: string
+  enabledIds: string[]
+  cats: string[]
+  sLo: number
+  sHi: number
+  yLo: number
+  yHi: number
+  sort: AdvSort
+}
+
+export function advancedQuerySignature(input: AdvancedQuerySignatureInput): string {
+  const { query, enabledIds, cats, sLo, sHi, yLo, yHi, sort } = input
+  const text = query.trim()
+  return JSON.stringify({
+    q: text,
+    enabledIds,
+    cats: [...cats].sort(),
+    sLo,
+    sHi,
+    yLo,
+    yHi,
+    backendSort: advancedBackendSort(sort, Boolean(text)),
+  })
 }
 
 export function AdvancedSearchPage() {
@@ -39,11 +65,16 @@ export function AdvancedSearchPage() {
   const [total, setTotal] = useState(() => cached?.total ?? 0)
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [sourceNotice, setSourceNotice] = useState<"partial" | "failed" | null>(null)
+  const [retryToken, setRetryToken] = useState(0)
+  const gamesRef = useRef(games)
+  useEffect(() => { gamesRef.current = games }, [games])
   const reqId = useRef(0)
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
   const genresLocked = useRef(Boolean(cached?.genreOptions?.length))
   const offsetRef = useRef(cached?.offset ?? 0)
   const loadingMoreRef = useRef(false)
+  const appendReqRef = useRef<number | null>(null)
   const bootedRef = useRef(false)
 
   useEffect(() => {
@@ -63,11 +94,14 @@ export function AdvancedSearchPage() {
   const sLo = Math.min(sizeMin, sizeMax), sHi = Math.max(sizeMin, sizeMax)
   const yLo = Math.min(yearFrom, yearTo), yHi = Math.max(yearFrom, yearTo)
 
-  const paramsKey = JSON.stringify({ q: query.trim(), enabledIds, cats: [...cats].sort(), sLo, sHi, yLo, yHi, sort })
+  const paramsKey = advancedQuerySignature({ query, enabledIds, cats: [...cats], sLo, sHi, yLo, yHi, sort })
+  const slowParamsKey = JSON.stringify({ query: query.trim(), sLo, sHi, yLo, yHi })
+  const previousSlowParamsKey = useRef(slowParamsKey)
+  const backendSort = advancedBackendSort(sort, Boolean(query.trim()))
 
   const buildParams = useCallback((offset: number): SourceQueryParams => {
     const text = query.trim()
-    const params: SourceQueryParams = { sort: toBackendSort(sort, Boolean(text)), sources: enabledIds, offset, limit: ADV_PAGE }
+    const params: SourceQueryParams = { sort: backendSort, sources: enabledIds, offset, limit: ADV_PAGE }
     if (!text) params.balanced = true
     if (text) params.text = text
     if (cats.size) { params.tags = [...cats]; params.tagMode = "or" }
@@ -76,26 +110,49 @@ export function AdvancedSearchPage() {
     if (yLo > YEAR_MIN) params.minYear = yLo
     if (yHi < YEAR_MAX) params.maxYear = yHi
     return params
-  }, [query, sort, enabledIds, cats, sLo, sHi, yLo, yHi])
+  }, [query, backendSort, enabledIds, cats, sLo, sHi, yLo, yHi])
 
   useEffect(() => {
-    if (!available || !sources.length) return
+    if (debounce.current) clearTimeout(debounce.current)
+    const id = nextSourceRequestId()
+    reqId.current = id
+    appendReqRef.current = null
+    setLoadingMore(false)
+    loadingMoreRef.current = false
+    if (!available || !sources.length) {
+      setLoading(false)
+      return
+    }
     if (!bootedRef.current) {
       bootedRef.current = true
       if (cached && cached.paramsKey === paramsKey && cached.games.length) return
     }
-    if (!enabledIds.length) { setGames([]); setTotal(0); return }
-    if (debounce.current) clearTimeout(debounce.current)
-    debounce.current = setTimeout(() => {
-      const id = ++reqId.current
-      offsetRef.current = 0
-      setLoading(true)
+    offsetRef.current = 0
+    setSourceNotice(null)
+    const slowChanged = previousSlowParamsKey.current !== slowParamsKey
+    previousSlowParamsKey.current = slowParamsKey
+    if (!enabledIds.length) {
+      gamesRef.current = []
+      setGames([])
+      setTotal(0)
+      setLoading(false)
+      return
+    }
+    setLoading(true)
+    const run = () => {
       void querySources(buildParams(0), id)
         .then((res) => {
           if (id !== reqId.current) return
+          if (!res.ok) {
+            setSourceNotice("failed")
+            setLoading(false)
+            return
+          }
           rememberGames(res.games)
+          gamesRef.current = res.games
           setGames(res.games)
           setTotal(res.total)
+          setSourceNotice(res.sourcesErrored ? "partial" : null)
           offsetRef.current = ADV_PAGE
           if (!genresLocked.current && res.facets.tags.length) {
             genresLocked.current = true
@@ -103,26 +160,56 @@ export function AdvancedSearchPage() {
           }
           setLoading(false)
         })
-        .catch(() => { if (id === reqId.current) setLoading(false) })
-    }, 280)
+        .catch(() => {
+          if (id !== reqId.current) return
+          setSourceNotice("failed")
+          setLoading(false)
+        })
+    }
+    debounce.current = setTimeout(run, slowChanged ? 280 : 0)
     return () => { if (debounce.current) clearTimeout(debounce.current) }
-  }, [paramsKey, available, sources.length])
+  }, [paramsKey, slowParamsKey, available, sources.length, retryToken])
+
+  useEffect(() => {
+    return window.ucSources?.onBrowsePartial?.((payload) => {
+      if (!payload || payload.reqId !== reqId.current) return
+      rememberGames(payload.games)
+      const nextGames = appendReqRef.current === payload.reqId ? mergeUnique(gamesRef.current, payload.games) : payload.games
+      gamesRef.current = nextGames
+      setGames(nextGames)
+      setTotal(payload.total)
+      if (payload.failedSources.length) setSourceNotice("partial")
+    })
+  }, [])
 
   const loadMore = useCallback(async () => {
     if (loadingMoreRef.current) return
     loadingMoreRef.current = true
     setLoadingMore(true)
     const id = reqId.current
+    appendReqRef.current = id
     try {
       const res = await querySources(buildParams(offsetRef.current), id)
       if (id !== reqId.current) return
+      if (!res.ok) {
+        setSourceNotice("failed")
+        return
+      }
       rememberGames(res.games)
-      setGames((prev) => mergeUnique(prev, res.games))
-      setTotal(res.games.length === 0 ? 0 : res.total)
-      offsetRef.current += ADV_PAGE
+      const nextGames = mergeUnique(gamesRef.current, res.games)
+      gamesRef.current = nextGames
+      setGames(nextGames)
+      setTotal(res.games.length === 0 ? nextGames.length : Math.max(res.total, nextGames.length))
+      setSourceNotice(res.sourcesErrored ? "partial" : null)
+      if (res.games.length > 0) offsetRef.current += ADV_PAGE
+    } catch {
+      if (id === reqId.current) setSourceNotice("failed")
     } finally {
-      loadingMoreRef.current = false
-      setLoadingMore(false)
+      if (id === reqId.current) {
+        appendReqRef.current = null
+        loadingMoreRef.current = false
+        setLoadingMore(false)
+      }
     }
   }, [buildParams])
 
@@ -319,6 +406,13 @@ export function AdvancedSearchPage() {
         </header>
 
         <div className="mf-scroll" onScroll={onScroll} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "24px 36px 40px" }}>
+          {sourceNotice && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)" }}>
+              <span style={{ width: 6, height: 6, borderRadius: 99, background: "#7a4a4a", flexShrink: 0 }} />
+              {sourceNotice === "partial" ? "Some sources unavailable" : "Sources unavailable — showing previous results"}
+              <button type="button" onClick={() => setRetryToken((value) => value + 1)} style={{ fontFamily: MONO, fontSize: 10, color: "#c98080", cursor: "pointer", textDecoration: "underline", background: "none", border: "none", padding: 0 }}>retry</button>
+            </div>
+          )}
           {!available ? (
             <CenterState>
               <SearchIcon size={30} stroke="var(--mf-t6)" />
@@ -346,7 +440,7 @@ export function AdvancedSearchPage() {
           ) : (
             <CenterState>
               <SearchIcon size={30} stroke="var(--mf-t6)" />
-              <span style={{ fontFamily: MONO, fontSize: 12, color: "var(--mf-t4)" }}>no titles match these filters</span>
+              <span style={{ fontFamily: MONO, fontSize: 12, color: "var(--mf-t4)" }}>{sourceNotice === "failed" ? "sources unavailable — retry above" : "no titles match these filters"}</span>
               <button type="button" onClick={reset} className="mf-ghost" style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t2)", fontSize: 12, fontWeight: 500, cursor: "pointer" }}>Reset filters</button>
             </CenterState>
           )}

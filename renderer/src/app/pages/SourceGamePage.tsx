@@ -58,6 +58,11 @@ function relTime(ms?: number | null): string {
 const keyOf = (e: DownloadEntry) =>
   `${e.source.sourceId}:${e.source.sourceSlug}:${e.option.hostType}:${e.option.url || e.option.label}`
 
+export function SourceGameRoute() {
+  const { key = "" } = useParams()
+  return <SourceGamePage key={key} />
+}
+
 export function SourceGamePage() {
   const { key = "" } = useParams()
   const dedupKey = decodeURIComponent(key)
@@ -71,7 +76,7 @@ export function SourceGamePage() {
   const initial = remembered?.fullyResolved ? remembered : (passed || remembered)
 
   const [game, setGame] = useState<UnifiedSourceGame | null>(initial)
-  const [loading, setLoading] = useState(!initial)
+  const [loading, setLoading] = useState(!initial?.fullyResolved)
   const [optState, setOptState] = useState<Record<string, OptState>>({})
   const [optMsg, setOptMsg] = useState<Record<string, string>>({})
   const [sourcesOpen, setSourcesOpen] = useState(false)
@@ -112,6 +117,8 @@ export function SourceGamePage() {
   useEffect(() => {
     let alive = true
     let request = 0
+    setInstalled(Boolean(navState?.installed))
+    setInstalledVersion(null)
     const sync = async () => {
       const currentRequest = ++request
       try {
@@ -134,12 +141,17 @@ export function SourceGamePage() {
   }, [dlAppid])
 
   useEffect(() => {
-    if (game?.fullyResolved) return
-    const stubs = (game?.sources || initial?.sources || []).map((s) => ({ sourceId: s.sourceId, sourceSlug: s.sourceSlug }))
+    const seed = initial
+    setGame(seed)
+    if (seed?.fullyResolved) {
+      setLoading(false)
+      return
+    }
+    const stubs = (seed?.sources || []).map((s) => ({ sourceId: s.sourceId, sourceSlug: s.sourceSlug }))
     let alive = true
     setLoading(true)
-    const title = game?.title || initial?.title || ""
-    const knownSteam = game?.steamAppId ?? initial?.steamAppId ?? null
+    const title = seed?.title || ""
+    const knownSteam = seed?.steamAppId ?? null
     const work = stubs.length ? getSourceDetail(stubs) : resolveInstalledGame(dedupKey, title, knownSteam)
     void work.then((full) => {
       if (!alive) return
@@ -160,7 +172,7 @@ export function SourceGamePage() {
     const id = game?.steamAppId
     setProtonData(null)
     setSteamMeta(null)
-    if (!id) return
+    if (!id || loading) return
     let alive = true
     void Promise.resolve(window.ucSources?.protondb?.(id))
       .then((res) => { if (alive && res?.ok) setProtonData(res.data) })
@@ -169,19 +181,19 @@ export function SourceGamePage() {
       .then((res) => { if (alive && res?.ok) setSteamMeta(res.meta) })
       .catch(() => undefined)
     return () => { alive = false }
-  }, [game?.steamAppId])
+  }, [game?.steamAppId, loading])
 
   const [wand, setWand] = useState<WandLookupResult | null>(null)
   const [wandOpen, setWandOpen] = useState(false)
   useEffect(() => {
     setWand(null)
-    if (!game?.title) return
+    if (!installed || !game?.title) return
     let alive = true
     void window.ucWand?.lookup(game.title, game.steamAppId ?? undefined)
       .then((result) => { if (alive) setWand(result) })
       .catch(() => undefined)
     return () => { alive = false }
-  }, [game?.title, game?.steamAppId])
+  }, [installed, game?.title, game?.steamAppId])
 
   const ordered = useMemo(() => orderSourcesByPreference(game?.sources || [], priority), [game, priority])
   const entries = useMemo(() => collectDownloadEntries(ordered), [ordered])

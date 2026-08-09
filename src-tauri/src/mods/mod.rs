@@ -903,6 +903,8 @@ pub(crate) enum ModLayout {
     MelonLoader,
     Fluffy,
     ModsFolder,
+    WuchangEnabler,
+    WuchangPackage,
 }
 
 fn game_layout(steam_appid: Option<u64>) -> Option<ModLayout> {
@@ -919,6 +921,8 @@ const RESIDENT_EVIL_REQUIEM_STEAM_APPID: u64 = 3_764_200;
 const EVERYTHING_IS_CRAB_STEAM_APPID: u64 = 3_526_710;
 const MEWGENICS_STEAM_APPID: u64 = 686_060;
 const MEWGENICS_DEPLOY_MARKER: &str = ".mewgenics-modpaths";
+const WUCHANG_STEAM_APPID: u64 = 2_277_560;
+const WUCHANG_MODS_PREFIX: &str = "Project_Plague/Content/Paks/~mods";
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1070,6 +1074,10 @@ fn loader_compatibility(
     let melon = steam_appid == Some(EVERYTHING_IS_CRAB_STEAM_APPID) || unity_files;
     let fluffy_title = fluffy_game(steam_appid);
     let fluffy_files = target.map(is_fluffy_target).unwrap_or(false);
+    let wuchang = steam_appid == Some(WUCHANG_STEAM_APPID)
+        || target
+            .and_then(|root| child_dir(root, "Project_Plague"))
+            .is_some();
 
     vec![
         LoaderCompatibility {
@@ -1110,6 +1118,17 @@ fn loader_compatibility(
                 "detected a supported RE Engine or MT Framework game layout".to_string()
             } else {
                 "no supported title or game layout was detected".to_string()
+            },
+        },
+        LoaderCompatibility {
+            name: "Wuchang Mod Enabler",
+            compatible: wuchang,
+            reason: if steam_appid == Some(WUCHANG_STEAM_APPID) {
+                "supported for WUCHANG: Fallen Feathers".to_string()
+            } else if wuchang {
+                "detected a Project_Plague mod loader tree".to_string()
+            } else {
+                "this title is not WUCHANG: Fallen Feathers".to_string()
             },
         },
     ]
@@ -1303,6 +1322,74 @@ fn unreal_paks_target(target: &Path) -> Option<String> {
     matches.into_iter().next()
 }
 
+fn has_content_paks(root: &Path) -> bool {
+    child_dir(root, "Content")
+        .and_then(|content| child_dir(&content, "Paks"))
+        .is_some()
+}
+
+fn wuchang_project_plague_root(root: &Path) -> Option<PathBuf> {
+    walkdir::WalkDir::new(root)
+        .max_depth(4)
+        .into_iter()
+        .flatten()
+        .find(|entry| {
+            entry.file_type().is_dir()
+                && entry
+                    .file_name()
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case("Project_Plague")
+        })
+        .map(|entry| entry.into_path())
+}
+
+fn is_wuchang_enabler_payload(root: &Path) -> bool {
+    wuchang_project_plague_root(root).is_some()
+        || root
+            .file_name()
+            .map(|name| name.to_string_lossy().eq_ignore_ascii_case("Project_Plague"))
+            .unwrap_or(false)
+}
+
+fn is_wuchang_enabler_identity(provider: &str, remote_id: &str, page_url: &str) -> bool {
+    if !provider.eq_ignore_ascii_case("nexus") || remote_id != "3" {
+        return false;
+    }
+    let Ok(page) = url::Url::parse(page_url) else {
+        return false;
+    };
+    if page.scheme() != "https"
+        || !matches!(page.host_str(), Some("nexusmods.com" | "www.nexusmods.com"))
+    {
+        return false;
+    }
+    let segments: Vec<&str> = page.path_segments().into_iter().flatten().collect();
+    segments == ["wuchangfallenfeathers", "mods", "3"]
+}
+
+fn infer_deployment_plan_for_entry(
+    target: &Path,
+    staged: &Path,
+    steam_appid: Option<u64>,
+    provider: &str,
+    remote_id: &str,
+    page_url: &str,
+) -> DeploymentPlan {
+    let root = classification_root(staged);
+    if steam_appid == Some(WUCHANG_STEAM_APPID)
+        && is_wuchang_enabler_identity(provider, remote_id, page_url)
+        && (is_wuchang_enabler_payload(staged) || has_content_paks(&root))
+    {
+        return deployment_plan(
+            ModLayout::WuchangEnabler,
+            "",
+            "matched Nexus wuchangfallenfeathers mod 3 and its Project_Plague enabler tree",
+            "high",
+        );
+    }
+    infer_deployment_plan(target, staged, steam_appid)
+}
+
 fn infer_deployment_plan(target: &Path, staged: &Path, steam_appid: Option<u64>) -> DeploymentPlan {
     let root = classification_root(staged);
     if contains_fomod(&root) {
@@ -1365,6 +1452,16 @@ fn infer_deployment_plan(target: &Path, staged: &Path, steam_appid: Option<u64>)
             ModLayout::Fluffy,
             "",
             "the archive contains Fluffy metadata and the game has a supported title or layout",
+            "high",
+        );
+    }
+    if steam_appid == Some(WUCHANG_STEAM_APPID)
+        && has_extension(&root, &["pak", "utoc", "ucas"], 6)
+    {
+        return deployment_plan(
+            ModLayout::WuchangPackage,
+            WUCHANG_MODS_PREFIX,
+            "Wuchang unsigned packages load through Project_Plague's ~mods folder",
             "high",
         );
     }
@@ -1812,6 +1909,94 @@ fn apply_fluffy_layout(staged: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn apply_wuchang_enabler_layout(staged: &Path) -> Result<(), String> {
+    let direct = child_dir(staged, "Project_Plague");
+    let entry_count = std::fs::read_dir(staged)
+        .map_err(|error| format!("Wuchang stage read: {error}"))?
+        .flatten()
+        .count();
+    if direct.is_some() && entry_count == 1 {
+        return Ok(());
+    }
+
+    let source = direct.or_else(|| wuchang_project_plague_root(staged));
+    let direct_payload = has_content_paks(staged);
+    if source.is_none() && !direct_payload {
+        return Err("Wuchang enabler archive has no Project_Plague tree".to_string());
+    }
+
+    let name = staged
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy();
+    let temporary = staged.with_file_name(format!(".{name}-wuchang-layout"));
+    if temporary.exists() {
+        std::fs::remove_dir_all(&temporary)
+            .map_err(|error| format!("Wuchang temporary cleanup: {error}"))?;
+    }
+    let project_plague = temporary.join("Project_Plague");
+    std::fs::create_dir_all(&project_plague)
+        .map_err(|error| format!("Wuchang stage: {error}"))?;
+
+    if let Some(source) = source {
+        copy_dir_recursive(&source, &project_plague)?;
+    } else {
+        copy_dir_recursive(staged, &project_plague)?;
+    }
+
+    std::fs::remove_dir_all(staged).map_err(|error| format!("Wuchang stage replace: {error}"))?;
+    std::fs::rename(&temporary, staged)
+        .map_err(|error| format!("Wuchang stage replace: {error}"))
+}
+
+fn apply_wuchang_package_layout(staged: &Path) -> Result<(), String> {
+    let name = staged
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy();
+    let temporary = staged.with_file_name(format!(".{name}-wuchang-package"));
+    if temporary.exists() {
+        std::fs::remove_dir_all(&temporary)
+            .map_err(|error| format!("Wuchang package temporary cleanup: {error}"))?;
+    }
+    std::fs::create_dir_all(&temporary)
+        .map_err(|error| format!("Wuchang package stage: {error}"))?;
+
+    let mut copied = 0usize;
+    for entry in walkdir::WalkDir::new(staged).into_iter().flatten() {
+        if !entry.file_type().is_file()
+            || !entry
+                .path()
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .map(|extension| matches!(extension.to_ascii_lowercase().as_str(), "pak" | "utoc" | "ucas"))
+                .unwrap_or(false)
+        {
+            continue;
+        }
+        let destination = temporary.join(entry.file_name());
+        if destination.exists() {
+            std::fs::remove_dir_all(&temporary).ok();
+            return Err(format!(
+                "Wuchang package contains duplicate file name {}",
+                entry.file_name().to_string_lossy()
+            ));
+        }
+        std::fs::copy(entry.path(), &destination)
+            .map_err(|error| format!("Wuchang package copy: {error}"))?;
+        copied += 1;
+    }
+    if copied == 0 {
+        std::fs::remove_dir_all(&temporary).ok();
+        return Err("Wuchang package contains no .pak, .utoc, or .ucas files".to_string());
+    }
+
+    std::fs::remove_dir_all(staged)
+        .map_err(|error| format!("Wuchang package replace: {error}"))?;
+    std::fs::rename(&temporary, staged)
+        .map_err(|error| format!("Wuchang package replace: {error}"))
+}
+
 fn is_mod_engine_bootstrap(name: &str) -> bool {
     name == MOD_ENGINE_PROFILE
         || name.ends_with(".me3")
@@ -1892,6 +2077,8 @@ fn apply_staging_layout(
         ModLayout::MelonLoader => Ok(()),
         ModLayout::Fluffy => apply_fluffy_layout(staged),
         ModLayout::ModsFolder => wrap_in_mods_folder(staged, fallback_name),
+        ModLayout::WuchangEnabler => apply_wuchang_enabler_layout(staged),
+        ModLayout::WuchangPackage => apply_wuchang_package_layout(staged),
         ModLayout::BepInEx | ModLayout::RequiresInstaller => {
             Err("loader-specific staging layout reached the raw archive path".to_string())
         }
@@ -1963,7 +2150,14 @@ pub(crate) async fn finalize_install(
     let mut cfg = load_config(&state.paths, &spec.appid);
     let target = deploy_target_dir(&state, &spec.appid, &cfg)?;
     let steam_appid = detect_steam_appid(&state, &spec.appid).await;
-    let mut plan = infer_deployment_plan(&target, staged_src, steam_appid);
+    let mut plan = infer_deployment_plan_for_entry(
+        &target,
+        staged_src,
+        steam_appid,
+        &spec.provider,
+        &spec.remote_id,
+        &spec.page_url,
+    );
     if !cfg.deploy_target.is_empty() {
         apply_manual_target(&mut plan, &cfg.deploy_target);
     }
@@ -2145,7 +2339,7 @@ async fn flatten_tar(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-const DEPLOYMENT_PLAN_VERSION: u32 = 5;
+const DEPLOYMENT_PLAN_VERSION: u32 = 7;
 
 fn refresh_deployment_plans(state: &AppState, appid: &str, cfg: &mut GameMods) -> bool {
     let Ok(target) = deploy_target_dir(state, appid, cfg) else {
@@ -2177,11 +2371,22 @@ fn refresh_deployment_plans(state: &AppState, appid: &str, cfg: &mut GameMods) -
                 }
             }
         }
-        let mut plan = infer_deployment_plan(&target, &staged, cfg.steam_appid);
+        let mut plan = infer_deployment_plan_for_entry(
+            &target,
+            &staged,
+            cfg.steam_appid,
+            &installed.provider,
+            &installed.remote_id,
+            &installed.page_url,
+        );
         if migrating
             && matches!(
                 plan.layout,
-                ModLayout::ModEngine3 | ModLayout::Lenny | ModLayout::Fluffy
+                ModLayout::ModEngine3
+                    | ModLayout::Lenny
+                    | ModLayout::Fluffy
+                    | ModLayout::WuchangEnabler
+                    | ModLayout::WuchangPackage
             )
         {
             if let Err(error) =

@@ -28,6 +28,8 @@ Nexus, Workshop and Thunderstore installs share a per-mod deployment planner. It
 
 Mod Engine 3 installs are isolated under `.union-manifold-me3`, generate `.union-manifold.me3`, and launch through the official `me3` executable when the game is started from Manifold. Install Mod Engine 3 from its official release and keep `me3` on `PATH`. Lenny packages preserve their `install.xml` folder under `lml`; manifest-backed MelonLoader packages retain their folder under `Mods`; Fluffy metadata stays out of the game directory. Each mod shows its inferred destination and confidence. Unknown layouts use the game root and are marked **check target**; the folder control remains available as a game-wide manual override. Interactive FOMOD archives are rejected instead of deploying every optional file.
 
+WUCHANG: Fallen Feathers recognizes the [Wuchang Mod Enabler](https://www.nexusmods.com/wuchangfallenfeathers/mods/3) automatically: its `Project_Plague` folder stays at the game root, and regular Unreal package mods deploy to `Project_Plague/Content/Paks/~mods`.
+
 ### local achievements
 The Achievements page records progress reported by local Steam-compatible
 achievement stores while a game runs. It recognizes common Goldberg/GSE,
@@ -51,4 +53,3 @@ Picks the right artifact for your distro (pacman package on Arch, RPM on Fedora,
 
 ### credit
 Built on [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3. Huge thanks to the original team, none of this exists without their work.
-

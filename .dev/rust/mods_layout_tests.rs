@@ -25,6 +25,170 @@ fn game_layout_leaves_unknown_games_to_detection() {
 }
 
 #[test]
+fn wuchang_enabler_preserves_project_plague_at_game_root() {
+    let tmp = tempdir().unwrap();
+    let dir = tmp.path().join("mods");
+    let target = tmp.path().join("game");
+    let staged = dir.join("staging/nexus-3");
+    write_file(
+        &staged.join("Wuchang Mod Enabler/Project_Plague/Binaries/Win64/dsound.dll"),
+        "loader",
+    );
+    write_file(&staged.join("README.txt"), "instructions");
+
+    let plan = infer_deployment_plan_for_entry(
+        &target,
+        &staged,
+        Some(WUCHANG_STEAM_APPID),
+        "nexus",
+        "3",
+        "https://www.nexusmods.com/wuchangfallenfeathers/mods/3",
+    );
+    assert_eq!(plan.layout, ModLayout::WuchangEnabler);
+    assert!(plan.deploy_prefix.is_empty());
+    assert_eq!(plan.confidence, "high");
+    apply_staging_layout(&staged, plan.layout, "Wuchang Mod Enabler", "nexus-3").unwrap();
+
+    let cfg = GameMods {
+        steam_appid: Some(WUCHANG_STEAM_APPID),
+        mods: vec![ModEntry {
+            id: "nexus-3".to_string(),
+            enabled: true,
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    deploy_to(&dir, &target, &cfg).unwrap();
+
+    assert!(target
+        .join("Project_Plague/Binaries/Win64/dsound.dll")
+        .is_file());
+    assert!(!target.join("Binaries/Win64/dsound.dll").exists());
+    assert!(!target.join("README.txt").exists());
+}
+
+#[test]
+fn wuchang_migration_repairs_a_previously_stripped_enabler_tree() {
+    let tmp = tempdir().unwrap();
+    let staged = tmp.path().join("staging/nexus-3");
+    write_file(&staged.join("Content/Paks/loader.pak"), "loader");
+
+    let plan = infer_deployment_plan_for_entry(
+        tmp.path(),
+        &staged,
+        Some(WUCHANG_STEAM_APPID),
+        "nexus",
+        "3",
+        "https://www.nexusmods.com/wuchangfallenfeathers/mods/3",
+    );
+    assert_eq!(plan.layout, ModLayout::WuchangEnabler);
+    apply_staging_layout(&staged, plan.layout, "Wuchang Mod Enabler", "nexus-3").unwrap();
+
+    assert!(staged
+        .join("Project_Plague/Content/Paks/loader.pak")
+        .is_file());
+    assert!(!staged.join("Content/Paks/loader.pak").exists());
+}
+
+#[test]
+fn wuchang_regular_packages_always_use_project_plague_mods_folder() {
+    for (source, file) in [
+        ("UncensorMod_4_P.pak", "UncensorMod_4_P.pak"),
+        ("Content/Paks/Visual_4_P.utoc", "Visual_4_P.utoc"),
+        (
+            "Download/Project_Plague/Content/Paks/Visual_4_P.ucas",
+            "Visual_4_P.ucas",
+        ),
+    ] {
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path().join("mods");
+        let target = tmp.path().join("game");
+        let staged = dir.join("staging/nexus-44");
+        std::fs::create_dir_all(target.join("Wuchang/Content/Paks")).unwrap();
+        write_file(&staged.join(source), "mod");
+
+        let plan = infer_deployment_plan_for_entry(
+            &target,
+            &staged,
+            Some(WUCHANG_STEAM_APPID),
+            "nexus",
+            "44",
+            "https://www.nexusmods.com/wuchangfallenfeathers/mods/44",
+        );
+        assert_eq!(plan.layout, ModLayout::WuchangPackage);
+        assert_eq!(plan.deploy_prefix, WUCHANG_MODS_PREFIX);
+        assert_eq!(plan.confidence, "high");
+        apply_staging_layout(&staged, plan.layout, "Uncensor Mod", "nexus-44").unwrap();
+
+        let cfg = GameMods {
+            steam_appid: Some(WUCHANG_STEAM_APPID),
+            mods: vec![ModEntry {
+                id: "nexus-44".to_string(),
+                enabled: true,
+                deploy_prefix: plan.deploy_prefix,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        deploy_to(&dir, &target, &cfg).unwrap();
+
+        assert!(target.join(WUCHANG_MODS_PREFIX).join(file).is_file());
+        assert!(!target.join("Wuchang/Content/Paks/~mods").join(file).exists());
+        assert!(!target.join("Project_Plague/Content/Paks").join(file).is_file());
+    }
+}
+
+#[test]
+fn wuchang_enabler_layout_requires_exact_nexus_identity() {
+    let tmp = tempdir().unwrap();
+    let staged = tmp.path().join("archive");
+    write_file(
+        &staged.join("Project_Plague/Content/Paks/ordinary.pak"),
+        "mod",
+    );
+
+    for (provider, remote_id, page_url) in [
+        (
+            "nexus",
+            "44",
+            "https://www.nexusmods.com/wuchangfallenfeathers/mods/44",
+        ),
+        (
+            "nexus",
+            "3",
+            "https://www.nexusmods.com/anothergame/mods/3",
+        ),
+        (
+            "workshop",
+            "3",
+            "https://www.nexusmods.com/wuchangfallenfeathers/mods/3",
+        ),
+    ] {
+        let plan = infer_deployment_plan_for_entry(
+            tmp.path(),
+            &staged,
+            Some(WUCHANG_STEAM_APPID),
+            provider,
+            remote_id,
+            page_url,
+        );
+        assert_eq!(plan.layout, ModLayout::WuchangPackage);
+        assert_eq!(plan.deploy_prefix, WUCHANG_MODS_PREFIX);
+    }
+}
+
+#[test]
+fn wuchang_loader_registry_matches_the_steam_title() {
+    let loaders = loader_compatibility(None, Some(WUCHANG_STEAM_APPID));
+    let loader = loaders
+        .iter()
+        .find(|loader| loader.name == "Wuchang Mod Enabler")
+        .unwrap();
+    assert!(loader.compatible);
+    assert!(loader.reason.contains("WUCHANG"));
+}
+
+#[test]
 fn mewgenics_uses_launch_time_modpaths() {
     let tmp = tempdir().unwrap();
     let target = tmp.path().join("game");

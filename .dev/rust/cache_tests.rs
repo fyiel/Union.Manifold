@@ -121,6 +121,51 @@ async fn in_flight_fetch_after_clear_does_not_re_seed_the_cache() {
 }
 
 #[tokio::test]
+async fn keyed_cache_coalesces_concurrent_fetches_for_the_same_key() {
+    let c = std::sync::Arc::new(KeyedCache::new(Duration::from_secs(60)));
+    let calls = std::sync::Arc::new(AtomicUsize::new(0));
+    let started = std::sync::Arc::new(tokio::sync::Notify::new());
+    let release = std::sync::Arc::new(tokio::sync::Notify::new());
+
+    let first = tokio::spawn({
+        let cache = c.clone();
+        let calls = calls.clone();
+        let started = started.clone();
+        let release = release.clone();
+        async move {
+            cache
+                .get_or("catalog", || async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    started.notify_one();
+                    release.notified().await;
+                    Some(42)
+                })
+                .await
+        }
+    });
+    started.notified().await;
+    let second = tokio::spawn({
+        let cache = c.clone();
+        let calls = calls.clone();
+        async move {
+            cache
+                .get_or("catalog", || async move {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Some(99)
+                })
+                .await
+        }
+    });
+    tokio::task::yield_now().await;
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    release.notify_one();
+    assert_eq!(first.await.unwrap(), Some(42));
+    assert_eq!(second.await.unwrap(), Some(42));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
 async fn bounded_cache_evicts_oldest_beyond_limit() {
     let c: KeyedCache<u32> = KeyedCache::with_limit(Duration::from_secs(60), 2);
     c.get_or("a", || async { Some(1) }).await;

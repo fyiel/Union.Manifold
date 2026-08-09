@@ -602,104 +602,97 @@ async fn run_query_stream(
     if let Some(cp) = pool_cache.peek(&sig).await {
         return page_from(&cp, &params, &ids, reg);
     }
-    // Capture the cache epoch before the fetch loop: a sources_refresh clear()
-    // mid-fetch must discard this pool's store, or pre-refresh data would be
-    // served as fresh for the full TTL.
-    let epoch = pool_cache.epoch();
     let mut p = params.clone();
     p.limit = POOL_SIZE;
     p.offset = 0;
-    let mut futs = FuturesUnordered::new();
-    for id in ids.clone() {
-        let pp = p.clone();
-        futs.push(async move {
-            let games = adapter_query(&id, &pp).await;
-            (id, games)
-        });
-    }
-    let mut pool: Vec<SourceGame> = Vec::new();
-    let mut done: Vec<String> = Vec::new();
-    let mut failed: Vec<String> = Vec::new();
-    let mut status: Vec<filters::SourceStatus> = Vec::new();
-    let mut errored = false;
-    let mut latest: Option<std::sync::Arc<CachedPool>> = None;
-    while let Some((id, games)) = futs.next().await {
-        match games {
-            Some(g) if g.is_empty() => {
-                done.push(id.clone());
-                status.push(filters::SourceStatus {
-                    id,
-                    ok: true,
-                    games: 0,
-                    reason: None,
+    let app = app.clone();
+    let ids_fetch = ids.clone();
+    let page_params = params.clone();
+    let cached = pool_cache
+        .get_or(&sig, || async move {
+            let mut futs = FuturesUnordered::new();
+            for id in ids_fetch {
+                let pp = p.clone();
+                futs.push(async move {
+                    let games = adapter_query(&id, &pp).await;
+                    (id, games)
                 });
             }
-            Some(mut g) => {
-                done.push(id.clone());
-                let n = g.len();
-                pool.append(&mut g);
-                status.push(filters::SourceStatus {
-                    id,
-                    ok: true,
-                    games: n,
-                    reason: None,
+            let mut pool: Vec<SourceGame> = Vec::new();
+            let mut done: Vec<String> = Vec::new();
+            let mut failed: Vec<String> = Vec::new();
+            let mut status: Vec<filters::SourceStatus> = Vec::new();
+            let mut errored = false;
+            let mut latest = empty_pool();
+            while let Some((id, games)) = futs.next().await {
+                match games {
+                    Some(g) if g.is_empty() => {
+                        done.push(id.clone());
+                        status.push(filters::SourceStatus {
+                            id,
+                            ok: true,
+                            games: 0,
+                            reason: None,
+                        });
+                    }
+                    Some(mut g) => {
+                        done.push(id.clone());
+                        let n = g.len();
+                        pool.append(&mut g);
+                        status.push(filters::SourceStatus {
+                            id,
+                            ok: true,
+                            games: n,
+                            reason: None,
+                        });
+                    }
+                    None => {
+                        // A failed source must not be labelled 'done' in the stream:
+                        // the renderer strip keys off doneSources to show progress.
+                        errored = true;
+                        failed.push(id.clone());
+                        status.push(filters::SourceStatus {
+                            id,
+                            ok: false,
+                            games: 0,
+                            reason: Some("no response".to_string()),
+                        });
+                    }
+                }
+                let (ordered, facets, total) = filters::finalize_pool(pool.clone(), &p);
+                let page: Vec<schema::UnifiedGame> = ordered
+                    .iter()
+                    .skip(page_params.offset)
+                    .take(page_params.limit)
+                    .cloned()
+                    .collect();
+                app.emit(
+                    "uc:browse-partial",
+                    json!({
+                        "reqId": req_id,
+                        "games": page,
+                        "total": total,
+                        "doneSources": done,
+                        "failedSources": failed,
+                    }),
+                )
+                .ok();
+                latest = std::sync::Arc::new(CachedPool {
+                    ordered,
+                    facets,
+                    total,
+                    errored,
+                    status: status.clone(),
+                    raw: pool.clone(),
+                    fetched_at_ms: now_ms(),
                 });
             }
-            None => {
-                // A failed source must not be labelled 'done' in the stream:
-                // the renderer strip keys off doneSources to show progress.
-                errored = true;
-                failed.push(id.clone());
-                status.push(filters::SourceStatus {
-                    id,
-                    ok: false,
-                    games: 0,
-                    reason: Some("no response".to_string()),
-                });
-            }
-        }
-        let (ordered, facets, total) = filters::finalize_pool(pool.clone(), &p);
-        let page: Vec<schema::UnifiedGame> = ordered
-            .iter()
-            .skip(params.offset)
-            .take(params.limit)
-            .cloned()
-            .collect();
-        app.emit(
-            "uc:browse-partial",
-            json!({
-                "reqId": req_id,
-                "games": page,
-                "total": total,
-                "doneSources": done,
-                "failedSources": failed,
-            }),
-        )
-        .ok();
-        latest = Some(std::sync::Arc::new(CachedPool {
-            ordered,
-            facets,
-            total,
-            errored,
-            status: status.clone(),
-            raw: pool.clone(),
-            fetched_at_ms: now_ms(),
-        }));
-    }
-    let cp = latest.unwrap_or_else(empty_pool);
-    record_health(&cp.status);
-    let stored = cp.clone();
-    pool_cache.store_if_epoch(&sig, epoch, stored).await;
+            record_health(&latest.status);
+            Some(latest)
+        })
+        .await;
+    let cp = cached.unwrap_or_else(empty_pool);
     page_from(&cp, &params, &ids, reg)
-}
-
-pub async fn warm_catalog(reg: &Registry) {
-    let params = QueryParams {
-        balanced: true,
-        limit: 48,
-        ..Default::default()
-    };
-    let _ = run_query(reg, params).await;
 }
 
 pub async fn warm_hydralinks(app: AppHandle) {
@@ -795,17 +788,20 @@ pub async fn sources_search(
 
 #[tauri::command]
 pub async fn sources_detail(_state: State<'_, AppState>, sources: Vec<Value>) -> Result<Value> {
-    let mut records: Vec<SourceGame> = Vec::new();
-    for stub in &sources {
-        let sid = stub.get("sourceId").and_then(|v| v.as_str()).unwrap_or("");
+    let records = crate::http::map_limit(sources, 4, |stub| async move {
+        let sid = stub
+            .get("sourceId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let slug = stub
             .get("sourceSlug")
             .and_then(|v| v.as_str())
-            .unwrap_or("");
-        if let Some(g) = adapter_detail(sid, slug).await {
-            records.push(g);
-        }
-    }
+            .unwrap_or("")
+            .to_string();
+        adapter_detail(&sid, &slug).await
+    })
+    .await;
     if records.is_empty() {
         return Ok(json!({ "ok": true, "game": Value::Null }));
     }

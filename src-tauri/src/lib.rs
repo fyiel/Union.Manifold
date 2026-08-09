@@ -191,7 +191,6 @@ pub fn run() {
                 })
                 .unwrap_or_default();
             let sources = Arc::new(Registry::new(&disabled_sources));
-            let sources_warm = sources.clone();
             let default_root = default_download_root(&paths.data_dir);
             let downloads =
                 DownloadEngine::new(handle.clone(), settings.clone(), default_root, aria2);
@@ -208,9 +207,6 @@ pub fn run() {
             let managed_handle = handle.clone();
             tauri::async_runtime::spawn(async move {
                 slipgate_managed::autostart(managed_handle, managed_paths, managed_settings).await;
-            });
-            tauri::async_runtime::spawn(async move {
-                sources::warm_catalog(&sources_warm).await;
             });
             let hydra_handle = handle.clone();
             tauri::async_runtime::spawn(async move {

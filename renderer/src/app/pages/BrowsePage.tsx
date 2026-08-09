@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import { X } from "lucide-react"
-import { querySources, rememberGames, sourcesAvailable, listSources, onSourcesChanged, mergeUnique, countMirrors, nextSortMode, sortModeLabel, type SourceSortMode, sortUnifiedGames } from "@/lib/sources"
+import { querySources, nextSourceRequestId, rememberGames, sourcesAvailable, listSources, onSourcesChanged, mergeUnique, countMirrors, nextSortMode, sortModeLabel, type SourceSortMode, sortUnifiedGames } from "@/lib/sources"
 import { getBrowseCache, setBrowseCache, setBrowseScroll, consumeDiskRestore } from "@/lib/browse-cache"
 import { GameCard } from "@/app/manifold/GameCard"
 import { MONO, SearchIcon, SmartImage, Spinner, CenterState } from "@/app/manifold/ui"
@@ -22,6 +22,7 @@ export function BrowsePage() {
   const [sourceCounts, setSourceCounts] = useState<Record<string, number>>(() => cached?.counts ?? {})
   const [loadingMore, setLoadingMore] = useState(false)
   const [sourcesErrored, setSourcesErrored] = useState(false)
+  const [sourceError, setSourceError] = useState<string | null>(null)
   const [zoomedCover, setZoomedCover] = useState<ZoomedCover | null>(null)
 
   const reqId = useRef(0)
@@ -75,11 +76,17 @@ export function BrowsePage() {
 
   const runQuery = useCallback(async (text: string, append = false) => {
     const q = text.trim()
-    const id = ++reqId.current
+    const id = nextSourceRequestId()
+    reqId.current = id
     appendReqRef.current = append ? id : null
     const srcs = sourcesRef.current
     const startOffset = append ? offsetRef.current : 0
     if (!append) {
+      appendReqRef.current = null
+      loadingMoreRef.current = false
+      setLoadingMore(false)
+      setSourceError(null)
+      setSourcesErrored(false)
       setCommitted(q)
       setStatus((prev) => {
         const next = { ...prev }
@@ -93,11 +100,23 @@ export function BrowsePage() {
         : { sort: "latest", balanced: true, offset: startOffset, limit: PAGE }
       const res = await querySources(params, id)
       if (id !== reqId.current) return
+      if (!res.ok) {
+        setSourceError(res.error || "Source query failed")
+        setSourcesErrored(true)
+        setStatus((prev) => {
+          const next = { ...prev }
+          for (const s of srcs) if (s.enabled) next[s.id] = "failed"
+          return next
+        })
+        return
+      }
       rememberGames(res.games)
       const nextGames = append ? mergeUnique(gamesRef.current, res.games) : res.games
+      gamesRef.current = nextGames
       setGames(nextGames)
       offsetRef.current = startOffset + PAGE
       setTotal(append && res.games.length === 0 ? nextGames.length : res.total)
+      setSourceError(null)
       setSourcesErrored("sourcesErrored" in res && res.sourcesErrored === true)
       setSourceCounts(countMirrors(nextGames).perSource)
       setStatus((prev) => {
@@ -108,7 +127,9 @@ export function BrowsePage() {
       })
     } catch {
       if (id !== reqId.current) return
-      if (!append) setStatus((prev) => {
+      setSourceError("Source query failed")
+      setSourcesErrored(true)
+      setStatus((prev) => {
         const next = { ...prev }
         for (const s of srcs) if (s.enabled) next[s.id] = "failed"
         return next
@@ -120,11 +141,16 @@ export function BrowsePage() {
     if (loadingMoreRef.current) return
     loadingMoreRef.current = true
     setLoadingMore(true)
+    const request = runQuery(committed, true)
+    const owner = appendReqRef.current
     try {
-      await runQuery(committed, true)
+      await request
     } finally {
-      loadingMoreRef.current = false
-      setLoadingMore(false)
+      if (appendReqRef.current === owner) {
+        appendReqRef.current = null
+        loadingMoreRef.current = false
+        setLoadingMore(false)
+      }
     }
   }, [runQuery, committed])
 
@@ -164,10 +190,12 @@ export function BrowsePage() {
       const merged = isAppend ? mergeUnique(gamesRef.current, payload.games) : payload.games
       rememberGames(payload.games)
       setGames(merged)
+      gamesRef.current = merged
       setTotal(payload.total)
       setSourceCounts(countMirrors(merged).perSource)
       const done = new Set(payload.doneSources)
       const failed = new Set(payload.failedSources)
+      if (failed.size) setSourcesErrored(true)
       setStatus((prev) => {
         const next = { ...prev }
         for (const s of sourcesRef.current) {
@@ -320,10 +348,10 @@ export function BrowsePage() {
 
       {}
       <div ref={scrollerRef} className="mf-scroll" onScroll={onScroll} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "22px 36px 40px" }}>
-        {sourcesErrored && (
+        {(sourcesErrored || sourceError) && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)" }}>
             <span style={{ width: 6, height: 6, borderRadius: 99, background: "#7a4a4a", flexShrink: 0 }} />
-            Some sources unavailable
+            {sourceError || "Some sources unavailable"}
             <button type="button" onClick={() => void runQuery(committed)} style={{ fontFamily: MONO, fontSize: 10, color: "#c98080", cursor: "pointer", textDecoration: "underline", background: "none", border: "none", padding: 0 }}>retry</button>
           </div>
         )}
@@ -348,6 +376,8 @@ export function BrowsePage() {
             <Spinner size={26} stroke="var(--mf-t5)" />
             <span style={{ fontFamily: MONO, fontSize: 12, color: "var(--mf-t4)" }}>querying {sources.length} sources{committed ? ` for “${committed}”` : ""}…</span>
           </CenterState>
+        ) : sourceError ? (
+          <EmptyState text="sources unavailable — retry above" />
         ) : hasQuery ? (
           <CenterState>
             <SearchIcon size={30} stroke="var(--mf-t6)" />

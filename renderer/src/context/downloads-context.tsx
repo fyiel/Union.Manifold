@@ -516,8 +516,8 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
   }, [flushPersist])
 
   const reconcileInstalledState = useCallback(
-    async (appid?: string | null) => {
-      if (!appid || !window.ucDownloads?.getInstalled) return
+    async (appid?: string | null, installedAppids?: ReadonlySet<string>) => {
+      if (!appid || (!installedAppids && !window.ucDownloads?.getInstalled)) return
       if (downloadsRef.current.some((item) =>
         item.appid === appid &&
         item.update &&
@@ -526,7 +526,9 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       if (reconcileLocksRef.current.has(appid)) return
       reconcileLocksRef.current.add(appid)
       try {
-        const installed = await window.ucDownloads.getInstalled(appid)
+        const installed = installedAppids !== undefined
+          ? installedAppids.has(appid)
+          : await window.ucDownloads?.getInstalled?.(appid)
         if (!installed) return
         const prev = downloadsRef.current
         let mutated = false
@@ -571,7 +573,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           }
         }
         try {
-          await window.ucDownloads.deleteInstalling?.(appid)
+          await window.ucDownloads?.deleteInstalling?.(appid)
         } catch { }
       } catch {
       } finally {
@@ -1094,21 +1096,36 @@ const resolveWithTimeout = useCallback(async (host: string, targetUrl: string) =
 
   useEffect(() => {
     if (typeof window === "undefined") return
-    const reconcile = (statuses: DownloadStatus[]) => {
+    let installedSnapshot: Promise<Set<string> | undefined> | null = null
+    const getInstalledSnapshot = () => {
+      if (installedSnapshot) return installedSnapshot
+      installedSnapshot = (async () => {
+        try {
+          const installed = await window.ucDownloads?.listInstalled?.()
+          if (!Array.isArray(installed)) return undefined
+          return new Set(installed.map((item) => String(item?.appid || item?.metadata?.appid || "")).filter(Boolean))
+        } catch {
+          return undefined
+        }
+      })().finally(() => { installedSnapshot = null })
+      return installedSnapshot
+    }
+    const reconcile = async (statuses: DownloadStatus[]) => {
       const candidates = downloadsRef.current.filter((item) => statuses.includes(item.status))
       if (!candidates.length) return
       const appids = new Set(candidates.map((item) => item.appid).filter(Boolean) as string[])
+      const installedAppids = await getInstalledSnapshot()
       for (const appid of appids) {
-        void reconcileInstalledState(appid)
+        void reconcileInstalledState(appid, installedAppids)
       }
     }
     const interval = setInterval(() => {
       if (document.hidden) return
-      reconcile(["extracting", "installing"])
+      void reconcile(["extracting", "installing"])
     }, 3000)
     const onReturn = () => {
       if (document.hidden) return
-      reconcile(["extracting", "installing", "paused"])
+      void reconcile(["extracting", "installing", "paused"])
     }
     document.addEventListener("visibilitychange", onReturn)
     window.addEventListener("focus", onReturn)

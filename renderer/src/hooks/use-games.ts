@@ -18,7 +18,7 @@ type GamesDataState = {
   error: string | null
 }
 
-export function useGamesData() {
+export function useGamesData(enabled = true) {
   const connectivity = useConnectivityStatus()
   const initialCache = getCatalogCache()
   const [state, setState] = useState<GamesDataState>(() => ({
@@ -28,6 +28,7 @@ export function useGamesData() {
   }))
 
   useEffect(() => {
+    if (!enabled) return
     let cancelled = false
 
     const load = async () => {
@@ -57,6 +58,7 @@ export function useGamesData() {
       try {
         const now = Date.now()
         const games = shouldRefreshGames ? await fetchCatalogGames() : getCatalogCache().games
+        if (cancelled) return
         const mergedGames = await mergeInstalledGames(games)
         if (cancelled) return
 
@@ -105,7 +107,7 @@ export function useGamesData() {
       if (idleHandle !== null && typeof cancelIdleCallback === "function") cancelIdleCallback(idleHandle)
       if (timerHandle !== null) window.clearTimeout(timerHandle)
     }
-  }, [connectivity.isOnline])
+  }, [connectivity.isOnline, enabled])
 
   return state
 }

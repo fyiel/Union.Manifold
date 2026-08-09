@@ -1,10 +1,8 @@
 import { memo, useState } from "react"
 import { Link } from "react-router-dom"
 import { ArrowDownToLine, Maximize2 } from "lucide-react"
-import { sourceAbbr, sourceName, sourceIsDirect, getSourceDetail, getRememberedGame, rememberGames, rememberGameAs } from "@/lib/sources"
+import { sourceAbbr, sourceName, sourceIsDirect } from "@/lib/sources"
 import { MONO, COVER_LINES, gbLabel, SmartImage, useGameImages } from "@/app/manifold/ui"
-
-const prefetched = new Set<string>()
 
 export const GameCard = memo(function GameCard({
   game,
@@ -23,19 +21,9 @@ export const GameCard = memo(function GameCard({
   const detailUrl = `/g/${encodeURIComponent(game.dedupKey)}`
   const detailState = { game }
 
-  const prefetchDetail = () => {
-    const key = game.dedupKey
-    if (!key || game.fullyResolved || prefetched.has(key) || getRememberedGame(key)?.fullyResolved) return
-    prefetched.add(key)
-    const stubs = game.sources.map((s) => ({ sourceId: s.sourceId, sourceSlug: s.sourceSlug }))
-    void getSourceDetail(stubs).then((full) => { if (full) { rememberGames([full]); rememberGameAs(key, full) } }).catch(() => {})
-  }
-
   return (
     <div
       className="mf-card"
-      onMouseEnter={prefetchDetail}
-      onFocus={prefetchDetail}
       style={{ display: "flex", flexDirection: "column", border: "1px solid color-mix(in srgb, var(--mf-t0) 7%, transparent)", borderRadius: 10, overflow: "hidden", background: "var(--mf-panel)", contentVisibility: "auto", containIntrinsicSize: "auto 300px" }}
     >
       <div style={{ position: "relative", aspectRatio: "3 / 4", background: hasImg ? "#0f0f0f" : COVER_LINES }}>

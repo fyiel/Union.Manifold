@@ -2,13 +2,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
   collectDownloadEntries,
   forgetRememberedGame,
+  getSourceDetail,
   getRememberedGame,
   hostFriendliness,
   orderSourcesByPreference,
   pickPrimaryDownload,
   rememberGames,
+  resolveInstalledGame,
   loadDisabledSources,
   loadSourcePriority,
+  nextSourceRequestId,
   sourceAbbr,
   sourceDirect,
   sourceName,
@@ -17,6 +20,13 @@ import {
   unifiedToGame,
   type DownloadEntry,
 } from "@/lib/sources"
+
+describe("source request ids", () => {
+  it("allocates globally unique increasing ids across mounted pages", () => {
+    const first = nextSourceRequestId()
+    expect(nextSourceRequestId()).toBe(first + 1)
+  })
+})
 
 function opt(hostType: string, resolvable: boolean, url = `https://${hostType}.example/f`): SourceDownloadOption {
   return { label: hostType, hostType, url, resolvable }
@@ -162,6 +172,64 @@ describe("remembered games cache", () => {
     expect(getRememberedGame("title:some game")?.title).toBe("Portal 2")
     forgetRememberedGame("title:some game")
     expect(getRememberedGame("title:some game")).toBeUndefined()
+  })
+})
+
+describe("detail request sharing", () => {
+  it("reuses one in-flight native detail request and releases it afterward", async () => {
+    let release: (value: { ok: true; game: null }) => void = () => {}
+    const detail = vi.fn()
+      .mockImplementationOnce(() => new Promise<{ ok: true; game: null }>((resolve) => { release = resolve }))
+      .mockResolvedValue({ ok: true, game: null })
+    ;(window as any).ucSources = { detail }
+    const stubs = [{ sourceId: "steamrip", sourceSlug: "instant-game" }]
+
+    const first = getSourceDetail(stubs)
+    const second = getSourceDetail(stubs)
+    expect(first).toBe(second)
+    expect(detail).toHaveBeenCalledTimes(1)
+
+    release({ ok: true, game: null })
+    await Promise.all([first, second])
+    await getSourceDetail(stubs)
+    expect(detail).toHaveBeenCalledTimes(2)
+    ;(window as any).ucSources = undefined
+  })
+
+  it("releases a rejected request so the next attempt can retry", async () => {
+    const detail = vi.fn()
+      .mockRejectedValueOnce(new Error("temporary scrape failure"))
+      .mockResolvedValue({ ok: true, game: null })
+    ;(window as any).ucSources = { detail }
+    const stubs = [{ sourceId: "steamrip", sourceSlug: "retry-game" }]
+
+    await expect(getSourceDetail(stubs)).rejects.toThrow("temporary scrape failure")
+    await getSourceDetail(stubs)
+
+    expect(detail).toHaveBeenCalledTimes(2)
+    ;(window as any).ucSources = undefined
+  })
+})
+
+describe("installed-game resolution sharing", () => {
+  it("coalesces the complete search and detail chain", async () => {
+    let releaseSearch: (value: { ok: true; games: UnifiedSourceGame[] }) => void = () => {}
+    const search = vi.fn()
+      .mockImplementationOnce(() => new Promise<{ ok: true; games: UnifiedSourceGame[] }>((resolve) => { releaseSearch = resolve }))
+      .mockResolvedValue({ ok: true, games: [] })
+    ;(window as any).ucSources = { search }
+
+    const first = resolveInstalledGame("local-shared", "Shared Game")
+    const second = resolveInstalledGame("local-shared", "Shared Game")
+
+    expect(first).toBe(second)
+    expect(search).toHaveBeenCalledTimes(1)
+    releaseSearch({ ok: true, games: [] })
+    await Promise.all([first, second])
+
+    await resolveInstalledGame("local-shared", "Shared Game")
+    expect(search).toHaveBeenCalledTimes(2)
+    ;(window as any).ucSources = undefined
   })
 })
 

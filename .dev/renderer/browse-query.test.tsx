@@ -1,0 +1,108 @@
+import { act, fireEvent, render, screen } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
+import { afterEach, describe, expect, it, vi } from "vitest"
+
+const querySources = vi.hoisted(() => vi.fn())
+
+vi.mock("@/lib/browse-cache", () => ({
+  getBrowseCache: () => null,
+  setBrowseCache: vi.fn(),
+  setBrowseScroll: vi.fn(),
+  consumeDiskRestore: () => false,
+}))
+vi.mock("@/app/manifold/GameCard", () => ({ GameCard: ({ game }: any) => <div>{game.title}</div> }))
+vi.mock("@/lib/sources", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/sources")>(),
+  sourcesAvailable: () => true,
+  listSources: async () => [{ id: "steamrip", name: "SteamRIP", enabled: true, available: true }],
+  onSourcesChanged: () => () => {},
+  querySources,
+  rememberGames: vi.fn(),
+}))
+
+import { BrowsePage } from "@/app/pages/BrowsePage"
+
+const result = (title: string) => ({
+  ok: true,
+  games: [{ dedupKey: title, title, sources: [{ sourceId: "steamrip", id: title }] }],
+  total: 1,
+  facets: { tags: [] },
+  applied: {},
+  capabilities: { perSource: [] },
+})
+
+const deferred = <T,>() => {
+  let resolve: (value: T) => void = () => {}
+  const promise = new Promise<T>((done) => { resolve = done })
+  return { promise, resolve }
+}
+
+describe("Browse source query failures", () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+    Object.defineProperty(window, "ucSources", { configurable: true, writable: true, value: undefined })
+  })
+
+  it("preserves stable rows on native failure and recovers on retry", async () => {
+    vi.useFakeTimers()
+    querySources.mockReset()
+      .mockResolvedValueOnce(result("stable result"))
+      .mockResolvedValueOnce({ ...result("ignored"), ok: false, games: [], total: 0, error: "offline" })
+      .mockResolvedValueOnce(result("recovered result"))
+
+    render(<MemoryRouter><BrowsePage /></MemoryRouter>)
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { vi.advanceTimersByTime(0); await Promise.resolve() })
+    expect(screen.getByText("stable result")).toBeTruthy()
+
+    fireEvent.change(screen.getByPlaceholderText("search every source…"), { target: { value: "broken" } })
+    await act(async () => { vi.advanceTimersByTime(300); await Promise.resolve() })
+    expect(screen.getByText("stable result")).toBeTruthy()
+    expect(screen.getByText("offline")).toBeTruthy()
+
+    fireEvent.click(screen.getAllByText("retry")[0])
+    await act(async () => { await Promise.resolve() })
+    expect(screen.getByText("recovered result")).toBeTruthy()
+    expect(screen.queryByText("offline")).toBeNull()
+  })
+
+  it("owns partial events and warns as soon as a current source fails", async () => {
+    vi.useFakeTimers()
+    const final = deferred<ReturnType<typeof result>>()
+    let onPartial: ((payload: any) => void) | undefined
+    Object.defineProperty(window, "ucSources", {
+      configurable: true,
+      writable: true,
+      value: { onBrowsePartial: (callback: (payload: any) => void) => { onPartial = callback; return () => {} } },
+    })
+    querySources.mockReset().mockReturnValueOnce(final.promise)
+
+    render(<MemoryRouter><BrowsePage /></MemoryRouter>)
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { vi.advanceTimersByTime(0); await Promise.resolve() })
+    const requestId = querySources.mock.calls[0][1]
+
+    act(() => onPartial?.({
+      reqId: requestId - 1,
+      games: result("stale partial").games,
+      total: 1,
+      doneSources: [],
+      failedSources: ["steamrip"],
+    }))
+    expect(screen.queryByText("stale partial")).toBeNull()
+
+    act(() => onPartial?.({
+      reqId: requestId,
+      games: result("current partial").games,
+      total: 1,
+      doneSources: [],
+      failedSources: ["steamrip"],
+    }))
+    expect(screen.getByText("current partial")).toBeTruthy()
+    expect(screen.getByText("Some sources unavailable")).toBeTruthy()
+
+    await act(async () => { final.resolve(result("final result")); await final.promise })
+    expect(screen.getByText("final result")).toBeTruthy()
+  })
+})

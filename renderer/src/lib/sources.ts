@@ -100,18 +100,44 @@ async function searchSources(query: string, limit = 24): Promise<UnifiedSourceGa
 }
 
 
-export async function getSourceDetail(
+const _detailRequests = new Map<string, Promise<UnifiedSourceGame | null>>()
+
+export function getSourceDetail(
   sources: Array<{ sourceId: string; sourceSlug: string }>
 ): Promise<UnifiedSourceGame | null> {
-  const res = await api()?.detail?.(sources)
-  return res?.ok ? res.game : null
+  const key = JSON.stringify(sources)
+  const pending = _detailRequests.get(key)
+  if (pending) return pending
+  const request = (async () => {
+    const res = await api()?.detail?.(sources)
+    return res?.ok ? res.game : null
+  })()
+  _detailRequests.set(key, request)
+  void request.finally(() => {
+    if (_detailRequests.get(key) === request) _detailRequests.delete(key)
+  }).catch(() => {})
+  return request
 }
 
 function normTitle(s: string): string {
   return slugify(s)
 }
 
-export async function resolveInstalledGame(appid: string, title: string, knownSteamAppId?: number | null): Promise<UnifiedSourceGame | null> {
+const _installedResolutionRequests = new Map<string, Promise<UnifiedSourceGame | null>>()
+
+export function resolveInstalledGame(appid: string, title: string, knownSteamAppId?: number | null): Promise<UnifiedSourceGame | null> {
+  const key = JSON.stringify([appid, title.trim(), knownSteamAppId ?? null])
+  const pending = _installedResolutionRequests.get(key)
+  if (pending) return pending
+  const request = resolveInstalledGameOnce(appid, title, knownSteamAppId)
+  _installedResolutionRequests.set(key, request)
+  void request.finally(() => {
+    if (_installedResolutionRequests.get(key) === request) _installedResolutionRequests.delete(key)
+  }).catch(() => {})
+  return request
+}
+
+async function resolveInstalledGameOnce(appid: string, title: string, knownSteamAppId?: number | null): Promise<UnifiedSourceGame | null> {
   if (!knownSteamAppId && /^\d+$/.test(appid)) {
     const full = await getSourceDetail([{ sourceId: "unioncrax", sourceSlug: appid }])
     if (full) return full
@@ -159,11 +185,17 @@ const EMPTY_QUERY_RESULT: SourceQueryResult = {
   capabilities: { perSource: [] },
 }
 
+let _sourceRequestId = 0
+export function nextSourceRequestId(): number {
+  _sourceRequestId += 1
+  return _sourceRequestId
+}
+
 export async function querySources(params: SourceQueryParams, reqId?: number): Promise<SourceQueryResult> {
   const res = await api()?.query?.(params, reqId)
   if (!res?.ok) {
     if (res?.error) sourceLogger.warn("sources query failed", { data: res.error })
-    return { ...EMPTY_QUERY_RESULT, applied: params }
+    return { ...EMPTY_QUERY_RESULT, applied: params, error: res?.error || "Source query failed" }
   }
   return res
 }

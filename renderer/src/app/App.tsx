@@ -8,11 +8,12 @@ import { ToastProvider } from "@/context/toast-context"
 import { Toaster } from "@/components/Toaster"
 import { ControllerNavigation } from "@/components/ControllerNavigation"
 import { ThemeBoundary } from "@/components/ThemeBoundary"
+import { SourceGameRoute } from "@/app/pages/SourceGamePage"
+import { applySavedSourceSettings } from "@/lib/sources"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { AlertTriangle } from "@/components/icons"
 
-const SourceGamePage = lazy(() => import("@/app/pages/SourceGamePage").then((m) => ({ default: m.SourceGamePage })))
 const GameModsPage = lazy(() => import("@/app/pages/GameModsPage").then((m) => ({ default: m.GameModsPage })))
 const AchievementToastWindow = lazy(() => import("@/app/pages/AchievementToastWindow"))
 
@@ -143,7 +144,7 @@ function DownloadBlockedGuard() {
 
 function AppWithDownloads() {
   useEffect(() => {
-    void import("@/lib/sources").then((m) => m.applySavedSourceSettings())
+    void applySavedSourceSettings()
   }, [])
   return (
     <>
@@ -170,7 +171,7 @@ export default function App() {
 
               {}
               <Route element={<AppWithDownloads />}>
-                <Route path="/g/:key" element={<SourceGamePage />} />
+                <Route path="/g/:key" element={<SourceGameRoute />} />
                 <Route path="/g/:key/mods" element={<GameModsPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Route>

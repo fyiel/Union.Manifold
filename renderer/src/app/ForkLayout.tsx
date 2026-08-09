@@ -1,36 +1,17 @@
 import { Outlet, useLocation, useNavigate } from "react-router-dom"
-import { lazy, Suspense, useEffect, useRef, type CSSProperties, type ReactNode } from "react"
+import { Suspense, useEffect, useRef, type CSSProperties, type ReactNode } from "react"
 import { Minus, Square, X } from "lucide-react"
 import { Sidebar } from "@/app/manifold/Sidebar"
+import { AdvancedSearchPage } from "@/app/pages/AdvancedSearchPage"
+import { AchievementsPage } from "@/app/pages/AchievementsPage"
+import { BrowsePage } from "@/app/pages/BrowsePage"
+import { DownloadsPage } from "@/app/pages/DownloadsPage"
+import { LibraryPage } from "@/app/pages/LibraryPage"
+import { PlayLaterPage } from "@/app/pages/PlayLaterPage"
+import { SettingsPage } from "@/app/pages/SettingsPage"
 import { usePauseDownloadsWhilePlaying } from "@/hooks/use-pause-on-launch"
 import { TabVisibleProvider } from "@/context/tab-visibility"
 import { cn } from "@/lib/utils"
-
-const importAdvanced = () => import("@/app/pages/AdvancedSearchPage")
-const importLibrary = () => import("@/app/pages/LibraryPage")
-const importPlayLater = () => import("@/app/pages/PlayLaterPage")
-const importAchievements = () => import("@/app/pages/AchievementsPage")
-const importDownloads = () => import("@/app/pages/DownloadsPage")
-const importSettings = () => import("@/app/pages/SettingsPage")
-const importDetail = () => import("@/app/pages/SourceGamePage")
-
-const AdvancedSearchPage = lazy(() => importAdvanced().then((m) => ({ default: m.AdvancedSearchPage })))
-const LibraryPage = lazy(() => importLibrary().then((m) => ({ default: m.LibraryPage })))
-const PlayLaterPage = lazy(() => importPlayLater().then((m) => ({ default: m.PlayLaterPage })))
-const AchievementsPage = lazy(() => importAchievements().then((m) => ({ default: m.AchievementsPage })))
-const DownloadsPage = lazy(() => importDownloads().then((m) => ({ default: m.DownloadsPage })))
-const SettingsPage = lazy(() => importSettings().then((m) => ({ default: m.SettingsPage })))
-const BrowsePage = lazy(() => import("@/app/pages/BrowsePage").then((m) => ({ default: m.BrowsePage })))
-
-function prefetchRoutes() {
-  void importAdvanced()
-  void importLibrary()
-  void importPlayLater()
-  void importAchievements()
-  void importDownloads()
-  void importSettings()
-  void importDetail()
-}
 
 const drag = { WebkitAppRegion: "drag" } as CSSProperties
 const noDrag = { WebkitAppRegion: "no-drag" } as CSSProperties
@@ -65,16 +46,6 @@ export function ForkLayout() {
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
   usePauseDownloadsWhilePlaying()
-
-  useEffect(() => {
-    const ric = (window as unknown as { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback
-    if (ric) {
-      const id = ric(prefetchRoutes)
-      return () => (window as unknown as { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback?.(id)
-    }
-    const t = setTimeout(prefetchRoutes, 200)
-    return () => clearTimeout(t)
-  }, [])
 
   const startupRouted = useRef(false)
   useEffect(() => {
@@ -121,9 +92,7 @@ export function ForkLayout() {
         </div>
 
         <div ref={scrollRef} style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", overflowX: "hidden" }}>
-          <Suspense fallback={<div style={{ flex: 1 }} aria-hidden />}>
-            <TabHost path={location.pathname} />
-          </Suspense>
+          <TabHost path={location.pathname} />
           {!TABS[location.pathname] && (
             <Suspense fallback={<div style={{ flex: 1 }} aria-hidden />}>
               <Outlet />

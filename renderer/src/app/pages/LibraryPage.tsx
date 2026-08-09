@@ -5,7 +5,7 @@ import { useGamesData } from "@/hooks/use-games"
 import { useGameLaunch } from "@/context/game-launch-context"
 import { useToast } from "@/context/toast-context"
 import { useRunningGame } from "@/hooks/use-running-games"
-import { useDownloadsSelector } from "@/context/downloads-context"
+import { useDownloadsSelector, type DownloadStatus } from "@/context/downloads-context"
 import { useTabVisible } from "@/context/tab-visibility"
 import { hasInstalledVersionUpdate, proxyImageUrl } from "@/lib/utils"
 import { rememberGames, rememberGameAs, getRememberedGame, resolveInstalledGame, getDownloadArt, hydrateDownloadArt, steamCoverUrl, forgetRememberedGame } from "@/lib/sources"
@@ -36,6 +36,15 @@ type LibraryGameMeta = { collections?: string[]; lastPlayedAt?: number; playTime
 type CachedGame = { cachedAt: number; game: UnifiedSourceGame }
 const GAME_CACHE_KEY = "libraryGameCache"
 const GAME_CACHE_TTL_MS = 3 * 60 * 60 * 1000
+const EMPTY_LIVE_DOWNLOADS: Array<{
+  appid: string
+  name: string
+  status: DownloadStatus
+  pct: number
+  total: number
+  speed: number
+  extract: number | null
+}> = []
 
 type FilterKey = "All" | "Favorites" | "Recently played" | "Updates"
 const FILTERS: FilterKey[] = ["All", "Favorites", "Recently played", "Updates"]
@@ -98,7 +107,7 @@ function InstallingStrip({ installingMeta, installedIds, filter, query }: { inst
   const visibleRef = useRef(visible)
   visibleRef.current = visible
   const live = useDownloadsSelector(
-    (downloads) => downloads.map((d) => ({
+    (downloads) => !visibleRef.current ? EMPTY_LIVE_DOWNLOADS : downloads.map((d) => ({
       appid: d.appid,
       name: d.gameName,
       status: d.status,
@@ -169,7 +178,8 @@ function InstallingStrip({ installingMeta, installedIds, filter, query }: { inst
 }
 
 export function LibraryPage() {
-  const { games: catalog } = useGamesData()
+  const visible = useTabVisible()
+  const { games: catalog } = useGamesData(visible)
   const { requestLaunch, requestSetExecutable, stopGame } = useGameLaunch()
   const navigate = useNavigate()
   const { toast } = useToast()
@@ -179,6 +189,8 @@ export function LibraryPage() {
   const [installingMeta, setInstallingMeta] = useState<Array<{ appid: string; name: string; image?: string; status?: string }>>([])
   const [meta, setMeta] = useState<Record<string, LibraryGameMeta>>({})
   const [loading, setLoading] = useState(true)
+  const [cacheHydrated, setCacheHydrated] = useState(false)
+  const metaRef = useRef<Record<string, LibraryGameMeta>>({})
   const gameCacheRef = useRef<Record<string, CachedGame>>({})
 
   const [menu, setMenu] = useState<{ game: MenuGame; anchor: DOMRect } | null>(null)
@@ -215,26 +227,25 @@ export function LibraryPage() {
 
   useEffect(() => {
     let alive = true
+    let loadGeneration = 0
     const load = async () => {
-      try {
-        await hydrateDownloadArt()
-        const [value, gcValue, ofStatus] = await Promise.all([
-          window.ucSettings?.get?.("libraryGameMeta"),
-          window.ucSettings?.get?.(GAME_CACHE_KEY),
-          window.ucSources?.onlinefixStatus?.().catch(() => undefined),
-        ])
-        const m = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, LibraryGameMeta>) : {}
-        const gc = gcValue && typeof gcValue === "object" && !Array.isArray(gcValue) ? (gcValue as Record<string, CachedGame>) : {}
-        gameCacheRef.current = gc
-        if (!alive) return
+      const generation = ++loadGeneration
+      const current = () => alive && generation === loadGeneration
+      setCacheHydrated(false)
+      const artRequest = hydrateDownloadArt().catch(() => undefined)
+      const metaRequest = Promise.resolve(window.ucSettings?.get?.("libraryGameMeta")).catch(() => undefined)
+      const cacheRequest = Promise.resolve(window.ucSettings?.get?.(GAME_CACHE_KEY)).catch(() => undefined)
+      const onlineFixRequest = Promise.resolve(window.ucSources?.onlinefixStatus?.()).catch(() => undefined)
+      const installedRequest = Promise.resolve(window.ucDownloads?.listInstalled?.() || []).catch(() => [])
+      const installingRequest = Promise.resolve(window.ucDownloads?.listInstalling?.() || []).catch(() => [])
+
+      const installedList = await installedRequest
+      if (!current()) return
+      let m = metaRef.current
+
+      const commitInstalled = (gc: Record<string, CachedGame>) => {
+        if (!current()) return
         setMeta(m)
-        setOnlineFixReady(Boolean(ofStatus?.available))
-        setOnlineFixEnabled(Boolean(ofStatus?.enabled))
-        const [installedList, installingList] = await Promise.all([
-          window.ucDownloads?.listInstalled?.() || [],
-          window.ucDownloads?.listInstalling?.() || [],
-        ])
-        if (!alive) return
         const now = Date.now()
         const seen = new Set<string>()
         const games: LibGame[] = []
@@ -255,13 +266,39 @@ export function LibraryPage() {
           games.push(g)
         }
         setInstalled(games)
+      }
+
+      commitInstalled(gameCacheRef.current)
+      setLoading(false)
+
+      void metaRequest.then((value) => {
+        if (!current()) return
+        m = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, LibraryGameMeta>) : metaRef.current
+        metaRef.current = m
+        commitInstalled(gameCacheRef.current)
+      })
+
+      const gcValue = await cacheRequest
+      if (!current()) return
+      const gc = gcValue && typeof gcValue === "object" && !Array.isArray(gcValue) ? (gcValue as Record<string, CachedGame>) : gameCacheRef.current
+      gameCacheRef.current = gc
+      setCacheHydrated(true)
+      commitInstalled(gc)
+
+      const [ofStatus, installingList] = await Promise.all([onlineFixRequest, installingRequest])
+      if (!current()) return
+      setOnlineFixReady(Boolean(ofStatus?.available))
+      setOnlineFixEnabled(Boolean(ofStatus?.enabled))
+
+      const commitInstalling = () => {
+        if (!current()) return
         setInstallingMeta((installingList as any[]).map((e) => {
           const g = entryToLib(e, m)
           return g ? { appid: g.appid, name: g.name, image: g.image || getDownloadArt(g.appid)?.image, status: e?.installStatus } : null
         }).filter(Boolean) as Array<{ appid: string; name: string; image?: string; status?: string }>)
-      } finally {
-        if (alive) setLoading(false)
       }
+      commitInstalling()
+      void artRequest.then(commitInstalling)
     }
     void load()
     let reloadTimer: number | undefined
@@ -283,47 +320,68 @@ export function LibraryPage() {
 
   const enrichTried = useRef<Set<string>>(new Set())
   useEffect(() => {
-    const now = Date.now()
-    const targets = installed.filter((g) => {
-      if (g.appid.startsWith("local-") && g.steamAppId == null) return false
-      if (enrichTried.current.has(g.appid)) return false
-      const c = gameCacheRef.current[g.appid]
-      return !(c && c.game && now - (c.cachedAt || 0) < GAME_CACHE_TTL_MS)
-    })
-    if (!targets.length) return
-    targets.forEach((g) => enrichTried.current.add(g.appid))
-    void (async () => {
-      const CONC = 4
-      for (let i = 0; i < targets.length; i += CONC) {
-        const resolved = new Map<string, UnifiedSourceGame>()
-        await Promise.all(targets.slice(i, i + CONC).map(async (g) => {
-          try {
-            const full = await resolveInstalledGame(g.appid, g.name, g.steamAppId)
-            if (!enrichTried.current.has(g.appid)) return
-            if (!full) { enrichTried.current.delete(g.appid); return }
-            rememberGames([full])
-            rememberGameAs(g.appid, full)
-            gameCacheRef.current[g.appid] = { cachedAt: Date.now(), game: full }
-            resolved.set(g.appid, full)
-          } catch { enrichTried.current.delete(g.appid) }
-        }))
-        if (resolved.size) {
-          setInstalled((prev) => prev.map((x) => {
-            const full = resolved.get(x.appid)
-            if (!full) return x
-            return {
-              ...x,
-              name: (!x.name || x.name === x.appid) ? (full.title || x.name) : x.name,
-              image: x.image || full.image || undefined,
-              sizeText: x.sizeText || full.sizeText || undefined,
-              sizeBytes: x.sizeBytes ?? full.sizeBytes,
-            }
+    if (!visible || !cacheHydrated) return
+    let cancelled = false
+    let activeTargets: LibGame[] = []
+    const run = () => {
+      if (cancelled) return
+      const now = Date.now()
+      const targets = installed.filter((g) => {
+        if (g.appid.startsWith("local-") && g.steamAppId == null) return false
+        if (enrichTried.current.has(g.appid)) return false
+        const c = gameCacheRef.current[g.appid]
+        return !(c && c.game && now - (c.cachedAt || 0) < GAME_CACHE_TTL_MS)
+      })
+      if (!targets.length) return
+      activeTargets = targets
+      targets.forEach((g) => enrichTried.current.add(g.appid))
+      void (async () => {
+        const CONC = 4
+        for (let i = 0; i < targets.length && !cancelled; i += CONC) {
+          const resolved = new Map<string, UnifiedSourceGame>()
+          await Promise.all(targets.slice(i, i + CONC).map(async (g) => {
+            try {
+              const full = await resolveInstalledGame(g.appid, g.name, g.steamAppId)
+              if (cancelled || !enrichTried.current.has(g.appid)) return
+              if (!full) { enrichTried.current.delete(g.appid); return }
+              rememberGames([full])
+              rememberGameAs(g.appid, full)
+              gameCacheRef.current[g.appid] = { cachedAt: Date.now(), game: full }
+              resolved.set(g.appid, full)
+            } catch { if (!cancelled) enrichTried.current.delete(g.appid) }
           }))
-          void window.ucSettings?.set?.(GAME_CACHE_KEY, { ...gameCacheRef.current })
+          if (cancelled) break
+          if (resolved.size) {
+            setInstalled((prev) => prev.map((x) => {
+              const full = resolved.get(x.appid)
+              if (!full) return x
+              return {
+                ...x,
+                name: (!x.name || x.name === x.appid) ? (full.title || x.name) : x.name,
+                image: x.image || full.image || undefined,
+                sizeText: x.sizeText || full.sizeText || undefined,
+                sizeBytes: x.sizeBytes ?? full.sizeBytes,
+              }
+            }))
+            void window.ucSettings?.set?.(GAME_CACHE_KEY, { ...gameCacheRef.current })
+          }
         }
-      }
-    })()
-  }, [installed.length])
+      })()
+    }
+    let timer: number | null = null
+    let idle: number | null = null
+    timer = window.setTimeout(() => {
+      timer = null
+      if (typeof requestIdleCallback === "function") idle = requestIdleCallback(run, { timeout: 950 })
+      else run()
+    }, 250)
+    return () => {
+      cancelled = true
+      for (const g of activeTargets) enrichTried.current.delete(g.appid)
+      if (idle !== null && typeof cancelIdleCallback === "function") cancelIdleCallback(idle)
+      if (timer !== null) window.clearTimeout(timer)
+    }
+  }, [cacheHydrated, installed.length, visible])
 
   const updates = useMemo(() => {
     const byId = new Map(catalog.map((g) => [g.appid, g.version || ""]))
@@ -424,6 +482,7 @@ export function LibraryPage() {
       void window.ucSettings?.set?.(GAME_CACHE_KEY, { ...gameCacheRef.current })
       setInstalled((prev) => prev.map((x) => x.appid !== g.appid ? x : { ...x, name: (!x.name || x.name === x.appid) ? (full.title || x.name) : x.name, image: full.image || x.image, sizeText: full.sizeText || x.sizeText, sizeBytes: full.sizeBytes ?? x.sizeBytes }))
     } catch {  }
+    finally { enrichTried.current.delete(g.appid) }
   }
 
   const deleteGame = async (g: LibGame) => {

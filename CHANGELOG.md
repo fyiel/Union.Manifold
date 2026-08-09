@@ -3,6 +3,36 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.5.9
+
+### Added
+
+- WUCHANG: Fallen Feathers now has a native Nexus deployment profile. The
+  Wuchang Mod Enabler keeps its `Project_Plague` tree at the game root, while
+  ordinary `.pak`, `.utoc`, and `.ucas` mods install under
+  `Project_Plague/Content/Paks/~mods`. Existing staged enablers that an older
+  build stripped to `Content/Paks` or marked as an unknown root layout are
+  repaired during plan migration.
+
+### Changed
+
+- Main application tabs and game details are ready on first navigation instead
+  of waiting for deferred renderer chunks. Library secondary metadata work is
+  visibility-gated and deferred until after installed games paint.
+- Browse and advanced search coalesce identical backend pool fetches, stream
+  partial source results under globally unique request IDs, and apply cheap
+  sort/source changes without the text-search debounce.
+- Game-detail and installed-game enrichment requests are shared while in
+  flight, source details resolve with bounded parallelism, and background card
+  hover no longer starts speculative network work.
+
+### Fixed
+
+- Download reconciliation uses one authoritative installed-game snapshot,
+  including negative matches, and shares overlapping focus/interval checks.
+- Browse pagination and rapid search/filter transitions no longer allow stale
+  partial responses to replace current results.
+
 ## 3.5.8
 
 ### Fixed
