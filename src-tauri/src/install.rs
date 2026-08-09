@@ -724,12 +724,42 @@ pub async fn auto_install(
     }
 }
 
+/// Extract, finalize, and report one archive install, resolving with the
+/// JSON payload both archive commands return (no Err path exists).
+#[allow(clippy::too_many_arguments)]
+async fn install_archive_to(
+    downloads: &std::sync::Arc<DownloadEngine>,
+    app: &AppHandle,
+    download_id: &str,
+    appid: &str,
+    game_name: &Option<String>,
+    archive: &Path,
+    dir: &Path,
+    metadata: Option<&Value>,
+) -> Value {
+    match extract_archive(downloads, app, download_id, appid, game_name, archive, dir).await {
+        Ok(_) => {
+            finalize_installed(dir, appid, game_name, metadata).await;
+            emit_status(app, download_id, appid, game_name, "extracted", None);
+            json!({ "ok": true, "downloadId": download_id, "extracted": 1 })
+        }
+        Err(e) => {
+            emit_status(
+                app,
+                download_id,
+                appid,
+                game_name,
+                "extract_failed",
+                Some(&e.to_string()),
+            );
+            json!({ "ok": false, "error": e.to_string(), "downloadId": download_id })
+        }
+    }
+}
+
 #[tauri::command]
-pub async fn install_from_archive(
-    state: State<'_, AppState>,
-    app: AppHandle,
-    payload: Value,
-) -> Result<Value> {
+pub async fn install_from_archive(app: AppHandle, payload: Value) -> Value {
+    let state = app.state::<AppState>();
     let appid = payload
         .get("appid")
         .and_then(|v| v.as_str())
@@ -755,63 +785,41 @@ pub async fn install_from_archive(
         .unwrap_or_default();
     let metadata = payload.get("metadata").cloned();
     if archive_paths.is_empty() {
-        return Ok(json!({ "ok": false, "error": "no archive paths" }));
+        return json!({ "ok": false, "error": "no archive paths" });
     }
     if let Some(err) = install_guard(&state.downloads, &appid) {
-        return Ok(err);
+        return err;
     }
-    let out = async {
-        let dir = crate::downloads::install_dir_for(&state.download_root(), game_name.as_deref().unwrap_or(&appid));
-        std::fs::create_dir_all(&dir).ok();
-        let primary = archive_paths[0].clone();
-        let result = extract_archive(
-            &state.downloads,
-            &app,
-            &download_id,
-            &appid,
-            &game_name,
-            &primary,
-            &dir,
-        )
-        .await;
-        match result {
-            Ok(_) => {
-                finalize_installed(&dir, &appid, &game_name, metadata.as_ref()).await;
-                emit_status(&app, &download_id, &appid, &game_name, "extracted", None);
-            }
-            Err(e) => {
-                emit_status(
-                    &app,
-                    &download_id,
-                    &appid,
-                    &game_name,
-                    "extract_failed",
-                    Some(&e.to_string()),
-                );
-                return Ok(
-                    json!({ "ok": false, "error": e.to_string(), "downloadId": download_id }),
-                );
-            }
-        }
-        Ok(json!({ "ok": true, "downloadId": download_id, "extracted": 1 }))
-    }
+    let dir = crate::downloads::install_dir_for(
+        &state.download_root(),
+        game_name.as_deref().unwrap_or(&appid),
+    );
+    std::fs::create_dir_all(&dir).ok();
+    let primary = archive_paths[0].clone();
+    let out = install_archive_to(
+        &state.downloads,
+        &app,
+        &download_id,
+        &appid,
+        &game_name,
+        &primary,
+        &dir,
+        metadata.as_ref(),
+    )
     .await;
     state.downloads.install_unlock(&appid);
     out
 }
 
 #[tauri::command]
-pub async fn install_downloaded_archive(
-    state: State<'_, AppState>,
-    app: AppHandle,
-    appid: String,
-) -> Result<Value> {
+pub async fn install_downloaded_archive(app: AppHandle, appid: String) -> Value {
+    let state = app.state::<AppState>();
     let (dir, save_path, game_name, download_id) = {
         let found = find_installing(&state.download_root(), &appid);
         match found {
             Some((dir, manifest)) => {
                 if manifest.get("installStatus").and_then(|v| v.as_str()) != Some("downloaded") {
-                    return Ok(json!({ "ok": false, "error": "archive is not ready to install" }));
+                    return json!({ "ok": false, "error": "archive is not ready to install" });
                 }
                 let snap = manifest.get("downloadSnapshot");
                 let save = snap
@@ -830,43 +838,23 @@ pub async fn install_downloaded_archive(
                     .unwrap_or_else(|| archive_download_id(&appid));
                 (dir, save, name, id)
             }
-            None => return Ok(json!({ "ok": false, "error": "no downloaded archive found" })),
+            None => return json!({ "ok": false, "error": "no downloaded archive found" }),
         }
     };
     if let Some(err) = install_guard(&state.downloads, &appid) {
-        return Ok(err);
+        return err;
     }
-    let out = async {
-        let entry = extract_entry_point(&dir, &save_path);
-        let result = extract_archive(
-            &state.downloads,
-            &app,
-            &download_id,
-            &appid,
-            &game_name,
-            &entry,
-            &dir,
-        )
-        .await;
-        match result {
-            Ok(_) => {
-                finalize_installed(&dir, &appid, &game_name, None).await;
-                emit_status(&app, &download_id, &appid, &game_name, "extracted", None);
-                Ok(json!({ "ok": true, "downloadId": download_id, "extracted": 1 }))
-            }
-            Err(e) => {
-                emit_status(
-                    &app,
-                    &download_id,
-                    &appid,
-                    &game_name,
-                    "extract_failed",
-                    Some(&e.to_string()),
-                );
-                Ok(json!({ "ok": false, "error": e.to_string(), "downloadId": download_id }))
-            }
-        }
-    }
+    let entry = extract_entry_point(&dir, &save_path);
+    let out = install_archive_to(
+        &state.downloads,
+        &app,
+        &download_id,
+        &appid,
+        &game_name,
+        &entry,
+        &dir,
+        None,
+    )
     .await;
     state.downloads.install_unlock(&appid);
     out
