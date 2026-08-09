@@ -69,10 +69,6 @@ function normalizeRemoteMediaUrl(url: string): string {
   return trimmed
 }
 
-function shouldProxyUcFilesMedia(): boolean {
-  return true
-}
-
 const PUBLIC_IMAGE_HOST_SUFFIXES = [
   "cdn.union-crax.xyz",
   "images.igdb.com",
@@ -157,7 +153,7 @@ export function proxyMediaUrl(mediaUrl: string): string {
       if (!parsed.hostname || parsed.hostname === "undefined" || parsed.hostname === "null") {
         return ""
       }
-      if (isUcFilesAppUrl(parsed.hostname) && shouldProxyUcFilesMedia()) {
+      if (isUcFilesAppUrl(parsed.hostname)) {
         return apiUrl(`/api/ucfiles/media?url=${encodeURIComponent(normalizedRemoteUrl)}&raw=1`)
       }
       if (isPublicImageHost(parsed.hostname)) {

@@ -247,8 +247,6 @@ export function extractUCFilesFileId(url: string): string | null {
     if (!isUCFilesHostValue(parsed.hostname)) return null
     const fMatch = parsed.pathname.match(/\/(?:f|file)\/([A-Za-z0-9_-]{1,64})(?:[/?#]|$)/)
     if (fMatch?.[1]) return fMatch[1]
-    const dlMatch = parsed.pathname.match(/\/dl\/([A-Za-z0-9_-]{1,64})(?:[/?#]|$)/)
-    if (dlMatch?.[1]) return null
     return null
   } catch {
     return null
