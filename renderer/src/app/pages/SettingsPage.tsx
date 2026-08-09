@@ -34,6 +34,8 @@ const SECTIONS: Array<{ id: Section; label: string; sub: string }> = [
 const SELECT: React.CSSProperties = { ...SELECT_BASE, borderRadius: 8, fontSize: 12.5 }
 const SECTION: React.CSSProperties = { padding: "16px 0", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }
 const PANEL: React.CSSProperties = { padding: "14px 16px", border: "1px solid var(--mf-line)", borderRadius: 11, background: "var(--mf-panel-2)" }
+const SLIPGATE_ACTION: React.CSSProperties = { height: 32, padding: "0 12px", borderRadius: 7, border: "1px solid var(--mf-line-2)", fontSize: 11, fontWeight: 600, cursor: "pointer" }
+const PILL: React.CSSProperties = { padding: "2px 8px", borderRadius: 999, border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 9, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--mf-t4)" }
 const MONO_INPUT: React.CSSProperties = { height: 38, padding: "0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12, outline: "none" }
 const GAMESCOPE_NUM: React.CSSProperties = { width: 90, boxSizing: "border-box", height: 36, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", borderRadius: 8, padding: "0 12px", fontFamily: MONO, fontSize: 12.5, color: "var(--mf-t1)", textAlign: "center", outline: "none" }
 
@@ -630,26 +632,26 @@ function SourcesTab() {
               <button type="button" className="mf-ghost" onClick={() => void window.ucSystem?.openExternal?.("https://docs.docker.com/get-docker/")} style={{ height: 32, padding: "0 12px", borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t1)", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Get Docker</button>
             ) : null}
             {managedSlipgate?.dockerAvailable && managedSlipgate.composeAvailable && !managedSlipgate.installed ? (
-              <button type="button" className="mf-ghost" disabled={managedSlipgateAction !== null} onClick={() => void runManagedSlipgateAction("install")} style={{ height: 32, padding: "0 12px", borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "var(--mf-t1)", color: "var(--mf-bg)", fontSize: 11, fontWeight: 700, cursor: managedSlipgateAction ? "default" : "pointer", opacity: managedSlipgateAction ? 0.65 : 1 }}>
+              <button type="button" className="mf-ghost" disabled={managedSlipgateAction !== null} onClick={() => void runManagedSlipgateAction("install")} style={{ ...SLIPGATE_ACTION, background: "var(--mf-t1)", color: "var(--mf-bg)", fontWeight: 700, cursor: managedSlipgateAction ? "default" : "pointer", opacity: managedSlipgateAction ? 0.65 : 1 }}>
                 {managedSlipgateAction === "install" ? "Installing…" : "Install with Docker"}
               </button>
             ) : null}
             {managedSlipgate?.installed && !managedSlipgate.running ? (
-              <button type="button" className="mf-ghost" disabled={managedSlipgateAction !== null} onClick={() => void runManagedSlipgateAction("start")} style={{ height: 32, padding: "0 12px", borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "var(--mf-t1)", color: "var(--mf-bg)", fontSize: 11, fontWeight: 700, cursor: managedSlipgateAction ? "default" : "pointer", opacity: managedSlipgateAction ? 0.65 : 1 }}>
+              <button type="button" className="mf-ghost" disabled={managedSlipgateAction !== null} onClick={() => void runManagedSlipgateAction("start")} style={{ ...SLIPGATE_ACTION, background: "var(--mf-t1)", color: "var(--mf-bg)", fontWeight: 700, cursor: managedSlipgateAction ? "default" : "pointer", opacity: managedSlipgateAction ? 0.65 : 1 }}>
                 {managedSlipgateAction === "start" ? "Starting…" : "Start"}
               </button>
             ) : null}
             {managedSlipgate?.installed && managedSlipgate.running && !managedSelected ? (
-              <button type="button" className="mf-ghost" disabled={managedSlipgateAction !== null} onClick={() => void runManagedSlipgateAction("start")} style={{ height: 32, padding: "0 12px", borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "var(--mf-t1)", color: "var(--mf-bg)", fontSize: 11, fontWeight: 700, cursor: managedSlipgateAction ? "default" : "pointer", opacity: managedSlipgateAction ? 0.65 : 1 }}>Use local</button>
+              <button type="button" className="mf-ghost" disabled={managedSlipgateAction !== null} onClick={() => void runManagedSlipgateAction("start")} style={{ ...SLIPGATE_ACTION, background: "var(--mf-t1)", color: "var(--mf-bg)", fontWeight: 700, cursor: managedSlipgateAction ? "default" : "pointer", opacity: managedSlipgateAction ? 0.65 : 1 }}>Use local</button>
             ) : null}
             {managedSlipgate?.installed && managedSlipgate.running ? (
-              <button type="button" className="mf-ghost" disabled={managedSlipgateAction !== null} onClick={() => void runManagedSlipgateAction("stop")} style={{ height: 32, padding: "0 12px", borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t1)", fontSize: 11, fontWeight: 600, cursor: managedSlipgateAction ? "default" : "pointer", opacity: managedSlipgateAction ? 0.65 : 1 }}>
+              <button type="button" className="mf-ghost" disabled={managedSlipgateAction !== null} onClick={() => void runManagedSlipgateAction("stop")} style={{ ...SLIPGATE_ACTION, background: "transparent", color: "var(--mf-t1)", fontWeight: 600, cursor: managedSlipgateAction ? "default" : "pointer", opacity: managedSlipgateAction ? 0.65 : 1 }}>
                 {managedSlipgateAction === "stop" ? "Stopping…" : "Stop"}
               </button>
             ) : null}
             {managedSlipgate?.installed ? (
               <>
-                <button type="button" className="mf-ghost" disabled={managedSlipgateAction !== null} onClick={() => void runManagedSlipgateAction("update")} style={{ height: 32, padding: "0 12px", borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t1)", fontSize: 11, fontWeight: 600, cursor: managedSlipgateAction ? "default" : "pointer", opacity: managedSlipgateAction ? 0.65 : 1 }}>
+                <button type="button" className="mf-ghost" disabled={managedSlipgateAction !== null} onClick={() => void runManagedSlipgateAction("update")} style={{ ...SLIPGATE_ACTION, background: "transparent", color: "var(--mf-t1)", fontWeight: 600, cursor: managedSlipgateAction ? "default" : "pointer", opacity: managedSlipgateAction ? 0.65 : 1 }}>
                   {managedSlipgateAction === "update" ? "Updating…" : "Update"}
                 </button>
                 <button type="button" className="mf-ghost" disabled={managedSlipgateAction !== null} onClick={() => void runManagedSlipgateAction("uninstall")} style={{ height: 32, padding: "0 12px", borderRadius: 7, border: "1px solid color-mix(in srgb, var(--mf-danger) 45%, transparent)", background: "transparent", color: "var(--mf-danger)", fontSize: 11, fontWeight: 600, cursor: managedSlipgateAction ? "default" : "pointer", opacity: managedSlipgateAction ? 0.65 : 1 }}>
@@ -723,10 +725,10 @@ function SourcesTab() {
                 <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, fontWeight: 600, color: "var(--mf-t0)" }}>
                   {s.name}
                   {s.torrentOnly ? (
-                    <span style={{ padding: "2px 8px", borderRadius: 999, border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 9, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--mf-t4)" }}>torrent-only</span>
+                    <span style={PILL}>torrent-only</span>
                   ) : null}
                   {s.requiresSlipgate ? (
-                    <span style={{ padding: "2px 8px", borderRadius: 999, border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 9, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--mf-t4)" }}>dependent on Slipgate</span>
+                    <span style={PILL}>dependent on Slipgate</span>
                   ) : null}
                 </div>
                 <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t5)", marginTop: 2 }}>{torrentHidden ? "hidden by source filter" : gated ? "configure Slipgate above to enable" : on ? detailFor(s.id) : "disabled · hidden from browse"}</div>
