@@ -1504,7 +1504,7 @@ const startGameDownload = useCallback(async (game: Game, preferredHostOverride?:
       if (!appid) return
       const current = downloadsRef.current.filter((item) => item.appid === appid)
       const hasActive = current.some((item) =>
-        ["downloading", "extracting", "installing", "verifying", "retrying"].includes(item.status)
+        ["downloading", "extracting", "installing"].includes(item.status)
       )
       if (hasActive) return
       const pausedWithProgress = current
