@@ -1008,16 +1008,14 @@ function AboutTab() {
 function ModsTab({ onJumpToSources }: { onJumpToSources: () => void }) {
   const [apiKey, setApiKey] = useState("")
   const [reveal, setReveal] = useState(false)
-  const [saved, setSaved] = useState(false)
+  const [savedKey, setSavedKey] = useState<string | null>(null)
   const [validating, setValidating] = useState(false)
   const [account, setAccount] = useState<{ name: string; premium: boolean } | null>(null)
   const [valError, setValError] = useState("")
   const [steamcmd, setSteamcmd] = useState<"absent" | "bootstrapping" | "ready" | null>(null)
   const [sessionCookie, setSessionCookie] = useState("")
   const [sessionRevealed, setSessionRevealed] = useState(false)
-  const [sessionSaved, setSessionSaved] = useState(false)
   const [sessionUa, setSessionUa] = useState("")
-  const [uaSaved, setUaSaved] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -1039,34 +1037,18 @@ function ModsTab({ onJumpToSources }: { onJumpToSources: () => void }) {
     return () => { alive = false }
   }, [])
 
-  const persistKey = async (value: string) => {
+  const persist = async (key: string, value: string) => {
     try {
-      await window.ucSettings?.set?.("nexusApiKey", value.trim() || null)
-      setSaved(true)
-      window.setTimeout(() => setSaved(false), 1600)
-    } catch {  }
-  }
-
-  const persistSession = async (value: string) => {
-    try {
-      await window.ucSettings?.set?.("nexusSessionCookie", value.trim() || null)
-      setSessionSaved(true)
-      window.setTimeout(() => setSessionSaved(false), 1600)
-    } catch {  }
-  }
-
-  const persistUa = async (value: string) => {
-    try {
-      await window.ucSettings?.set?.("nexusUserAgent", value.trim() || null)
-      setUaSaved(true)
-      window.setTimeout(() => setUaSaved(false), 1600)
+      await window.ucSettings?.set?.(key, value.trim() || null)
+      setSavedKey(key)
+      window.setTimeout(() => setSavedKey(null), 1600)
     } catch {  }
   }
 
   const validate = async () => {
     setValidating(true); setValError(""); setAccount(null)
     try {
-      await window.ucSettings?.set?.("nexusApiKey", apiKey.trim() || null)
+      await persist("nexusApiKey", apiKey)
       const r = await window.ucMods?.nexusValidate?.()
       if (r?.ok && r.user) setAccount({ name: r.user.name, premium: r.user.premium })
       else setValError(r?.error || "key rejected")
@@ -1079,13 +1061,13 @@ function ModsTab({ onJumpToSources }: { onJumpToSources: () => void }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <div style={{ padding: "16px 0", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }}>
         <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>NexusMods API key</div>
-        <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)", marginTop: 3 }}>personal key from nexusmods.com → account settings → API keys, stored locally{saved ? " — saved" : ""}</div>
+        <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)", marginTop: 3 }}>personal key from nexusmods.com → account settings → API keys, stored locally{savedKey === "nexusApiKey" ? " — saved" : ""}</div>
         <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
           <input
             type={reveal ? "text" : "password"}
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
-            onBlur={() => void persistKey(apiKey)}
+            onBlur={() => void persist("nexusApiKey", apiKey)}
             placeholder="paste your API key…"
             autoComplete="off"
             spellCheck={false}
@@ -1126,14 +1108,14 @@ function ModsTab({ onJumpToSources }: { onJumpToSources: () => void }) {
           </span>
         </div>
         <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t4)", marginTop: 8, lineHeight: 1.5 }}>
-          To enable: in your browser open devtools (F12) on nexusmods.com → Application → Cookies → https://www.nexusmods.com, copy the nexusmods_session value and paste it here as name=value (or paste the whole Cookie header). If downloads fail with a Cloudflare error, also include cf_clearance.{sessionSaved ? " (saved)" : ""}
+          To enable: in your browser open devtools (F12) on nexusmods.com → Application → Cookies → https://www.nexusmods.com, copy the nexusmods_session value and paste it here as name=value (or paste the whole Cookie header). If downloads fail with a Cloudflare error, also include cf_clearance.{savedKey === "nexusSessionCookie" ? " (saved)" : ""}
         </div>
         <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
           <input
             type={sessionRevealed ? "text" : "password"}
             value={sessionCookie}
             onChange={(e) => setSessionCookie(e.target.value)}
-            onBlur={() => void persistSession(sessionCookie)}
+            onBlur={() => void persist("nexusSessionCookie", sessionCookie)}
             placeholder="nexusmods_session=…"
             autoComplete="off"
             spellCheck={false}
@@ -1142,12 +1124,12 @@ function ModsTab({ onJumpToSources }: { onJumpToSources: () => void }) {
           <RevealButton shown={sessionRevealed} onToggle={() => setSessionRevealed((v) => !v)} title="cookie" />
         </div>
         <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t4)", marginTop: 12, lineHeight: 1.5 }}>
-          Browser User-Agent (required when using cf_clearance): in the SAME browser's devtools console run <code>navigator.userAgent</code> and paste the result here. A cf_clearance cookie only validates against the exact User-Agent that created it.{uaSaved ? " (saved)" : ""}
+          Browser User-Agent (required when using cf_clearance): in the SAME browser's devtools console run <code>navigator.userAgent</code> and paste the result here. A cf_clearance cookie only validates against the exact User-Agent that created it.{savedKey === "nexusUserAgent" ? " (saved)" : ""}
         </div>
         <input
           value={sessionUa}
           onChange={(e) => setSessionUa(e.target.value)}
-          onBlur={() => void persistUa(sessionUa)}
+          onBlur={() => void persist("nexusUserAgent", sessionUa)}
           placeholder="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 …"
           autoComplete="off"
           spellCheck={false}
