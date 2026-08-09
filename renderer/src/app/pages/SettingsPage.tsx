@@ -32,6 +32,7 @@ const SECTIONS: Array<{ id: Section; label: string; sub: string }> = [
 ]
 
 const SELECT: React.CSSProperties = { ...SELECT_BASE, borderRadius: 8, fontSize: 12.5 }
+const SECTION: React.CSSProperties = { padding: "16px 0", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }
 const MONO_INPUT: React.CSSProperties = { height: 38, padding: "0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12, outline: "none" }
 const GAMESCOPE_NUM: React.CSSProperties = { width: 90, boxSizing: "border-box", height: 36, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", borderRadius: 8, padding: "0 12px", fontFamily: MONO, fontSize: 12.5, color: "var(--mf-t1)", textAlign: "center", outline: "none" }
 
@@ -204,7 +205,7 @@ export function SettingsPage() {
 
             {section === "downloads" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <div style={{ padding: "16px 0", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }}>
+                <div style={SECTION}>
                   <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)", marginBottom: 10 }}>Install location</div>
                   <div style={{ display: "flex", gap: 10 }}>
                     <div style={{ flex: 1, display: "flex", alignItems: "center", height: 38, padding: "0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", fontFamily: MONO, fontSize: 12, color: "var(--mf-t2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{installPath || "default install folder"}</div>
@@ -213,7 +214,7 @@ export function SettingsPage() {
                     </button>
                   </div>
                 </div>
-                <div style={{ padding: "16px 0", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }}>
+                <div style={SECTION}>
                   <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Limit download speed</div>
@@ -396,7 +397,7 @@ function ProxyRow() {
   }, [])
   const persist = (v: string) => { try { void window.ucSettings?.set?.("proxyUrl", v.trim() || null) } catch {  } }
   return (
-    <div style={{ padding: "16px 0", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }}>
+    <div style={SECTION}>
       <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)", marginBottom: 4 }}>Proxy (all connections)</div>
       <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)", marginBottom: 10 }}>Route all of Union.Manifold&apos;s traffic — catalogs, resolvers, images and downloads — through this proxy. Applied live; leave empty for a direct connection.</div>
       <input value={url} onChange={(e) => setUrl(e.target.value)} onBlur={() => persist(url)} placeholder="http://user:pass@host:port" autoComplete="off" spellCheck={false} style={{ width: "100%", height: 38, padding: "0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12 }} />
@@ -855,7 +856,7 @@ function LinuxSettingsTab() {
         </select>
       </Row>
 
-      <div style={{ padding: "16px 0", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }}>
+      <div style={SECTION}>
         <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)", marginBottom: 3 }}>Proton prefix</div>
         <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)", marginBottom: 10 }}>STEAM_COMPAT_DATA_PATH, blank uses the per-game auto path</div>
         <div style={{ display: "flex", gap: 10 }}>
@@ -903,7 +904,7 @@ function LinuxSettingsTab() {
       ) : null}
       <ToggleRow title="Steam compatibility fixes" desc="Repair known Steam API DLL issues and add local achievement files before Proton or Wine launches" on={steamFixes} onToggle={() => setBool("linuxSteamCompatibilityFixes", !steamFixes, setSteamFixes)} />
 
-      <div style={{ padding: "16px 0", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }}>
+      <div style={SECTION}>
         <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)", marginBottom: 3 }}>Default WINEDLLOVERRIDES</div>
         <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)", marginBottom: 10 }}>Used when neither the game folder (OnlineFix) nor per-game env set overrides, e.g. winmm=n,b;dinput8=n,b</div>
         <input
@@ -1060,7 +1061,7 @@ function ModsTab({ onJumpToSources }: { onJumpToSources: () => void }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <div style={{ padding: "16px 0", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }}>
+      <div style={SECTION}>
         <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>NexusMods API key</div>
         <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)", marginTop: 3 }}>personal key from nexusmods.com → account settings → API keys, stored locally{savedKey === "nexusApiKey" ? " — saved" : ""}</div>
         <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
@@ -1092,7 +1093,7 @@ function ModsTab({ onJumpToSources }: { onJumpToSources: () => void }) {
         </div>
       </div>
 
-      <div style={{ padding: "16px 0", borderBottom: "1px solid color-mix(in srgb, var(--mf-t0) 5%, transparent)" }}>
+      <div style={SECTION}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Free in-app downloads (advanced, opt-in)</div>
           <span style={{ padding: "2px 8px", borderRadius: 999, border: "1px solid var(--mf-danger)", color: "var(--mf-danger)", fontFamily: MONO, fontSize: 9, textTransform: "uppercase", letterSpacing: "0.08em" }}>ToS risk</span>
