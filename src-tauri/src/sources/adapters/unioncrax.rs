@@ -203,8 +203,7 @@ fn normalize(uc: &Value) -> SourceGame {
     };
     let size_bytes = match uc.get("size") {
         Some(Value::String(s)) => parse_size_to_bytes(s),
-        Some(Value::Number(n)) => n.as_u64().or_else(|| n.as_f64().map(|f| f as u64)),
-        _ => None,
+        v => v.and_then(json_num),
     };
 
     let genres: Vec<String> = coerce_genres(uc.get("genres"))

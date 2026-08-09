@@ -29,9 +29,6 @@ fn unscramble(cap: &str) -> Option<String> {
     }
 }
 
-fn file_name_of(direct: &str) -> Option<String> {
-    super::last_segment(direct)
-}
 
 pub async fn resolve(url: &str) -> ResolveResult {
     let resp = match http::fetch(url, &FetchOpts::default()).await {
@@ -57,7 +54,7 @@ pub async fn resolve(url: &str) -> ResolveResult {
 
     match direct {
         Some(direct) => {
-            let file_name = file_name_of(&direct);
+            let file_name = super::last_segment(&direct);
             ResolveResult {
                 resolvable: true,
                 url: Some(direct),

@@ -115,7 +115,7 @@ pub fn detect_host_type(url: &str) -> String {
         return t.to_string();
     }
     let host = hostname_of(url);
-    let base = host.strip_prefix("www.").unwrap_or(&host);
+    let base = base_label(&host);
     let label = base.split('.').next().unwrap_or("");
     if label.is_empty() {
         "unknown".to_string()
