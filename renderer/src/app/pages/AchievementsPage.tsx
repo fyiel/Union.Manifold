@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
-import { Check, ChevronDown, RefreshCw, Search, Sparkles, TriangleAlert, Trophy } from "lucide-react"
-import { COVER_LINES, MONO, SmartImage, gameImageCandidates } from "@/app/manifold/ui"
+import { Check, ChevronDown, RefreshCw, Sparkles, TriangleAlert, Trophy } from "lucide-react"
+import { COVER_LINES, MONO, SearchIcon, SmartImage, gameImageCandidates } from "@/app/manifold/ui"
 import { proxyImageUrl } from "@/lib/utils"
 
 const FILTERS = ["all", "progress", "complete"] as const
@@ -137,7 +137,7 @@ export function AchievementsPage() {
 
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
           <label style={{ position: "relative", flex: 1, maxWidth: 430 }}>
-            <Search size={14} strokeWidth={1.6} color="var(--mf-t5)" style={{ position: "absolute", left: 13, top: 11 }} />
+            <SearchIcon size={14} color="var(--mf-t5)" style={{ position: "absolute", left: 13, top: 11 }} />
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
