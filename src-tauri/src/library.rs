@@ -1,5 +1,6 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
@@ -20,8 +21,9 @@ const INSTALLING: &[&str] = &[
     "cancelled",
 ];
 
-type ScanSnapshot = (Instant, String, Vec<(PathBuf, Value)>);
-static SCAN_CACHE: Mutex<Option<ScanSnapshot>> = Mutex::new(None);
+type ScanSnapshot = (Instant, Vec<(PathBuf, Value)>);
+static SCAN_CACHE: LazyLock<Mutex<HashMap<String, ScanSnapshot>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 static SCAN_GATE: Mutex<()> = Mutex::new(());
 const SCAN_TTL: Duration = Duration::from_millis(10_000);
 
@@ -75,13 +77,14 @@ fn roots_key(roots: &[PathBuf]) -> String {
 }
 
 fn cached_scan(key: &str) -> Option<Vec<(PathBuf, Value)>> {
-    let guard = SCAN_CACHE.lock();
-    match guard.as_ref() {
-        Some((at, cached_key, data)) if cached_key == key && at.elapsed() < SCAN_TTL => {
-            Some(data.clone())
+    let mut guard = SCAN_CACHE.lock();
+    if let Some((at, data)) = guard.get(key) {
+        if at.elapsed() < SCAN_TTL {
+            return Some(data.clone());
         }
-        _ => None,
+        guard.remove(key);
     }
+    None
 }
 
 fn load_all_cached(roots: &[PathBuf]) -> Vec<(PathBuf, Value)> {
@@ -94,12 +97,14 @@ fn load_all_cached(roots: &[PathBuf]) -> Vec<(PathBuf, Value)> {
         return data;
     }
     let data = load_all(roots);
-    *SCAN_CACHE.lock() = Some((Instant::now(), key, data.clone()));
+    SCAN_CACHE
+        .lock()
+        .insert(key, (Instant::now(), data.clone()));
     data
 }
 
 pub(crate) fn invalidate_scan() {
-    *SCAN_CACHE.lock() = None;
+    SCAN_CACHE.lock().clear();
 }
 
 /// Raw per-root manifest scan: every directory under `root` that parses as
