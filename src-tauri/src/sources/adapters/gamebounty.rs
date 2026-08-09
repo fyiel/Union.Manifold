@@ -80,9 +80,6 @@ fn epoch_from_value(v: Option<&Value>) -> Option<i64> {
     None
 }
 
-fn steam_image(appid: u64, kind: &str) -> String {
-    format!("https://shared.steamstatic.com/store_item_assets/steam/apps/{appid}/{kind}")
-}
 
 async fn fetch_data(url: &str) -> Option<Value> {
     let resp = http::fetch(url, &FetchOpts::default()).await.ok()?;
@@ -201,9 +198,9 @@ fn post_to_game(post: &Value) -> Option<SourceGame> {
 
     let image = get_str(post, "library_capsule")
         .or_else(|| get_str(post, "banner"))
-        .or_else(|| appid.map(|id| steam_image(id, "library_600x900.jpg")));
+        .or_else(|| appid.map(|id| crate::sources::steam::steam_image(id, "library_600x900.jpg")));
     let hero_image = get_str(post, "library_hero")
-        .or_else(|| appid.map(|id| steam_image(id, "library_hero.jpg")));
+        .or_else(|| appid.map(|id| crate::sources::steam::steam_image(id, "library_hero.jpg")));
 
     let description = get_str(post, "mini_description")
         .or_else(|| {

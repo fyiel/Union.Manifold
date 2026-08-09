@@ -183,9 +183,6 @@ fn blurb(article: &str) -> Option<String> {
     Some(format!("{}\u{2026}", cut.trim_end()))
 }
 
-fn steam_image(appid: u64, kind: &str) -> String {
-    format!("https://shared.steamstatic.com/store_item_assets/steam/apps/{appid}/{kind}")
-}
 
 /// Topic path segment used as the detail slug, e.g.
 /// "10440-broforce-free-download-build-12964083-online".
@@ -262,8 +259,8 @@ async fn attach_steam_art(mut g: SourceGame) -> SourceGame {
     if let Some(id) = steam::search_app_id(&g.title).await {
         g.steam_app_id = Some(id);
         g.dedup_key = dedup_key_for(Some(id), &g.title);
-        g.image = Some(steam_image(id, "library_600x900.jpg"));
-        g.hero_image = Some(steam_image(id, "library_hero.jpg"));
+        g.image = Some(crate::sources::steam::steam_image(id, "library_600x900.jpg"));
+        g.hero_image = Some(crate::sources::steam::steam_image(id, "library_hero.jpg"));
     }
     g
 }
@@ -463,10 +460,10 @@ pub async fn get_detail(slug: &str) -> Option<SourceGame> {
                 .captures(&html)
                 .map(|c| http::decode_entities(&c[1]));
             let image = appid
-                .map(|id| steam_image(id, "library_600x900.jpg"))
+                .map(|id| crate::sources::steam::steam_image(id, "library_600x900.jpg"))
                 .or_else(|| cover.clone());
             let hero_image = appid
-                .map(|id| steam_image(id, "library_hero.jpg"))
+                .map(|id| crate::sources::steam::steam_image(id, "library_hero.jpg"))
                 .or(cover);
 
             let genre = BREADCRUMB_FORUM

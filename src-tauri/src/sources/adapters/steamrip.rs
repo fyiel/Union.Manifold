@@ -186,9 +186,6 @@ async fn all_slugs() -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn steam_image(appid: u64, kind: &str) -> String {
-    format!("https://shared.steamstatic.com/store_item_assets/steam/apps/{appid}/{kind}")
-}
 
 fn clean_title(rendered: &str) -> (String, String) {
     let mut t = http::decode_entities(rendered).trim().to_string();
@@ -327,8 +324,8 @@ fn build_game(post: &Value, appid: Option<u64>, cats: &Cats) -> SourceGame {
             Some(b)
         }
     };
-    let image = final_appid.map(|id| steam_image(id, "library_600x900.jpg"));
-    let hero_image = final_appid.map(|id| steam_image(id, "library_hero.jpg"));
+    let image = final_appid.map(|id| crate::sources::steam::steam_image(id, "library_600x900.jpg"));
+    let hero_image = final_appid.map(|id| crate::sources::steam::steam_image(id, "library_hero.jpg"));
     let added_at = post
         .get("date")
         .and_then(|v| v.as_str())

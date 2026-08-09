@@ -111,9 +111,6 @@ fn slugify(title: &str) -> String {
         .to_string()
 }
 
-fn steam_image(appid: u64, kind: &str) -> String {
-    format!("https://shared.steamstatic.com/store_item_assets/steam/apps/{appid}/{kind}")
-}
 
 fn parse_source(body: &str) -> Vec<Entry> {
     let raw: RawSource = match serde_json::from_str(body) {
@@ -185,8 +182,8 @@ async fn attach_steam_art(mut g: SourceGame) -> SourceGame {
     if let Some(id) = steam::search_app_id(&g.title).await {
         g.steam_app_id = Some(id);
         g.dedup_key = dedup_key_for(Some(id), &g.title);
-        g.image = Some(steam_image(id, "library_600x900.jpg"));
-        g.hero_image = Some(steam_image(id, "library_hero.jpg"));
+        g.image = Some(crate::sources::steam::steam_image(id, "library_600x900.jpg"));
+        g.hero_image = Some(crate::sources::steam::steam_image(id, "library_hero.jpg"));
     }
     g
 }

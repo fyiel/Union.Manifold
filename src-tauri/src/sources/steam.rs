@@ -217,6 +217,11 @@ pub async fn steam_art(appid: u64, name: Option<&str>) -> Value {
     json!({ "header": "", "background": "" })
 }
 
+/// Steam store image asset URL (hero/header/portrait kinds).
+pub fn steam_image(appid: u64, kind: &str) -> String {
+    format!("https://shared.steamstatic.com/store_item_assets/steam/apps/{appid}/{kind}")
+}
+
 pub fn capsule_url(appid: u64) -> String {
     format!("https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/library_600x900.jpg")
 }
