@@ -32,6 +32,7 @@ const SECTIONS: Array<{ id: Section; label: string; sub: string }> = [
 ]
 
 const SELECT: React.CSSProperties = { ...SELECT_BASE, borderRadius: 8, fontSize: 12.5 }
+const GAMESCOPE_NUM: React.CSSProperties = { width: 90, boxSizing: "border-box", height: 36, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", borderRadius: 8, padding: "0 12px", fontFamily: MONO, fontSize: 12.5, color: "var(--mf-t1)", textAlign: "center", outline: "none" }
 
 export function SettingsPage() {
   const [section, setSection] = useState<Section>("general")
@@ -876,7 +877,7 @@ function LinuxSettingsTab() {
               onChange={(e) => setGamescopeSharpness(e.target.value)}
               onBlur={() => persist("linuxGamescopeSharpness", gamescopeSharpness)}
               placeholder="2"
-              style={{ width: 90, boxSizing: "border-box", height: 36, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", borderRadius: 8, padding: "0 12px", fontFamily: MONO, fontSize: 12.5, color: "var(--mf-t1)", textAlign: "center", outline: "none" }}
+              style={GAMESCOPE_NUM}
             />
           </Row>
           <Row title="Frame rate limit (FPS)" desc="gamescope --fps-limit — caps the session frame rate, e.g. 144">
@@ -885,7 +886,7 @@ function LinuxSettingsTab() {
               onChange={(e) => setGamescopeFps(e.target.value)}
               onBlur={() => persist("linuxGamescopeFpsLimit", gamescopeFps)}
               placeholder="144"
-              style={{ width: 90, boxSizing: "border-box", height: 36, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", borderRadius: 8, padding: "0 12px", fontFamily: MONO, fontSize: 12.5, color: "var(--mf-t1)", textAlign: "center", outline: "none" }}
+              style={GAMESCOPE_NUM}
             />
           </Row>
           <Row title="Force refresh rate (Hz)" desc="gamescope --force-refresh-rate — spoofs the refresh rate games detect, e.g. 144">
@@ -894,7 +895,7 @@ function LinuxSettingsTab() {
               onChange={(e) => setGamescopeRefresh(e.target.value)}
               onBlur={() => persist("linuxGamescopeRefreshRate", gamescopeRefresh)}
               placeholder="144"
-              style={{ width: 90, boxSizing: "border-box", height: 36, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", borderRadius: 8, padding: "0 12px", fontFamily: MONO, fontSize: 12.5, color: "var(--mf-t1)", textAlign: "center", outline: "none" }}
+              style={GAMESCOPE_NUM}
             />
           </Row>
         </>
