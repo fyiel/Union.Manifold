@@ -31,6 +31,8 @@ const SECTIONS: Array<{ id: Section; label: string; sub: string }> = [
   { id: "about", label: "About", sub: "version, stats, and links" },
 ]
 
+const SELECT: React.CSSProperties = { height: 36, padding: "0 32px 0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontSize: 12.5, cursor: "pointer", WebkitAppearance: "none", appearance: "none" }
+
 export function SettingsPage() {
   const [section, setSection] = useState<Section>("general")
   const [closeBehavior, setCloseBehavior] = useState<"hide" | "quit">("hide")
@@ -173,13 +175,13 @@ export function SettingsPage() {
             {section === "general" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <Row title="When closing the window" desc="What the titlebar X and window-manager close (e.g. Hyprland killactive) do">
-                  <select className="uc-select" value={closeBehavior} onChange={(e) => changeCloseBehavior(e.target.value as "hide" | "quit")} style={{ height: 36, minWidth: 150, padding: "0 32px 0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontSize: 12.5, cursor: "pointer", WebkitAppearance: "none", appearance: "none" }}>
+                  <select className="uc-select" value={closeBehavior} onChange={(e) => changeCloseBehavior(e.target.value as "hide" | "quit")} style={{ ...SELECT, minWidth: 150 }}>
                     <option value="hide">Hide to tray</option>
                     <option value="quit">Quit entirely</option>
                   </select>
                 </Row>
                 <Row title="Startup page" desc="Which page the app opens on after launch">
-                  <select className="uc-select" value={startPage} onChange={(e) => { const v = e.target.value === "library" ? "library" : "browse"; setStartPage(v); void window.ucSettings?.set?.("startPage", v) }} style={{ height: 36, minWidth: 150, padding: "0 32px 0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontSize: 12.5, cursor: "pointer", WebkitAppearance: "none", appearance: "none" }}>
+                  <select className="uc-select" value={startPage} onChange={(e) => { const v = e.target.value === "library" ? "library" : "browse"; setStartPage(v); void window.ucSettings?.set?.("startPage", v) }} style={{ ...SELECT, minWidth: 150 }}>
                     <option value="browse">Browse</option>
                     <option value="library">Library</option>
                   </select>
@@ -226,17 +228,17 @@ export function SettingsPage() {
                 </div>
                 <ProxyRow />
                 <Row title="Max parallel downloads" desc="How many downloads run at once, the rest wait in the queue">
-                  <select className="uc-select" value={maxConcurrent} onChange={(e) => { const v = Number(e.target.value); setMaxConcurrent(v); try { void window.ucSettings?.set?.("maxConcurrentDownloads", v) } catch {  } }} style={{ height: 36, minWidth: 90, padding: "0 32px 0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontSize: 12.5, cursor: "pointer", WebkitAppearance: "none", appearance: "none" }}>
+                  <select className="uc-select" value={maxConcurrent} onChange={(e) => { const v = Number(e.target.value); setMaxConcurrent(v); try { void window.ucSettings?.set?.("maxConcurrentDownloads", v) } catch {  } }} style={{ ...SELECT, minWidth: 90 }}>
                     {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => <option key={n} value={n}>{n}</option>)}
                   </select>
                 </Row>
                 <Row title="Connections per download" desc="Parallel connections aria2 opens to the mirror, applies to newly started downloads">
-                  <select className="uc-select" value={connsPerDl} onChange={(e) => { const v = Number(e.target.value); setConnsPerDl(v); try { void window.ucSettings?.set?.("aria2ConnectionsPerDownload", v) } catch {  } }} style={{ height: 36, minWidth: 90, padding: "0 32px 0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontSize: 12.5, cursor: "pointer", WebkitAppearance: "none", appearance: "none" }}>
+                  <select className="uc-select" value={connsPerDl} onChange={(e) => { const v = Number(e.target.value); setConnsPerDl(v); try { void window.ucSettings?.set?.("aria2ConnectionsPerDownload", v) } catch {  } }} style={{ ...SELECT, minWidth: 90 }}>
                     {[1, 2, 4, 8, 16].map((n) => <option key={n} value={n}>{n}</option>)}
                   </select>
                 </Row>
                 <Row title="Free space safety margin" desc="Extra headroom the pre-download disk check demands on top of the estimated install size">
-                  <select className="uc-select" value={diskMargin} onChange={(e) => { const v = Number(e.target.value); setDiskMargin(v); try { void window.ucSettings?.set?.("diskSpaceMarginGiB", v) } catch {  } }} style={{ height: 36, minWidth: 110, padding: "0 32px 0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontSize: 12.5, cursor: "pointer", WebkitAppearance: "none", appearance: "none" }}>
+                  <select className="uc-select" value={diskMargin} onChange={(e) => { const v = Number(e.target.value); setDiskMargin(v); try { void window.ucSettings?.set?.("diskSpaceMarginGiB", v) } catch {  } }} style={{ ...SELECT, minWidth: 110 }}>
                     {[0, 1, 2, 4, 8, 16].map((n) => <option key={n} value={n}>{n} GiB</option>)}
                   </select>
                 </Row>
@@ -767,7 +769,6 @@ function SourcesTab() {
   )
 }
 
-const LINUX_SELECT: React.CSSProperties = { height: 36, minWidth: 180, padding: "0 32px 0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontSize: 12.5, cursor: "pointer", WebkitAppearance: "none", appearance: "none" }
 
 function LinuxSettingsTab() {
   const [launchMode, setLaunchMode] = useState("auto")
@@ -835,7 +836,7 @@ function LinuxSettingsTab() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       <Row title="Launch mode" desc="How games launch on Linux when not overridden per-game">
-        <select className="uc-select" value={launchMode} onChange={(e) => { setLaunchMode(e.target.value); persist("linuxLaunchMode", e.target.value) }} style={LINUX_SELECT}>
+        <select className="uc-select" value={launchMode} onChange={(e) => { setLaunchMode(e.target.value); persist("linuxLaunchMode", e.target.value) }} style={{ ...SELECT, minWidth: 180 }}>
           <option value="auto">Auto detect</option>
           <option value="proton">Proton</option>
           <option value="wine">Wine</option>
@@ -845,7 +846,7 @@ function LinuxSettingsTab() {
       </Row>
 
       <Row title="Proton version" desc={proton.length ? `${proton.length} runner${proton.length === 1 ? "" : "s"} detected (Steam + ProtonPlus)` : "no Proton runners detected"}>
-        <select className="uc-select" value={protonPath} onChange={(e) => { setProtonPath(e.target.value); persist("linuxProtonPath", e.target.value) }} style={LINUX_SELECT}>
+        <select className="uc-select" value={protonPath} onChange={(e) => { setProtonPath(e.target.value); persist("linuxProtonPath", e.target.value) }} style={{ ...SELECT, minWidth: 180 }}>
           <option value="">System default</option>
           {steam.length ? <optgroup label="Steam Proton">{steam.map((p) => <option key={p.path} value={p.path}>{p.label}</option>)}</optgroup> : null}
           {protonplus.length ? <optgroup label="ProtonPlus">{protonplus.map((p) => <option key={p.path} value={p.path}>{p.label}{p.newest ? " — newest" : ""}</option>)}</optgroup> : null}
