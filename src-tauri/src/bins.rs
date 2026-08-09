@@ -1,5 +1,13 @@
 use std::path::PathBuf;
 
+/// Resolve a bundled resource file: `{resource_dir}/{name}` first, then
+/// `{resource_dir}/resources/{name}` (the packaging layout varies).
+pub(crate) fn resolve_resource_file(resource_dir: &std::path::Path, name: &str) -> Option<PathBuf> {
+    [resource_dir.join(name), resource_dir.join("resources").join(name)]
+        .into_iter()
+        .find(|path| path.is_file())
+}
+
 pub(crate) fn find_on_path(name: &str) -> Option<PathBuf> {
     let path = std::env::var("PATH").ok()?;
     let sep = if cfg!(windows) { ';' } else { ':' };

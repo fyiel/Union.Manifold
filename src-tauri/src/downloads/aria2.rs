@@ -38,13 +38,7 @@ fn free_port() -> u16 {
 }
 
 pub fn resolve_ca_cert(resource_dir: Option<PathBuf>) -> Option<PathBuf> {
-    let resource_dir = resource_dir?;
-    [
-        resource_dir.join("cacert.pem"),
-        resource_dir.join("resources").join("cacert.pem"),
-    ]
-    .into_iter()
-    .find(|path| path.is_file())
+    crate::bins::resolve_resource_file(&resource_dir?, "cacert.pem")
 }
 
 
