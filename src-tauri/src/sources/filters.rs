@@ -35,6 +35,16 @@ pub struct PerSource {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SourceStatus {
+    pub id: String,
+    pub ok: bool,
+    pub games: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct QueryResult {
     pub ok: bool,
     pub games: Vec<UnifiedGame>,
@@ -45,6 +55,8 @@ pub struct QueryResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     pub sources_errored: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub per_source_status: Vec<SourceStatus>,
 }
 
 fn matches_filters(g: &UnifiedGame, p: &QueryParams) -> bool {

@@ -102,7 +102,8 @@ export function BrowsePage() {
       setSourceCounts(countMirrors(nextGames).perSource)
       setStatus((prev) => {
         const next = { ...prev }
-        for (const s of srcs) if (s.enabled) next[s.id] = "done"
+        const failed = new Set(res.perSourceStatus?.filter((item) => !item.ok).map((item) => item.id))
+        for (const s of srcs) if (s.enabled) next[s.id] = failed.has(s.id) ? "failed" : "done"
         return next
       })
     } catch {
@@ -166,9 +167,12 @@ export function BrowsePage() {
       setTotal(payload.total)
       setSourceCounts(countMirrors(merged).perSource)
       const done = new Set(payload.doneSources)
+      const failed = new Set(payload.failedSources)
       setStatus((prev) => {
         const next = { ...prev }
-        for (const s of sourcesRef.current) if (s.enabled) next[s.id] = done.has(s.id) ? "done" : "searching"
+        for (const s of sourcesRef.current) {
+          if (s.enabled) next[s.id] = failed.has(s.id) ? "failed" : done.has(s.id) ? "done" : "searching"
+        }
         return next
       })
     })

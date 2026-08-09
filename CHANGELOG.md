@@ -3,12 +3,12 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
-## Unreleased
+## 3.5.7
 
 ### Added
 
-- Online-Fix repairs get a dedicated toggle in Settings → Sources and the
-  Library game menu, migrated from the legacy disabledSources entry
+- Online-Fix repairs get a dedicated toggle in Settings → Sources, migrated
+  from the legacy disabledSources entry
 - Theme fonts are bundled with the app instead of loaded from the Google Fonts
   CDN, and the webview runs under a strict Content-Security-Policy
 - CI runs clippy plus the full backend and renderer test suites
@@ -61,15 +61,19 @@ All notable changes to Union.Manifold. This project is a fork of
 - Deleting a game entry with an unreadable manifest now always removes its
   folder, and scans for different library roots no longer evict each
   other's cached results
+- Windows CI no longer rejects the elevated game-launch helper for mirroring
+  the existing flat launch argument list
 
 ### Changed
 
-- Source health surfaced per source in browse results; failed sources are
-  refetched on their own after a short cooldown instead of poisoning the
-  whole browse pool cache
+- Source health is surfaced per source in browse results; failures are shown
+  on the source strip and refetched on their own after a short cooldown,
+  without poisoning the whole browse pool or caching only a partial page
 
 ### Removed
 
+- The Library game menu no longer duplicates the Online-Fix enable/disable
+  setting; the repair action still appears there when enabled in Settings
 - Dead wire fields: popularity/nsfw/appid on game payloads, capability
   coverage/supports/scope maps, facet year/size ranges (renderer never
   read them), unused Nexus profileUrl/total/offset/summary/version fields,

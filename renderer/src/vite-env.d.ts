@@ -174,6 +174,7 @@ declare global {
     capabilities: SourceCapabilityReport
     error?: string
     sourcesErrored?: boolean
+    perSourceStatus?: Array<{ id: string; ok: boolean; games: number; reason?: string }>
   }
   type SourceResolveResult = {
     resolvable: boolean
@@ -569,7 +570,7 @@ declare global {
       onSourcesUpdated: (cb: (p: unknown) => void) => () => void
       steamMeta: (appid: number) => Promise<{ ok: boolean; meta: SteamMeta }>
       query: (params: SourceQueryParams, reqId?: number) => Promise<SourceQueryResult>
-      onBrowsePartial: (cb: (payload: { reqId: number; games: UnifiedSourceGame[]; total: number; doneSources: string[] }) => void) => () => void
+      onBrowsePartial: (cb: (payload: { reqId: number; games: UnifiedSourceGame[]; total: number; doneSources: string[]; failedSources: string[] }) => void) => () => void
       capabilities: (sourceIds?: string[]) => Promise<{ ok: boolean; capabilities: SourceCapabilityReport; error?: string }>
       onlinefixStatus: () => Promise<{ ok: boolean; enabled: boolean; available: boolean; error?: string }>
       onlinefixSetEnabled: (enabled: boolean) => Promise<{ ok: boolean; error?: string }>

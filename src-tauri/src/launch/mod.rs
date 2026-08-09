@@ -531,6 +531,8 @@ fn spawn_and_track(
 }
 
 #[cfg(windows)]
+// Flat argv mirrors spawn_and_track and has one internal call site.
+#[allow(clippy::too_many_arguments)]
 fn spawn_elevated_and_track(
     app: &AppHandle,
     appid: &str,

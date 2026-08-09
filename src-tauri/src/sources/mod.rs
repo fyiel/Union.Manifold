@@ -27,6 +27,9 @@ struct CachedPool {
     facets: filters::Facets,
     total: usize,
     errored: bool,
+    status: Vec<filters::SourceStatus>,
+    raw: Vec<schema::SourceGame>,
+    fetched_at_ms: i64,
 }
 
 static QUERY_POOL: LazyLock<cache::KeyedCache<std::sync::Arc<CachedPool>>> =
@@ -34,6 +37,40 @@ static QUERY_POOL: LazyLock<cache::KeyedCache<std::sync::Arc<CachedPool>>> =
 
 static CATALOG_POOL: LazyLock<cache::KeyedCache<std::sync::Arc<CachedPool>>> =
     LazyLock::new(|| cache::KeyedCache::with_limit(std::time::Duration::from_secs(600), 8));
+
+/// How long a pool with failing sources is served before the failed sources
+/// are refetched on the next access.
+const ERRED_REFRESH_MS: i64 = 30_000;
+
+#[derive(Clone, Default, Serialize, Deserialize)]
+struct SourceHealth {
+    last_success_at: Option<i64>,
+    consecutive_failures: u32,
+    last_error: Option<String>,
+}
+
+static SOURCE_HEALTH: LazyLock<metacache::WriteBehind<SourceHealth>> =
+    LazyLock::new(|| metacache::WriteBehind::load("source-health.json"));
+
+fn now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
+/// Record one query outcome per source in the durable health ledger.
+fn record_health(status: &[filters::SourceStatus]) {
+    for st in status {
+        let mut entry = SOURCE_HEALTH.get(&st.id).unwrap_or_default();
+        if st.ok {
+            entry.last_success_at = Some(now_ms());
+            entry.consecutive_failures = 0;
+            entry.last_error = None;
+        } else {
+            entry.consecutive_failures = entry.consecutive_failures.saturating_add(1);
+            entry.last_error = st.reason.clone();
+        }
+        SOURCE_HEALTH.insert(st.id.clone(), entry);
+    }
+}
 
 fn pool_for(params: &QueryParams) -> &'static cache::KeyedCache<std::sync::Arc<CachedPool>> {
     let unfiltered = params
@@ -398,7 +435,64 @@ async fn run_query(reg: &Registry, params: QueryParams) -> filters::QueryResult 
     let sig = pool_sig(&params, &ids);
     let params_fetch = params.clone();
     let ids_fetch = ids.clone();
-    let cached = pool_for(&params)
+    let pool_cache = pool_for(&params);
+
+    // Per-source retry: a pool whose fetch had failures is refetched for the
+    // failed sources only once the 30s cooldown has passed, so a recovered
+    // source clears the gap promptly without re-querying healthy sources.
+    if let Some(cp) = pool_cache.peek(&sig).await {
+        if !cp.errored || now_ms() - cp.fetched_at_ms < ERRED_REFRESH_MS {
+            return page_from(&cp, &params, &ids, reg);
+        }
+        let failed: Vec<String> = cp
+            .status
+            .iter()
+            .filter(|s| !s.ok)
+            .map(|s| s.id.clone())
+            .collect();
+        if !failed.is_empty() {
+            let mut raw = cp.raw.clone();
+            let mut status = cp.status.clone();
+            let epoch = pool_cache.epoch();
+            let mut retry_params = params_fetch.clone();
+            retry_params.limit = POOL_SIZE;
+            retry_params.offset = 0;
+            let fresh = crate::http::map_limit(failed, 3, |id| {
+                let p = retry_params.clone();
+                let idc = id.clone();
+                async move { Some((idc, adapter_query(&id, &p).await)) }
+            })
+            .await;
+            for (id, games) in fresh {
+                if let Some(g) = games {
+                    let n = g.len();
+                    raw.extend(g);
+                    if let Some(st) = status.iter_mut().find(|st| st.id == id) {
+                        st.ok = true;
+                        st.games = n;
+                        st.reason = None;
+                    }
+                }
+            }
+            let errored = status.iter().any(|s| !s.ok);
+            let (ordered, facets, total) = filters::finalize_pool(raw.clone(), &params_fetch);
+            record_health(&status);
+            let refreshed = std::sync::Arc::new(CachedPool {
+                ordered,
+                facets,
+                total,
+                errored,
+                status,
+                raw,
+                fetched_at_ms: now_ms(),
+            });
+            let stored = refreshed.clone();
+            pool_cache.store_if_epoch(&sig, epoch, stored).await;
+            return page_from(&refreshed, &params, &ids, reg);
+        }
+    }
+
+    let cached = pool_cache
         .get_or(&sig, || async move {
             let mut p = params_fetch;
             p.limit = POOL_SIZE;
@@ -406,23 +500,46 @@ async fn run_query(reg: &Registry, params: QueryParams) -> filters::QueryResult 
             let per_source =
                 crate::http::map_limit(ids_fetch.clone(), ids_fetch.len().max(1), |id| {
                     let p = p.clone();
-                    async move { Some(adapter_query(&id, &p).await) }
+                    let idc = id.clone();
+                    async move { Some((idc, adapter_query(&id, &p).await)) }
                 })
                 .await;
-            let mut pool: Vec<SourceGame> = Vec::new();
+            let mut pool: Vec<schema::SourceGame> = Vec::new();
+            let mut status: Vec<filters::SourceStatus> = Vec::new();
             let mut errored = false;
-            for v in per_source {
-                match v {
-                    Some(mut games) => pool.append(&mut games),
-                    None => errored = true,
+            for (id, games) in per_source {
+                match games {
+                    Some(mut g) => {
+                        let n = g.len();
+                        pool.append(&mut g);
+                        status.push(filters::SourceStatus {
+                            id,
+                            ok: true,
+                            games: n,
+                            reason: None,
+                        });
+                    }
+                    None => {
+                        errored = true;
+                        status.push(filters::SourceStatus {
+                            id,
+                            ok: false,
+                            games: 0,
+                            reason: Some("no response".to_string()),
+                        });
+                    }
                 }
             }
-            let (ordered, facets, total) = filters::finalize_pool(pool, &p);
+            let (ordered, facets, total) = filters::finalize_pool(pool.clone(), &p);
+            record_health(&status);
             Some(std::sync::Arc::new(CachedPool {
                 ordered,
                 facets,
                 total,
                 errored,
+                status,
+                raw: pool,
+                fetched_at_ms: now_ms(),
             }))
         })
         .await;
@@ -454,6 +571,7 @@ fn page_from(
         capabilities: filters::capability_report(ids, reg),
         error: None,
         sources_errored: cp.errored,
+        per_source_status: cp.status.clone(),
     }
 }
 
@@ -465,6 +583,9 @@ fn empty_pool() -> std::sync::Arc<CachedPool> {
         },
         total: 0,
         errored: false,
+        status: Vec::new(),
+        raw: Vec::new(),
+        fetched_at_ms: now_ms(),
     })
 }
 
@@ -498,14 +619,44 @@ async fn run_query_stream(
     }
     let mut pool: Vec<SourceGame> = Vec::new();
     let mut done: Vec<String> = Vec::new();
+    let mut failed: Vec<String> = Vec::new();
+    let mut status: Vec<filters::SourceStatus> = Vec::new();
     let mut errored = false;
     let mut latest: Option<std::sync::Arc<CachedPool>> = None;
     while let Some((id, games)) = futs.next().await {
-        done.push(id);
         match games {
-            Some(g) if g.is_empty() => continue,
-            Some(mut g) => pool.append(&mut g),
-            None => errored = true,
+            Some(g) if g.is_empty() => {
+                done.push(id.clone());
+                status.push(filters::SourceStatus {
+                    id,
+                    ok: true,
+                    games: 0,
+                    reason: None,
+                });
+            }
+            Some(mut g) => {
+                done.push(id.clone());
+                let n = g.len();
+                pool.append(&mut g);
+                status.push(filters::SourceStatus {
+                    id,
+                    ok: true,
+                    games: n,
+                    reason: None,
+                });
+            }
+            None => {
+                // A failed source must not be labelled 'done' in the stream:
+                // the renderer strip keys off doneSources to show progress.
+                errored = true;
+                failed.push(id.clone());
+                status.push(filters::SourceStatus {
+                    id,
+                    ok: false,
+                    games: 0,
+                    reason: Some("no response".to_string()),
+                });
+            }
         }
         let (ordered, facets, total) = filters::finalize_pool(pool.clone(), &p);
         let page: Vec<schema::UnifiedGame> = ordered
@@ -516,7 +667,13 @@ async fn run_query_stream(
             .collect();
         app.emit(
             "uc:browse-partial",
-            json!({ "reqId": req_id, "games": page, "total": total, "doneSources": done }),
+            json!({
+                "reqId": req_id,
+                "games": page,
+                "total": total,
+                "doneSources": done,
+                "failedSources": failed,
+            }),
         )
         .ok();
         latest = Some(std::sync::Arc::new(CachedPool {
@@ -524,9 +681,13 @@ async fn run_query_stream(
             facets,
             total,
             errored,
+            status: status.clone(),
+            raw: pool.clone(),
+            fetched_at_ms: now_ms(),
         }));
     }
     let cp = latest.unwrap_or_else(empty_pool);
+    record_health(&cp.status);
     let stored = cp.clone();
     pool_cache.store_if_epoch(&sig, epoch, stored).await;
     page_from(&cp, &params, &ids, reg)

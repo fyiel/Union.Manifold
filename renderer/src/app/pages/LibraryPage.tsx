@@ -456,15 +456,6 @@ export function LibraryPage() {
     void window.ucSources?.onlinefixRepair?.(g.appid, g.name)
   }
 
-  const toggleOnlineFix = async () => {
-    const next = !onlineFixEnabled
-    setOnlineFixEnabled(next)
-    try { await window.ucSources?.onlinefixSetEnabled?.(next) } catch { }
-    const status = await window.ucSources?.onlinefixStatus?.().catch(() => undefined)
-    setOnlineFixEnabled(Boolean(status?.enabled))
-    setOnlineFixReady(Boolean(status?.available))
-  }
-
   const subtitle = [
     `${installed.length} installed`,
     totalBytes > 0 ? `${gbLabel(totalBytes)} on disk` : null,
@@ -589,8 +580,6 @@ export function LibraryPage() {
             onMods: () => navigate(`/g/${encodeURIComponent(menu.game.appid)}/mods`, { state: { game: menu.game } }),
             onWand: IS_WINDOWS || IS_LINUX ? () => { const game = installed.find((item) => item.appid === menu.game.appid); if (game) setWandFor(game) } : undefined,
             onGrabRepair: onlineFixReady && onlineFixEnabled ? () => { const g = installed.find((x) => x.appid === menu.game.appid); if (g) void grabRepair(g) } : undefined,
-            onToggleOnlineFix: () => void toggleOnlineFix(),
-            onlineFixEnabled,
           }}
           onClose={() => setMenu(null)}
         />
