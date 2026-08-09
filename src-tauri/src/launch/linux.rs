@@ -767,12 +767,6 @@ fn steam_library_dirs(steam_root: &Path) -> Vec<PathBuf> {
             }
         }
     }
-    dirs.push(path);
-                }
-            }
-        }
-        break;
-    }
     dirs
 }
 
