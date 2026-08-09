@@ -509,11 +509,7 @@ pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Resul
         if cfg.steam_appid == Some(MEWGENICS_STEAM_APPID) {
             continue;
         }
-        let prefix = join_target(Path::new(""), &m.deploy_prefix)?
-            .components()
-            .map(|component| component.as_os_str().to_string_lossy().to_string())
-            .collect::<Vec<_>>()
-            .join("/");
+        let prefix = join_rel(&join_target(Path::new(""), &m.deploy_prefix)?);
         let sdir = staging_root.join(&m.id);
         for entry in walkdir::WalkDir::new(&sdir).into_iter().flatten() {
             if !entry.file_type().is_file() {
@@ -1532,10 +1528,7 @@ fn read_game_manifest(roots: &[PathBuf], appid: &str) -> Option<Value> {
 fn game_title(state: &AppState, appid: &str) -> Option<String> {
     let roots = library::scan_roots(state);
     let m = read_game_manifest(&roots, appid)?;
-    m.get("name")
-        .and_then(|v| v.as_str())
-        .or_else(|| m.pointer("/metadata/name").and_then(|v| v.as_str()))
-        .map(str::to_string)
+    manifest_get(&m, "name").and_then(|v| v.as_str()).map(str::to_string)
 }
 
 async fn detect_steam_appid(state: &AppState, appid: &str) -> Option<u64> {
@@ -1553,11 +1546,7 @@ async fn detect_steam_appid(state: &AppState, appid: &str) -> Option<u64> {
     {
         return Some(id);
     }
-    let name = manifest
-        .get("name")
-        .and_then(|v| v.as_str())
-        .or_else(|| manifest.pointer("/metadata/name").and_then(|v| v.as_str()))?
-        .to_string();
+    let name = manifest_get(&manifest, "name").and_then(|v| v.as_str())?.to_string();
     crate::sources::steam::search_app_id(&name).await
 }
 
@@ -1920,42 +1909,33 @@ fn bepinex_plugin_name(spec: &InstallSpec) -> String {
 
 fn upsert_mod(cfg: &mut GameMods, spec: &InstallSpec, size: u64, plan: &DeploymentPlan) {
     let mod_id = spec.mod_id();
-    if let Some(m) = cfg.mods.iter_mut().find(|m| m.id == mod_id) {
-        m.file_id = spec.file_id;
-        m.name = spec.name.clone();
-        m.version = spec.version.clone();
-        m.author = spec.author.clone();
-        m.picture = spec.picture.clone();
-        m.summary = spec.summary.clone();
-        m.installed_at = now_secs();
-        m.size_bytes = size;
-        m.page_url = spec.page_url.clone();
-        m.deploy_prefix = plan.deploy_prefix.clone();
-        m.deploy_reason = plan.reason.clone();
-        m.deploy_confidence = plan.confidence.to_string();
-        m.deploy_blocked = false;
+    let order = cfg.mods.iter().map(|m| m.order + 1).max().unwrap_or(0);
+    let mut entry = ModEntry {
+        id: mod_id,
+        provider: spec.provider.clone(),
+        remote_id: spec.remote_id.clone(),
+        file_id: spec.file_id,
+        name: spec.name.clone(),
+        version: spec.version.clone(),
+        author: spec.author.clone(),
+        picture: spec.picture.clone(),
+        summary: spec.summary.clone(),
+        enabled: true,
+        order,
+        installed_at: now_secs(),
+        size_bytes: size,
+        page_url: spec.page_url.clone(),
+        deploy_prefix: plan.deploy_prefix.clone(),
+        deploy_reason: plan.reason.clone(),
+        deploy_confidence: plan.confidence.to_string(),
+        deploy_blocked: false,
+    };
+    if let Some(m) = cfg.mods.iter_mut().find(|m| m.id == entry.id) {
+        entry.enabled = m.enabled;
+        entry.order = m.order;
+        *m = entry;
     } else {
-        let order = cfg.mods.iter().map(|m| m.order + 1).max().unwrap_or(0);
-        cfg.mods.push(ModEntry {
-            id: mod_id,
-            provider: spec.provider.clone(),
-            remote_id: spec.remote_id.clone(),
-            file_id: spec.file_id,
-            name: spec.name.clone(),
-            version: spec.version.clone(),
-            author: spec.author.clone(),
-            picture: spec.picture.clone(),
-            summary: spec.summary.clone(),
-            enabled: true,
-            order,
-            installed_at: now_secs(),
-            size_bytes: size,
-            page_url: spec.page_url.clone(),
-            deploy_prefix: plan.deploy_prefix.clone(),
-            deploy_reason: plan.reason.clone(),
-            deploy_confidence: plan.confidence.to_string(),
-            deploy_blocked: false,
-        });
+        cfg.mods.push(entry);
     }
 }
 
@@ -2334,7 +2314,7 @@ pub async fn mods_game_get(state: State<'_, AppState>, appid: String) -> Result<
         "deployTarget": cfg.deploy_target,
         "deployed": deployed,
         "loaderCompatibility": loaders,
-        "mods": serde_json::to_value(&cfg.mods).unwrap_or_else(|_| json!([])),
+        "mods": serde_json::to_value(&cfg.mods).unwrap(),
     }))
 }
 
