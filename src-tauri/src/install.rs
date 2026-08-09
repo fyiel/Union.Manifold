@@ -839,11 +839,8 @@ pub async fn install_downloaded_archive(
             None => return Ok(json!({ "ok": false, "error": "no downloaded archive found" })),
         }
     };
-    if state.downloads.appid_active(&appid) {
-        return Ok(json!({ "ok": false, "error": "download in progress for this app" }));
-    }
-    if !state.downloads.try_install_lock(&appid) {
-        return Ok(json!({ "ok": false, "error": "install already in progress" }));
+    if let Some(err) = install_guard(&state.downloads, &appid) {
+        return Ok(err);
     }
     let out = async {
         let entry = extract_entry_point(&dir, &save_path);
