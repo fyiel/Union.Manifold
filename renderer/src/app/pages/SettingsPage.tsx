@@ -1091,9 +1091,7 @@ function ModsTab({ onJumpToSources }: { onJumpToSources: () => void }) {
             spellCheck={false}
             style={{ flex: 1, height: 38, padding: "0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12, outline: "none" }}
           />
-          <button type="button" className="mf-ghost" title={reveal ? "Hide key" : "Show key"} onClick={() => setReveal((v) => !v)} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t3)", cursor: "pointer", flexShrink: 0 }}>
-            {reveal ? <EyeOff size={14} strokeWidth={1.6} /> : <Eye size={14} strokeWidth={1.6} />}
-          </button>
+          <RevealButton shown={reveal} onToggle={() => setReveal((v) => !v)} title="key" />
           <button type="button" className="mf-ghost" disabled={validating || !apiKey.trim()} onClick={() => void validate()} style={{ display: "flex", alignItems: "center", gap: 7, padding: "0 15px", height: 38, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: !apiKey.trim() ? "var(--mf-t4)" : "var(--mf-t1)", fontSize: 12, fontWeight: 600, cursor: validating || !apiKey.trim() ? "default" : "pointer", opacity: validating ? 0.6 : 1, flexShrink: 0 }}>
             {validating ? "Validating…" : "Validate"}
           </button>
@@ -1141,9 +1139,7 @@ function ModsTab({ onJumpToSources }: { onJumpToSources: () => void }) {
             spellCheck={false}
             style={{ flex: 1, height: 38, padding: "0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12, outline: "none" }}
           />
-          <button type="button" className="mf-ghost" title={sessionRevealed ? "Hide cookie" : "Show cookie"} onClick={() => setSessionRevealed((v) => !v)} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t3)", cursor: "pointer", flexShrink: 0 }}>
-            {sessionRevealed ? <EyeOff size={14} strokeWidth={1.6} /> : <Eye size={14} strokeWidth={1.6} />}
-          </button>
+          <RevealButton shown={sessionRevealed} onToggle={() => setSessionRevealed((v) => !v)} title="cookie" />
         </div>
         <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t4)", marginTop: 12, lineHeight: 1.5 }}>
           Browser User-Agent (required when using cf_clearance): in the SAME browser's devtools console run <code>navigator.userAgent</code> and paste the result here. A cf_clearance cookie only validates against the exact User-Agent that created it.{uaSaved ? " (saved)" : ""}
@@ -1165,6 +1161,14 @@ function ModsTab({ onJumpToSources }: { onJumpToSources: () => void }) {
         </span>
       </Row>
     </div>
+  )
+}
+
+function RevealButton({ shown, onToggle, title }: { shown: boolean; onToggle: () => void; title: string }) {
+  return (
+    <button type="button" className="mf-ghost" title={shown ? `Hide ${title}` : `Show ${title}`} onClick={onToggle} style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 38, height: 38, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t3)", cursor: "pointer", flexShrink: 0 }}>
+      {shown ? <EyeOff size={14} strokeWidth={1.6} /> : <Eye size={14} strokeWidth={1.6} />}
+    </button>
   )
 }
 
