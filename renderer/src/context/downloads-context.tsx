@@ -1426,26 +1426,24 @@ const startGameDownload = useCallback(async (game: Game, preferredHostOverride?:
           downloadLogger.info("Resume Level 2 resolved", { data: { resolvedUrl: resolved?.url, resolvedOk: resolved?.resolved } })
           const freshUrl = resolved?.resolved ? resolved.url : target.url
 
-          if (target.savePath) {
-            try {
-              const res = await window.ucDownloads.start({
-                downloadId,
-                url: freshUrl,
-                filename: resolved?.filename || target.filename,
-                appid: target.appid,
-                gameName: target.gameName,
-                partIndex: target.partIndex,
-                partTotal: target.partTotal,
-                savePath: target.savePath,
-                totalBytes: resolved?.size || target.totalBytes,
-                update: target.update,
-                installMetadata: target.installMetadata,
-              } as Parameters<typeof window.ucDownloads.start>[0])
-              downloadLogger.info("Resume Level 2 start result", { data: res })
-              ok = true
-            } catch (e) {
-              downloadLogger.warn("Resume Level 2 start failed", { data: e })
-            }
+          try {
+            const res = await window.ucDownloads.start({
+              downloadId,
+              url: freshUrl,
+              filename: resolved?.filename || target.filename,
+              appid: target.appid,
+              gameName: target.gameName,
+              partIndex: target.partIndex,
+              partTotal: target.partTotal,
+              ...(target.savePath ? { savePath: target.savePath } : {}),
+              totalBytes: resolved?.size || target.totalBytes,
+              update: target.update,
+              installMetadata: target.installMetadata,
+            } as Parameters<typeof window.ucDownloads.start>[0])
+            downloadLogger.info("Resume Level 2 start result", { data: res })
+            ok = true
+          } catch (e) {
+            downloadLogger.warn("Resume Level 2 start failed", { data: e })
           }
 
           setDownloads((prev) =>
