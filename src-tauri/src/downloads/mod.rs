@@ -19,12 +19,12 @@ pub const MANIFEST_NAME: &str = "installed.json";
 const MANIFEST_CHECKPOINT_INTERVAL: Duration = Duration::from_secs(5);
 const SPEED_EMIT_QUANTUM: u64 = 50 * 1024;
 
-pub /// Install directory for a game inside a root, using the sanitized name.
+/// Install directory for a game inside a root, using the sanitized name.
 pub fn install_dir_for(root: &Path, name: &str) -> PathBuf {
     root.join(safe_folder_name(name))
 }
 
-fn safe_folder_name(name: &str) -> String {
+pub fn safe_folder_name(name: &str) -> String {
     let cleaned: String = name
         .chars()
         .map(|c| {
