@@ -1138,7 +1138,7 @@ function ModsTab({ onJumpToSources }: { onJumpToSources: () => void }) {
           placeholder="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 …"
           autoComplete="off"
           spellCheck={false}
-          style={{ ...MONO_INPUT, width: "100%" }}
+          style={{ ...MONO_INPUT, width: "100%", marginTop: 12 }}
         />
       </div>
 

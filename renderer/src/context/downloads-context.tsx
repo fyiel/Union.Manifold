@@ -194,9 +194,10 @@ function normalizePersistedDownloads(parsed: unknown, sourceLabel: string): Down
         }
       }
 
-      // Statuses from pre-sweep builds (e.g. "verifying"/"retrying") are no
-      // longer part of the union; park them as paused so the row stays
-      // visible and resumable instead of vanishing from every UI section.
+      // Statuses from pre-sweep builds (e.g. "verifying"/"retrying") are
+      // never produced by the backend or the reducer; park them as paused
+      // so the row stays visible and resumable instead of vanishing from
+      // every UI section.
       const status = String(safeItem.status || "")
       const known = ["queued", "paused", "extracting", "installing", "install_ready", "completed", "extracted", "extract_failed", "cancelled"]
       if (!known.includes(status)) {
