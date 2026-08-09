@@ -126,6 +126,7 @@ pub(crate) fn systemd_scope_command(
     Some(c)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn track_game_started(
     app: &AppHandle,
     appid: &str,
