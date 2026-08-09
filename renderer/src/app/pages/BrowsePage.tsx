@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import { X } from "lucide-react"
-import { querySources, rememberGames, sourcesAvailable, listSources, onSourcesChanged, mergeUnique, countMirrors, nextSortMode, sortModeLabel, type SourceSortMode } from "@/lib/sources"
+import { querySources, rememberGames, sourcesAvailable, listSources, onSourcesChanged, mergeUnique, countMirrors, nextSortMode, sortModeLabel, type SourceSortMode, sortUnifiedGames } from "@/lib/sources"
 import { getBrowseCache, setBrowseCache, setBrowseScroll, consumeDiskRestore } from "@/lib/browse-cache"
 import { GameCard } from "@/app/manifold/GameCard"
 import { MONO, SearchIcon, SmartImage, Spinner, CenterState } from "@/app/manifold/ui"
@@ -187,21 +187,10 @@ export function BrowsePage() {
   const searching = sources.some((s) => s.enabled && status[s.id] === "searching")
   const hasMore = games.length < total
 
-  const sorted = useMemo(() => {
-    const arr = [...games]
-    if (sortMode === "a-z") arr.sort((a, b) => a.title.localeCompare(b.title))
-    else if (sortMode === "size") arr.sort((a, b) => (b.sizeBytes || 0) - (a.sizeBytes || 0))
-    else if (sortMode === "sources") arr.sort((a, b) => b.sources.length - a.sources.length || (b.releaseYear || 0) - (a.releaseYear || 0))
-    else if (hasQuery) {
-      const q = committed.toLowerCase()
-      arr.sort((a, b) => {
-        const ra = a.title.toLowerCase().startsWith(q) ? 0 : 1
-        const rb = b.title.toLowerCase().startsWith(q) ? 0 : 1
-        return ra - rb || b.sources.length - a.sources.length || a.title.localeCompare(b.title)
-      })
-    }
-    return arr
-  }, [games, sortMode, hasQuery, committed])
+  const sorted = useMemo(
+    () => sortUnifiedGames(games, sortMode, { query: hasQuery ? committed : "" }),
+    [games, sortMode, hasQuery, committed]
+  )
 
   const mirrors = useMemo(() => sorted.reduce((n, g) => n + g.sources.length, 0), [sorted])
   const resultSummary = searching ? `${sorted.length} so far…` : `${sorted.length}${hasMore ? "+" : ""} titles · ${mirrors} mirrors`

@@ -18,6 +18,32 @@ export function sortModeLabel(mode: SourceSortMode, hasQuery: boolean): string {
   return SORT_LABELS[mode]
 }
 
+export function sortUnifiedGames(games: UnifiedSourceGame[], sort: SourceSortMode, opts: { query?: string; fallbackLatest?: boolean } = {}): UnifiedSourceGame[] {
+  const arr = [...games]
+  const q = (opts.query || "").trim().toLowerCase()
+  if (sort === "a-z") arr.sort((a, b) => a.title.localeCompare(b.title))
+  else if (sort === "size") arr.sort((a, b) => (b.sizeBytes || 0) - (a.sizeBytes || 0))
+  else if (sort === "sources") arr.sort((a, b) => b.sources.length - a.sources.length || (b.releaseYear || 0) - (a.releaseYear || 0))
+  else if (q) {
+    arr.sort((a, b) => {
+      const ra = a.title.toLowerCase().startsWith(q) ? 0 : 1
+      const rb = b.title.toLowerCase().startsWith(q) ? 0 : 1
+      return ra - rb || b.sources.length - a.sources.length || a.title.localeCompare(b.title)
+    })
+  } else if (opts.fallbackLatest) {
+    arr.sort((a, b) => (b.releaseYear || 0) - (a.releaseYear || 0))
+  }
+  return arr
+}
+
+export function sortDownloadOptions(options: SourceDownloadOption[]): SourceDownloadOption[] {
+  return [...options].sort(
+    (a, b) =>
+      Number(Boolean(b.resolvable)) - Number(Boolean(a.resolvable)) ||
+      hostFriendliness(a.hostType) - hostFriendliness(b.hostType)
+  )
+}
+
 export function mergeUnique<T extends { dedupKey: string }>(prev: T[], next: T[]): T[] {
   const seen = new Set(prev.map((g) => g.dedupKey))
   return [...prev, ...next.filter((g) => !seen.has(g.dedupKey))]
