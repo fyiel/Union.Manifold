@@ -1,6 +1,34 @@
 use super::*;
 
 #[test]
+fn cached_merge_preserves_results_without_exposing_its_title_key() {
+    let mut records = vec![
+        SourceGame {
+            source_id: "one".into(),
+            title: "Portal 2 Deluxe".into(),
+            ..Default::default()
+        },
+        SourceGame {
+            source_id: "two".into(),
+            title: "Portal 2".into(),
+            ..Default::default()
+        },
+    ];
+    let expected = serde_json::to_value(merge_games(records.clone())).unwrap();
+    let first = merge_games_cached(&mut records);
+    assert_eq!(serde_json::to_value(&first).unwrap(), expected);
+    assert_eq!(records[0].normalized_title, "portal 2");
+    assert!(serde_json::to_value(&records[0])
+        .unwrap()
+        .get("normalizedTitle")
+        .is_none());
+    assert_eq!(
+        serde_json::to_value(merge_games_cached(&mut records)).unwrap(),
+        expected
+    );
+}
+
+#[test]
 fn browse_summary_keeps_card_and_directness_but_drops_detail_payload() {
     let mut source = SourceGame {
         source_id: "steamrip".into(),

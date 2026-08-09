@@ -246,6 +246,7 @@ fn normalize(uc: &Value) -> SourceGame {
             ..Default::default()
         }],
         direct: true,
+        normalized_title: String::new(),
     }
 }
 

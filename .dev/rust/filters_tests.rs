@@ -175,29 +175,7 @@ fn finalize_pool_facets_reflect_filtered_set_not_raw_pool() {
 #[test]
 #[ignore = "measurement helper; run explicitly with --ignored --nocapture"]
 fn benchmark_large_source_pool_finalize_and_page_json() {
-    let mut pool = Vec::with_capacity(2_400);
-    for i in 0..2_400 {
-        let mut entry = game(&format!("source-{}", i % 8), &format!("Synthetic game {i}"));
-        entry.source_slug = format!("game-{i}");
-        entry.source_url = format!("https://source.test/games/{i}");
-        entry.description = Some("A representative source description. ".repeat(30));
-        entry.image = Some(format!("https://cdn.test/{i}/library_600x900.jpg"));
-        entry.download_options = (0..4)
-            .map(|part| crate::sources::schema::DownloadOption {
-                label: format!("Part {part}"),
-                host_type: "pixeldrain".to_string(),
-                url: Some(format!(
-                    "https://files.test/{i}/{part}?token={}",
-                    "x".repeat(80)
-                )),
-                page_url: Some(format!("https://source.test/{i}/{part}")),
-                size_bytes: Some(1_234_567_890),
-                size_text: None,
-                resolvable: true,
-            })
-            .collect();
-        pool.push(entry);
-    }
+    let pool = large_source_pool(false);
 
     let started = std::time::Instant::now();
     let (games, _, total) = finalize_pool(pool, &params());
@@ -215,6 +193,79 @@ fn benchmark_large_source_pool_finalize_and_page_json() {
         finalize.as_millis(),
         json.len(),
         serialize.as_micros() as f64 / 1_000.0,
+    );
+}
+
+fn large_source_pool(overlap: bool) -> Vec<SourceGame> {
+    let mut pool = Vec::with_capacity(2_400);
+    for source in 0..8 {
+        for item in 0..300 {
+            let i = source * 300 + item;
+            let title = if overlap && item < 75 {
+                format!("Shared catalog game {item}")
+            } else {
+                format!("Synthetic game {i}")
+            };
+            let mut entry = game(&format!("source-{source}"), &title);
+            entry.source_slug = format!("game-{i}");
+            entry.source_url = format!("https://source.test/games/{i}");
+            entry.description = Some("A representative source description. ".repeat(30));
+            entry.image = Some(format!("https://cdn.test/{i}/library_600x900.jpg"));
+            entry.download_options = (0..4)
+                .map(|part| crate::sources::schema::DownloadOption {
+                    label: format!("Part {part}"),
+                    host_type: "pixeldrain".to_string(),
+                    url: Some(format!(
+                        "https://files.test/{i}/{part}?token={}",
+                        "x".repeat(80)
+                    )),
+                    page_url: Some(format!("https://source.test/{i}/{part}")),
+                    size_bytes: Some(1_234_567_890),
+                    size_text: None,
+                    resolvable: true,
+                })
+                .collect();
+            pool.push(entry);
+        }
+    }
+    pool
+}
+
+#[test]
+#[ignore = "measurement helper; run explicitly with --ignored --nocapture"]
+fn benchmark_progressive_source_finalization() {
+    let mut p = params();
+    p.balanced = true;
+    let source_pool = large_source_pool(true);
+    let batches: Vec<Vec<_>> = source_pool
+        .chunks(300)
+        .map(<[SourceGame]>::to_vec)
+        .collect();
+    let mut uncached = Vec::with_capacity(2_400);
+    let uncached_started = std::time::Instant::now();
+    for mut batch in batches.clone() {
+        uncached.append(&mut batch);
+        std::hint::black_box(finalize_pool(uncached.clone(), &p));
+    }
+    let uncached_progressive = uncached_started.elapsed();
+    let mut accumulated = Vec::with_capacity(2_400);
+    let started = std::time::Instant::now();
+    for mut batch in batches {
+        accumulated.append(&mut batch);
+        std::hint::black_box(finalize_pool_cached(&mut accumulated, &p));
+    }
+    let progressive = started.elapsed();
+
+    let pool = large_source_pool(true);
+    let started = std::time::Instant::now();
+    let (_, _, total) = finalize_pool(pool, &p);
+    let single = started.elapsed();
+    assert_eq!(total, 1_875);
+    eprintln!(
+        "source_progressive_8x300_ms={} uncached_reference_ms={} final_2400_ms={}",
+        progressive.as_millis(),
+        uncached_progressive.as_millis(),
+        single.as_millis(),
     );
 }
 

@@ -53,6 +53,8 @@ pub struct SourceGame {
     pub download_options: Vec<DownloadOption>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub direct: bool,
+    #[serde(skip)]
+    pub(crate) normalized_title: String,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -110,6 +112,7 @@ impl SourceGame {
             size_text: self.size_text.clone(),
             download_options: Vec::new(),
             direct: self.direct || self.download_options.iter().any(|option| option.resolvable),
+            normalized_title: String::new(),
         }
     }
 }
@@ -252,7 +255,16 @@ pub fn year_from(s: &str) -> Option<i32> {
         .filter(|y: &i32| *y >= 1970 && *y <= 2100)
 }
 
-pub fn merge_games(records: Vec<SourceGame>) -> Vec<UnifiedGame> {
+pub fn merge_games(mut records: Vec<SourceGame>) -> Vec<UnifiedGame> {
+    merge_games_cached(&mut records)
+}
+
+pub(crate) fn merge_games_cached(records: &mut [SourceGame]) -> Vec<UnifiedGame> {
+    for record in records.iter_mut() {
+        if record.normalized_title.is_empty() {
+            record.normalized_title = normalize_title(&record.title);
+        }
+    }
     let n = records.len();
     let mut parent: Vec<usize> = (0..n).collect();
     fn find(parent: &mut [usize], mut x: usize) -> usize {
@@ -280,9 +292,9 @@ pub fn merge_games(records: Vec<SourceGame>) -> Vec<UnifiedGame> {
                 by_appid.insert(id, i);
             }
         }
-        let key = normalize_title(&r.title);
+        let key = &r.normalized_title;
         if !key.is_empty() {
-            if let Some(&j) = by_title.get(&key) {
+            if let Some(&j) = by_title.get(key) {
                 let ai = r.steam_app_id.filter(|v| *v > 0);
                 let aj = records[j].steam_app_id.filter(|v| *v > 0);
                 let conflict = matches!((ai, aj), (Some(x), Some(y)) if x != y);
@@ -290,7 +302,7 @@ pub fn merge_games(records: Vec<SourceGame>) -> Vec<UnifiedGame> {
                     union(&mut parent, i, j);
                 }
             } else {
-                by_title.insert(key, i);
+                by_title.insert(key.clone(), i);
             }
         }
     }

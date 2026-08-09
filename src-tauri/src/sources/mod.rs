@@ -504,7 +504,8 @@ async fn run_query(reg: &Registry, params: QueryParams) -> filters::QueryResult 
                 }
             }
             let errored = status.iter().any(|s| !s.ok);
-            let (ordered, facets, total) = filters::finalize_pool(raw.clone(), &params_fetch);
+            let (ordered, facets, total) =
+                filters::finalize_pool_cached(&mut raw, &params_fetch);
             record_health(&status);
             let refreshed = std::sync::Arc::new(CachedPool {
                 ordered,
@@ -559,7 +560,7 @@ async fn run_query(reg: &Registry, params: QueryParams) -> filters::QueryResult 
                     }
                 }
             }
-            let (ordered, facets, total) = filters::finalize_pool(pool.clone(), &p);
+            let (ordered, facets, total) = filters::finalize_pool_cached(&mut pool, &p);
             record_health(&status);
             Some(std::sync::Arc::new(CachedPool {
                 ordered,
@@ -706,7 +707,7 @@ async fn run_query_stream(
                         });
                     }
                 }
-                let (ordered, facets, total) = filters::finalize_pool(pool.clone(), &p);
+                let (ordered, facets, total) = filters::finalize_pool_cached(&mut pool, &p);
                 let page: Vec<schema::UnifiedGame> = ordered
                     .iter()
                     .skip(page_params.offset)

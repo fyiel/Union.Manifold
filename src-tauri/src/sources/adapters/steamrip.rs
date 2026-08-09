@@ -359,6 +359,7 @@ fn build_game(post: &Value, appid: Option<u64>, cats: &Cats) -> SourceGame {
         size_text: None,
         download_options: extract_download_options(content),
         direct: false,
+        normalized_title: String::new(),
     }
 }
 

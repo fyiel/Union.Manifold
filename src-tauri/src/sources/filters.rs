@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use serde::Serialize;
 
-use super::schema::{merge_games, SourceGame, UnifiedGame};
+use super::schema::{merge_games_cached, SourceGame, UnifiedGame};
 use super::{Capabilities, QueryParams, Registry};
 
 #[derive(Debug, Clone, Serialize)]
@@ -139,7 +139,7 @@ fn sort_games(games: &mut [UnifiedGame], p: &QueryParams) {
 }
 
 fn balanced_interleave(games: Vec<UnifiedGame>) -> Vec<UnifiedGame> {
-    let mut buckets: HashMap<String, Vec<UnifiedGame>> = HashMap::new();
+    let mut buckets: HashMap<String, VecDeque<UnifiedGame>> = HashMap::new();
     let mut order: Vec<String> = Vec::new();
     for g in games {
         let key = g
@@ -150,16 +150,15 @@ fn balanced_interleave(games: Vec<UnifiedGame>) -> Vec<UnifiedGame> {
         if !buckets.contains_key(&key) {
             order.push(key.clone());
         }
-        buckets.entry(key).or_default().push(g);
+        buckets.entry(key).or_default().push_back(g);
     }
-    let mut out = Vec::new();
-    let mut idx = 0;
+    let mut out = Vec::with_capacity(buckets.values().map(VecDeque::len).sum());
     loop {
         let mut pushed = false;
         for key in &order {
-            if let Some(bucket) = buckets.get(key) {
-                if let Some(g) = bucket.get(idx) {
-                    out.push(g.clone());
+            if let Some(bucket) = buckets.get_mut(key) {
+                if let Some(g) = bucket.pop_front() {
+                    out.push(g);
                     pushed = true;
                 }
             }
@@ -167,7 +166,6 @@ fn balanced_interleave(games: Vec<UnifiedGame>) -> Vec<UnifiedGame> {
         if !pushed {
             break;
         }
-        idx += 1;
     }
     out
 }
@@ -209,11 +207,19 @@ pub fn capability_report(ids: &[String], reg: &Registry) -> CapabilityReport {
     CapabilityReport { per_source }
 }
 
+#[cfg(test)]
 pub fn finalize_pool(
-    pool: Vec<SourceGame>,
+    mut pool: Vec<SourceGame>,
     params: &QueryParams,
 ) -> (Vec<UnifiedGame>, Facets, usize) {
-    let merged = merge_games(pool);
+    finalize_pool_cached(&mut pool, params)
+}
+
+pub(crate) fn finalize_pool_cached(
+    pool: &mut [SourceGame],
+    params: &QueryParams,
+) -> (Vec<UnifiedGame>, Facets, usize) {
+    let merged = merge_games_cached(pool);
     let mut filtered: Vec<UnifiedGame> = merged
         .into_iter()
         .filter(|g| matches_filters(g, params))
