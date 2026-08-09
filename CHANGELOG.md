@@ -5,44 +5,6 @@ All notable changes to Union.Manifold. This project is a fork of
 
 ## Unreleased
 
-### Fixed
-
-- Pausing downloads frees their concurrency slot so the queue keeps
-  starting; resuming a paused transfer re-takes it
-- A download that completed between queueing and start no longer fires
-  auto-install for a row the user just cancelled
-- A typed deploy target that fails validation no longer persists in the
-  mods config
-- Clearing the image cache also clears the in-memory caches, so the freed
-  size is honest and stale 404s do not linger
-- Cold-start deep links for unknown schemes (unionmanifold://) now route
-  to the app like they do for an already-running instance
-
-### Changed
-
-- Source health surfaced per source in browse results; failed sources are
-  refetched on their own after a short cooldown instead of poisoning the
-  whole browse pool cache
-
-### Removed
-
-- The unused wand status command and dead trainer runtime frames (LOG,
-  SETRESULT, PROCESS) from the native trainer host
-- Dead bridge surface: sources_catalog/sources_tags commands, cloud
-  collection API (14 dead exports), controller preset/mapping enums,
-  user-history search/viewed tracking, browse mod fields the UI never
-  read, unused Tauri plugin/window permissions and radix-ui/react deps
-### Removed
-
-- Dead wire fields: popularity/nsfw/appid on game payloads, capability
-  coverage/supports/scope maps, facet year/size ranges (renderer never
-  read them), unused Nexus profileUrl/total/offset/summary/version fields,
-  the unused wand_status command and trainer runtime flag
-- 11 duplicated not-resolvable helpers, 10 duplicated host-match helpers,
-  7 duplicated URL-encoding helpers, and the write-only gid_to_id download
-  map
-
-
 ### Added
 
 - Online-Fix repairs get a dedicated toggle in Settings → Sources and the
@@ -73,6 +35,52 @@ All notable changes to Union.Manifold. This project is a fork of
 - The browse query and catalog caches are now bounded and refresh-safe: a
   source refresh can no longer be overwritten by an in-flight fetch, and
   stale pre-refresh data is never served after a refresh
+- Pausing downloads frees their concurrency slot so the queue keeps
+  starting; resuming a paused transfer re-takes it
+- A download that completed between queueing and start no longer fires
+  auto-install for a row the user just cancelled
+- A typed deploy target that fails validation no longer persists in the
+  mods config
+- Clearing the image cache also clears the in-memory caches, so the freed
+  size is honest and stale 404s do not linger
+- Cold-start deep links for unknown schemes (unionmanifold://) now route
+  to the app like they do for an already-running instance
+- Resuming a paused download that never recorded a save path now works
+  instead of stalling
+- Downloads restored from a legacy session with unknown statuses are
+  parked as paused instead of wedging the queue
+- The bundled trainer is used again when the resource directory is absent
+- Merging update metadata no longer panics when a legacy manifest stores
+  non-object metadata
+- Steam library detection falls back to a second candidate library file
+  and unescapes backslashes in stored entries
+- Zero-byte archives display "0 B" instead of empty parentheses in the
+  downloads list
+- The Slipgate user-agent input keeps its spacing on the settings row
+- The achievements search icon renders with the correct stroke
+- Deleting a game entry with an unreadable manifest now always removes its
+  folder, and scans for different library roots no longer evict each
+  other's cached results
+
+### Changed
+
+- Source health surfaced per source in browse results; failed sources are
+  refetched on their own after a short cooldown instead of poisoning the
+  whole browse pool cache
+
+### Removed
+
+- Dead wire fields: popularity/nsfw/appid on game payloads, capability
+  coverage/supports/scope maps, facet year/size ranges (renderer never
+  read them), unused Nexus profileUrl/total/offset/summary/version fields,
+  the unused wand_status command and trainer runtime flag
+- Dead bridge surface: sources_catalog/sources_tags commands, cloud
+  collection API (14 dead exports), controller preset/mapping enums,
+  user-history search/viewed tracking, browse mod fields the UI never
+  read, unused Tauri plugin/window permissions and radix-ui/react deps
+- 11 duplicated not-resolvable helpers, 10 duplicated host-match helpers,
+  7 duplicated URL-encoding helpers, and the write-only gid_to_id download
+  map
 
 ## 3.5.6
 
