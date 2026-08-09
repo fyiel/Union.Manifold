@@ -1122,6 +1122,7 @@ mod tests {
             vec!["GE-Proton10-12"]
         );
     }
+    #[cfg(target_os = "linux")]
     #[test]
     fn auxiliary_umu_launch_joins_a_running_prefix() {
         let plan = retarget_auxiliary(
