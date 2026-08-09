@@ -1459,14 +1459,7 @@ fn find_steam_app_id(root: &Path) -> Option<u64> {
 }
 
 fn manifest_steam_app_id(manifest: &Value) -> Option<u64> {
-    manifest
-        .get("steamAppId")
-        .and_then(Value::as_u64)
-        .or_else(|| {
-            manifest
-                .pointer("/metadata/steamAppId")
-                .and_then(Value::as_u64)
-        })
+    crate::mods::manifest_get(manifest, "steamAppId").and_then(Value::as_u64)
 }
 
 fn manifest_image(manifest: &Value) -> Option<String> {

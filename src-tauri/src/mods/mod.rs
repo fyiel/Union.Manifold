@@ -214,7 +214,7 @@ pub(crate) fn emit_progress(
     app.emit("mods:install-progress", payload).ok();
 }
 
-fn manifest_get<'a>(m: &'a Value, key: &str) -> Option<&'a Value> {
+pub(crate) fn manifest_get<'a>(m: &'a Value, key: &str) -> Option<&'a Value> {
     m.get(key).or_else(|| m.pointer(&format!("/metadata/{key}")))
 }
 
