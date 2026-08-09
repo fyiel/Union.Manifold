@@ -18,6 +18,7 @@ import {
   type PreferredDownloadHost,
 } from "@/lib/downloads"
 import { apiFetch } from "@/lib/api"
+import { fmtBytes } from "@/lib/utils"
 import { addDownloadedGameToHistory } from "@/lib/user-history"
 import { downloadLogger } from "@/lib/logger"
 import { reportPlayEvent } from "@/lib/cloud-collections"
