@@ -421,22 +421,7 @@ fn commit_staged_update(staging_dir: &Path, target_dir: &Path) -> Result<()> {
         .and_then(|value| value.as_object().cloned())
         .unwrap_or_default();
 
-    for (key, value) in staged {
-        if key == "metadata" && value.is_object() {
-            if !manifest.get(&key).map(Value::is_object).unwrap_or(false) {
-                manifest.insert(key.clone(), json!({}));
-            }
-            let metadata = manifest
-                .get_mut(&key)
-                .and_then(Value::as_object_mut)
-                .unwrap();
-            for (metadata_key, metadata_value) in value.as_object().unwrap() {
-                metadata.insert(metadata_key.clone(), metadata_value.clone());
-            }
-        } else {
-            manifest.insert(key, value);
-        }
-    }
+    crate::library::merge_manifest_updates(&mut manifest, &Value::Object(staged));
     manifest.insert("installPath".into(), json!(target_dir.to_string_lossy()));
     if let Some(snapshot) = manifest
         .get_mut("downloadSnapshot")

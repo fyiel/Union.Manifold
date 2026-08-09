@@ -199,6 +199,34 @@ pub(crate) fn game_files_dir(roots: &[PathBuf], appid: &str) -> Option<PathBuf> 
     Some(dir)
 }
 
+/// Merge manifest updates: null values delete keys, `metadata` is
+/// deep-merged (with its own null-deletion).
+pub(crate) fn merge_manifest_updates(manifest: &mut serde_json::Map<String, Value>, updates: &Value) {
+    let Some(obj) = updates.as_object() else {
+        return;
+    };
+    for (k, v) in obj {
+        if v.is_null() {
+            manifest.remove(k);
+        } else if k == "metadata" && v.is_object() {
+            let metadata = manifest
+                .entry(k.clone())
+                .or_insert_with(|| json!({}))
+                .as_object_mut()
+                .unwrap();
+            for (nk, nv) in v.as_object().unwrap() {
+                if nv.is_null() {
+                    metadata.remove(nk);
+                } else {
+                    metadata.insert(nk.clone(), nv.clone());
+                }
+            }
+        } else {
+            manifest.insert(k.clone(), v.clone());
+        }
+    }
+}
+
 pub(crate) fn merge_into_manifest(roots: &[PathBuf], appid: &str, updates: &Value) -> bool {
     if let Some(dir) = find_dir(roots, appid) {
         let manifest_path = dir.join(MANIFEST_NAME);
@@ -207,27 +235,9 @@ pub(crate) fn merge_into_manifest(roots: &[PathBuf], appid: &str, updates: &Valu
             .and_then(|t| serde_json::from_str::<Value>(&t).ok())
             .and_then(|v| v.as_object().cloned())
             .unwrap_or_default();
-        if let Some(obj) = updates.as_object() {
-            for (k, v) in obj {
-                if v.is_null() {
-                    manifest.remove(k);
-                } else if k == "metadata"
-                    && manifest.get(k).map(|m| m.is_object()).unwrap_or(false)
-                    && v.is_object()
-                {
-                    let old = manifest.get_mut(k).and_then(|m| m.as_object_mut()).unwrap();
-                    for (nk, nv) in v.as_object().unwrap() {
-                        if nv.is_null() {
-                            old.remove(nk);
-                        } else {
-                            old.insert(nk.clone(), nv.clone());
-                        }
-                    }
-                } else {
-                    manifest.insert(k.clone(), v.clone());
-                }
-            }
-        }
+        merge_manifest_updates(&mut manifest, updates);
+
+        merge_manifest_updates(&mut manifest, updates);
         manifest.insert("updatedAt".into(), json!(now_ms()));
         crate::downloads::write_manifest_atomic(&manifest_path, &Value::Object(manifest));
         invalidate_scan();
