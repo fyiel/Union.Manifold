@@ -126,6 +126,49 @@ pub(crate) fn systemd_scope_command(
     Some(c)
 }
 
+fn track_game_started(
+    app: &AppHandle,
+    appid: &str,
+    exe_path: &str,
+    game_name: Option<String>,
+    started_at: i64,
+    achievement_context: crate::achievements::GameContext,
+    reaper_label: &str,
+    wait: impl FnOnce() + Send + 'static,
+) {
+    crate::settings::merge_library_game_meta(
+        app,
+        appid,
+        serde_json::Map::from_iter([("lastPlayedAt".to_string(), json!(started_at))]),
+        0,
+    );
+    app.emit(
+        "uc:presence-changed",
+        json!({ "reason": "game-started", "appid": appid, "gameName": game_name, "startedAt": started_at, "activityRecorded": true }),
+    )
+    .ok();
+    app.state::<AppState>()
+        .achievements
+        .start_watch(app.clone(), achievement_context);
+    let app2 = app.clone();
+    let appid2 = appid.to_string();
+    let exe2 = exe_path.to_string();
+    let name2 = game_name.clone();
+    let reaper = std::thread::Builder::new()
+        .name(format!("game-reaper-{appid}"))
+        .spawn(move || {
+            wait();
+            finish_tracked_game(&app2, &appid2, &exe2, name2.as_deref(), started_at);
+        });
+    if let Err(e) = reaper {
+        RUNNING.lock().remove(appid);
+        crate::logging::write_line(
+            "error",
+            &format!("{reaper_label} thread spawn failed for {appid}: {e}"),
+        );
+    }
+}
+
 fn already_running() -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::AlreadyExists, "already running")
 }
@@ -470,38 +513,19 @@ fn spawn_and_track(
     };
     let pid = child.id();
     let started_at = now_ms();
-    crate::settings::merge_library_game_meta(
+    track_game_started(
         app,
         appid,
-        serde_json::Map::from_iter([("lastPlayedAt".to_string(), json!(started_at))]),
-        0,
-    );
-    app.emit(
-        "uc:presence-changed",
-        json!({ "reason": "game-started", "appid": appid, "gameName": game_name, "startedAt": started_at, "activityRecorded": true }),
-    )
-    .ok();
-    app.state::<AppState>()
-        .achievements
-        .start_watch(app.clone(), achievement_context);
-    let app2 = app.clone();
-    let appid2 = appid.to_string();
-    let exe2 = exe_path.to_string();
-    let name2 = game_name.clone();
-    let reaper = std::thread::Builder::new()
-        .name(format!("game-reaper-{appid}"))
-        .spawn(move || {
+        exe_path,
+        game_name,
+        started_at,
+        achievement_context,
+        "game reaper",
+        move || {
             let mut child = child;
             let _ = child.wait();
-            finish_tracked_game(&app2, &appid2, &exe2, name2.as_deref(), started_at);
-        });
-    if let Err(e) = reaper {
-        RUNNING.lock().remove(appid);
-        crate::logging::write_line(
-            "error",
-            &format!("game reaper thread spawn failed for {appid}: {e}"),
-        );
-    }
+        },
+    );
     Ok(pid)
 }
 
@@ -580,40 +604,21 @@ fn spawn_elevated_and_track(
     drop(running);
 
     let started_at = now_ms();
-    crate::settings::merge_library_game_meta(
+    track_game_started(
         app,
         appid,
-        serde_json::Map::from_iter([("lastPlayedAt".to_string(), json!(started_at))]),
-        0,
-    );
-    app.emit(
-        "uc:presence-changed",
-        json!({ "reason": "game-started", "appid": appid, "gameName": game_name, "startedAt": started_at, "activityRecorded": true }),
-    )
-    .ok();
-    app.state::<AppState>()
-        .achievements
-        .start_watch(app.clone(), achievement_context);
-    let app2 = app.clone();
-    let appid2 = appid.to_string();
-    let exe2 = exe_path.to_string();
-    let name2 = game_name.clone();
-    let reaper = std::thread::Builder::new()
-        .name(format!("game-reaper-{appid}"))
-        .spawn(move || {
+        exe_path,
+        game_name,
+        started_at,
+        achievement_context,
+        "elevated game reaper",
+        move || {
             let handle = process_handle.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE;
             unsafe {
                 WaitForSingleObject(handle, INFINITE);
             }
-            finish_tracked_game(&app2, &appid2, &exe2, name2.as_deref(), started_at);
-        });
-    if let Err(error) = reaper {
-        RUNNING.lock().remove(appid);
-        crate::logging::write_line(
-            "error",
-            &format!("elevated game reaper thread spawn failed for {appid}: {error}"),
-        );
-    }
+        },
+    );
     Ok(pid)
 }
 
