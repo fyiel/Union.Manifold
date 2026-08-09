@@ -1,5 +1,6 @@
 use serde_json::{json, Value};
 
+#[cfg(all(unix, not(target_os = "macos")))]
 fn desktop_entry_escape(value: &str) -> String {
     // Desktop-entry spec: backslash escapes the next character, so a quote
     // or backslash in a path cannot break out of the Exec/Path quoting.
@@ -115,6 +116,7 @@ pub fn delete_desktop_shortcut(game_name: String) -> Value {
 mod tests {
     use super::*;
 
+    #[cfg(all(unix, not(target_os = "macos")))]
     #[test]
     fn desktop_entry_escape_neutralizes_quotes_and_backslashes() {
         assert_eq!(desktop_entry_escape(r#"a"b\c"#), r#"a\"b\\c"#);
