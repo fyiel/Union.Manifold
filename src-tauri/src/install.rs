@@ -440,7 +440,7 @@ async fn finalize_installed(
     manifest.insert("installStatus".into(), json!("installed"));
     manifest.insert("installPath".into(), json!(dir.to_string_lossy()));
     let size = {
-        let p = install_path.to_path_buf();
+        let p = dir.to_path_buf();
         tokio::task::spawn_blocking(move || dir_size(&p))
             .await
             .unwrap_or(0)
