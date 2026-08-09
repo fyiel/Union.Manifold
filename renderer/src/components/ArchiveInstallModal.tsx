@@ -309,7 +309,7 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
             {files.length > 0 && (
               <div className="space-y-1">
                 <div className="text-xs font-medium text-muted-foreground">
-                  {files.length} file{files.length !== 1 ? "s" : ""} selected ({fmtBytes(totalSize)})
+                  {files.length} file{files.length !== 1 ? "s" : ""} selected ({fmtBytes(totalSize, "0 B")})
                 </div>
                 <div className="max-h-[160px] overflow-y-auto rounded-lg border border-white/[.07] bg-[#09090b]/30">
                   {files.map((f) => (
@@ -319,7 +319,7 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
                         <span className="truncate text-xs">{f.name}</span>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
-                        <span className="text-[10px] text-muted-foreground">{fmtBytes(f.size)}</span>
+                        <span className="text-[10px] text-muted-foreground">{fmtBytes(f.size, "0 B")}</span>
                         <button
                           onClick={() => removeFile(f.path)}
                           className="rounded p-0.5 text-muted-foreground hover:text-destructive transition-colors"
@@ -360,7 +360,7 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground">Total size:</span>
-                <span className="text-sm">{fmtBytes(totalSize)}</span>
+                <span className="text-sm">{fmtBytes(totalSize, "0 B")}</span>
               </div>
               {files.length <= 6 && (
                 <div className="space-y-0.5 pt-1 border-t border-white/[.07]">
@@ -368,7 +368,7 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
                     <div key={f.path} className="flex items-center gap-2 text-xs text-muted-foreground">
                       <Archive className="h-3 w-3 flex-shrink-0" />
                       <span className="truncate">{f.name}</span>
-                      <span className="ml-auto flex-shrink-0">{fmtBytes(f.size)}</span>
+                      <span className="ml-auto flex-shrink-0">{fmtBytes(f.size, "0 B")}</span>
                     </div>
                   ))}
                 </div>
@@ -405,7 +405,7 @@ export function ArchiveInstallModal({ open, game, installMetadata, onInstalled, 
               <div className="flex items-center justify-between text-xs text-muted-foreground">
                 <span>{progress.status || "Extracting..."}</span>
                 <div className="flex items-center gap-3">
-                  {progress.speedBps > 0 && <span>{fmtBytes(progress.speedBps)}/s</span>}
+                  {progress.speedBps > 0 && <span>{fmtBytes(progress.speedBps, "0 B")}/s</span>}
                   <span>{progress.percent}%</span>
                   {progress.etaSeconds != null && progress.etaSeconds > 0 && (
                     <span>

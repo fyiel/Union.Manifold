@@ -754,15 +754,19 @@ fn steam_root() -> Option<String> {
 
 fn steam_library_dirs(steam_root: &Path) -> Vec<PathBuf> {
     let mut dirs = vec![steam_root.to_path_buf()];
-    if let Ok(text) = std::fs::read_to_string(steam_root.join("steamapps/libraryfolders.vdf")) {
+    for rel in ["steamapps/libraryfolders.vdf", "config/libraryfolders.vdf"] {
+        let Ok(text) = std::fs::read_to_string(steam_root.join(rel)) else {
+            continue;
+        };
         for line in text.lines() {
             if let Some(rest) = line.trim().strip_prefix("\"path\"") {
-                let path = PathBuf::from(rest.trim().trim_matches('"').replace("\\", "/"));
+                let path = PathBuf::from(rest.trim().trim_matches('"').replace("\\\\", "/"));
                 if !path.as_os_str().is_empty() && !dirs.contains(&path) {
                     dirs.push(path);
                 }
             }
         }
+        break;
     }
     dirs
 }

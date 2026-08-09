@@ -579,13 +579,13 @@ export function DownloadCheckModal({ open, game, downloadToken, defaultHost, aut
                     : `Not enough free space — short ${storageCheck.humanShortfall}`}
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-[11px]">
-                  <div><span className="opacity-70">Download:</span> {storageCheck.humanRequired ? fmtBytes(storageCheck.downloadBytes) : "—"}</div>
-                  <div><span className="opacity-70">Extract:</span> {fmtBytes(storageCheck.extractBytes)}</div>
+                  <div><span className="opacity-70">Download:</span> {storageCheck.humanRequired ? fmtBytes(storageCheck.downloadBytes, "—") : "—"}</div>
+                  <div><span className="opacity-70">Extract:</span> {fmtBytes(storageCheck.extractBytes, "—")}</div>
                   <div><span className="opacity-70">Free:</span> {storageCheck.humanAvailable}</div>
                 </div>
                 {storageCheck.alreadyReservedBytes > 0 && (
                   <div className="text-[10px] opacity-70">
-                    {fmtBytes(storageCheck.alreadyReservedBytes)} already reserved by other in-flight downloads.
+                    {fmtBytes(storageCheck.alreadyReservedBytes, "—")} already reserved by other in-flight downloads.
                   </div>
                 )}
               </div>
