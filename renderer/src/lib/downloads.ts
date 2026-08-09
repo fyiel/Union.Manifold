@@ -51,7 +51,6 @@ export type DownloadConfig = {
 
 const DOWNLOAD_HOST_STORAGE_KEY = "uc_direct_download_host"
 export const SUPPORTED_DOWNLOAD_HOSTS: PreferredDownloadHost[] = ["ucfiles"]
-const PREFERRED_HOSTS: PreferredDownloadHost[] = ["ucfiles"]
 const UCFILES_404_MESSAGE = "UC.Files returned 404. The link appears to be dead."
 const UCFILES_IDENTIFIER_RE = /^[A-Za-z0-9_-]{1,64}$/
 
@@ -192,13 +191,10 @@ export async function fetchDownloadLinks(appid: string, downloadToken: string): 
   return { hosts: {}, redirectUrl: response.url }
 }
 
-function pickHostLinks(available: DownloadHosts, host: PreferredDownloadHost) {
-  if (host === "ucfiles") {
-    return Object.entries(available)
-      .filter(([key]) => isUCFilesHostValue(key))
-      .flatMap(([, entries]) => entries)
-  }
-  return []
+function pickHostLinks(available: DownloadHosts) {
+  return Object.entries(available)
+    .filter(([key]) => isUCFilesHostValue(key))
+    .flatMap(([, entries]) => entries)
 }
 
 export async function getPreferredDownloadHost(): Promise<PreferredDownloadHost> {
@@ -207,7 +203,7 @@ export async function getPreferredDownloadHost(): Promise<PreferredDownloadHost>
   if (window.ucSettings?.get) {
     try {
       const stored = await window.ucSettings.get('defaultMirrorHost')
-      if (stored && PREFERRED_HOSTS.includes(stored as PreferredDownloadHost)) {
+      if (stored && SUPPORTED_DOWNLOAD_HOSTS.includes(stored as PreferredDownloadHost)) {
         return stored as PreferredDownloadHost
       }
     } catch (err) {
@@ -216,7 +212,7 @@ export async function getPreferredDownloadHost(): Promise<PreferredDownloadHost>
   }
 
   const legacy = localStorage.getItem(DOWNLOAD_HOST_STORAGE_KEY)
-  if (legacy && PREFERRED_HOSTS.includes(legacy as PreferredDownloadHost)) {
+  if (legacy && SUPPORTED_DOWNLOAD_HOSTS.includes(legacy as PreferredDownloadHost)) {
     return legacy as PreferredDownloadHost
   }
 
@@ -224,8 +220,8 @@ export async function getPreferredDownloadHost(): Promise<PreferredDownloadHost>
 }
 
 
-export function selectHost(available: DownloadHosts, _preferredHost?: PreferredDownloadHost): { host: string; links: DownloadHostEntry[] } {
-  const links = pickHostLinks(available, "ucfiles")
+export function selectHost(available: DownloadHosts): { host: string; links: DownloadHostEntry[] } {
+  const links = pickHostLinks(available)
   if (links.length) return { host: "ucfiles", links }
   return { host: "", links: [] }
 }
@@ -351,7 +347,7 @@ async function resolveUCFilesDownload(url: string, signal?: AbortSignal): Promis
   }
 }
 
-export async function resolveDownloadUrl(_host: string, url: string, signal?: AbortSignal): Promise<ResolvedDownload> {
+export async function resolveDownloadUrl(url: string, signal?: AbortSignal): Promise<ResolvedDownload> {
   const normalizedUrl =
     typeof url === "string"
       ? url
@@ -367,7 +363,7 @@ export async function resolveDownloadUrl(_host: string, url: string, signal?: Ab
 
 export async function resolveDownloadSize(url: string): Promise<number | undefined> {
   try {
-    const resolved = await resolveDownloadUrl("", url)
+    const resolved = await resolveDownloadUrl(url)
     return resolved.size
   } catch {
     return undefined

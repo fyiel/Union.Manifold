@@ -761,7 +761,7 @@ const resolveWithTimeout = useCallback(async (host: string, targetUrl: string) =
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 12000)
     try {
-      const resolved = await resolveDownloadUrl(host, targetUrl, controller.signal)
+      const resolved = await resolveDownloadUrl(targetUrl, controller.signal)
       clearTimeout(timeout)
       return resolved
     } catch (err) {
@@ -786,7 +786,7 @@ const resolveWithTimeout = useCallback(async (host: string, targetUrl: string) =
         if (linksResult.redirectUrl) {
           links = [{ url: linksResult.redirectUrl, part: null }]
         } else {
-          const selected = selectHost(linksResult.hosts, effectiveHost)
+          const selected = selectHost(linksResult.hosts)
           if (!selected.links.length) {
             return null
           }
@@ -1199,7 +1199,7 @@ const startGameDownload = useCallback(async (game: Game, preferredHostOverride?:
           selectedHost = preferredHost
         }
       } else {
-        const selected = selectHost(linksResult.hosts, preferredHost)
+        const selected = selectHost(linksResult.hosts)
 
         if (!selected.links.length) {
           throw new Error(`No download links available for "${preferredHost}". This title may not be available on your selected host.`)
