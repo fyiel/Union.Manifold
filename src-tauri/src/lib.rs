@@ -335,6 +335,7 @@ pub fn run() {
             library::installing_get,
             library::library_list,
             library::installed_list,
+            library::installed_appids,
             library::installed_get,
             library::installing_list,
 

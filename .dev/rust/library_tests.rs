@@ -132,6 +132,11 @@ fn list_by_separates_installed_from_installing_statuses() {
     let installing = list_by(&roots, INSTALLING);
     assert_eq!(installed.len(), 1);
     assert_eq!(installing.len(), 2);
+    assert_eq!(appids_by(&roots, INSTALLED), vec!["a".to_string()]);
+    assert!(Arc::ptr_eq(
+        &load_all_cached(&roots),
+        &load_all_cached(&roots)
+    ));
 }
 
 #[test]

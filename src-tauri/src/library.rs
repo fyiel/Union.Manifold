@@ -181,6 +181,14 @@ fn get_by(roots: &[PathBuf], appid: &str, statuses: &[&str]) -> Option<Value> {
         .map(|(_, v)| v.clone())
 }
 
+fn appids_by(roots: &[PathBuf], statuses: &[&str]) -> Vec<String> {
+    load_all_cached(roots)
+        .iter()
+        .filter(|(_, value)| statuses.contains(&status_of(value)))
+        .filter_map(|(_, value)| value.get("appid")?.as_str().map(str::to_string))
+        .collect()
+}
+
 pub(crate) fn installed_manifests(state: &AppState) -> Vec<Value> {
     list_by(&scan_roots(state), INSTALLED)
 }
@@ -294,6 +302,14 @@ pub async fn library_list(app: AppHandle) -> Value {
 pub async fn installed_list(app: AppHandle) -> Vec<Value> {
     let roots = scan_roots(&app.state::<AppState>());
     tokio::task::spawn_blocking(move || list_by(&roots, INSTALLED))
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+pub async fn installed_appids(app: AppHandle) -> Vec<String> {
+    let roots = scan_roots(&app.state::<AppState>());
+    tokio::task::spawn_blocking(move || appids_by(&roots, INSTALLED))
         .await
         .unwrap_or_default()
 }

@@ -1042,3 +1042,71 @@ fn redeploy_over_existing_file_claims_backup_in_journal() {
         "user-file"
     );
 }
+
+#[test]
+fn unchanged_redeploy_does_not_rewrite_target_or_journal() {
+    let tmp = tempdir().unwrap();
+    let game_dir = tmp.path().join("game");
+    let target = game_dir.join("Data");
+    write_file(&game_dir.join("staging/mod1/file.txt"), "mod");
+
+    let cfg = mk_cfg(vec![mk_entry("mod1")]);
+    assert_eq!(deploy_to(&game_dir, &target, &cfg).unwrap(), 1);
+    let target_modified = std::fs::metadata(target.join("file.txt"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    let journal_modified = std::fs::metadata(journal_path(&game_dir))
+        .unwrap()
+        .modified()
+        .unwrap();
+
+    std::thread::sleep(std::time::Duration::from_millis(25));
+    assert_eq!(deploy_to(&game_dir, &target, &cfg).unwrap(), 1);
+    assert_eq!(
+        std::fs::metadata(target.join("file.txt"))
+            .unwrap()
+            .modified()
+            .unwrap(),
+        target_modified
+    );
+    assert_eq!(
+        std::fs::metadata(journal_path(&game_dir))
+            .unwrap()
+            .modified()
+            .unwrap(),
+        journal_modified
+    );
+}
+
+#[test]
+fn download_progress_is_rate_limited_but_completion_is_immediate() {
+    assert!(!should_emit_download_progress(
+        Some(20),
+        Some(21),
+        std::time::Duration::from_millis(199)
+    ));
+    assert!(should_emit_download_progress(
+        Some(20),
+        Some(21),
+        std::time::Duration::from_millis(200)
+    ));
+    assert!(should_emit_download_progress(
+        Some(99),
+        Some(100),
+        std::time::Duration::ZERO
+    ));
+}
+
+#[test]
+fn completed_provider_discovery_does_not_repeat_local_snapshots() {
+    let mut cfg = GameMods {
+        steam_appid: Some(620),
+        workshop_supported: Some(false),
+        thunderstore_checked: true,
+        ..Default::default()
+    };
+    assert!(discovery_needed_for(&cfg, true));
+    cfg.nexus_domain_checked = true;
+    assert!(!discovery_needed_for(&cfg, true));
+}

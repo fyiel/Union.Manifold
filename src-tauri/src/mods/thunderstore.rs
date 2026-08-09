@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
@@ -217,8 +217,8 @@ fn cache_file(paths: &AppPaths, community: &str) -> PathBuf {
         .join(format!("{}.json", safe_folder_name(community)))
 }
 
-fn load_disk(paths: &AppPaths, community: &str) -> Option<Arc<Vec<TsPackage>>> {
-    let text = std::fs::read_to_string(cache_file(paths, community)).ok()?;
+fn load_disk(file: &Path) -> Option<Arc<Vec<TsPackage>>> {
+    let text = std::fs::read_to_string(file).ok()?;
     let disk: DiskCache = serde_json::from_str(&text).ok()?;
     if now_secs() - disk.fetched_at >= CACHE_TTL.as_secs() as i64 {
         return None;
@@ -226,8 +226,7 @@ fn load_disk(paths: &AppPaths, community: &str) -> Option<Arc<Vec<TsPackage>>> {
     Some(Arc::new(disk.packages))
 }
 
-fn save_disk(paths: &AppPaths, community: &str, pkgs: &[TsPackage]) {
-    let file = cache_file(paths, community);
+fn save_disk(file: &Path, pkgs: &[TsPackage]) {
     if let Some(parent) = file.parent() {
         std::fs::create_dir_all(parent).ok();
     }
@@ -236,7 +235,7 @@ fn save_disk(paths: &AppPaths, community: &str, pkgs: &[TsPackage]) {
         packages: pkgs.to_vec(),
     };
     if let Ok(v) = serde_json::to_value(&disk) {
-        write_json_atomic(&file, &v).ok();
+        write_json_atomic(file, &v).ok();
     }
 }
 
@@ -276,12 +275,17 @@ async fn load_packages(paths: &AppPaths, community: &str) -> Result<Arc<Vec<TsPa
     if let Some(p) = mem_get(community) {
         return Ok(p);
     }
-    if let Some(p) = load_disk(paths, community) {
+    let disk_file = cache_file(paths, community);
+    if let Ok(Some(p)) = tokio::task::spawn_blocking(move || load_disk(&disk_file)).await {
         mem_put(community, p.clone());
         return Ok(p);
     }
     let arc = Arc::new(fetch_dump(community).await?);
-    save_disk(paths, community, &arc);
+    let disk_file = cache_file(paths, community);
+    let disk_packages = arc.clone();
+    tokio::task::spawn_blocking(move || save_disk(&disk_file, &disk_packages))
+        .await
+        .ok();
     mem_put(community, arc.clone());
     Ok(arc)
 }

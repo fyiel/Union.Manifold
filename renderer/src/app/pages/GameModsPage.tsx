@@ -267,6 +267,17 @@ function BrowseResults<T>({ browse, renderCard, emptyLabel, errorAction }: {
   )
 }
 
+export function cachedDetail<T>(cache: Map<string, Promise<T>>, key: string, load: () => Promise<T>): Promise<T> {
+  const existing = cache.get(key)
+  if (existing) return existing
+  const request = load().catch((error) => {
+    if (cache.get(key) === request) cache.delete(key)
+    throw error
+  })
+  cache.set(key, request)
+  return request
+}
+
 export function GameModsPage() {
   const { key = "" } = useParams()
   const appid = decodeURIComponent(key)
@@ -301,21 +312,41 @@ export function GameModsPage() {
   useEffect(() => window.ucMods?.onChanged?.((d) => { if (d?.appid === appid) void reload() }), [appid, reload])
 
   const [progress, setProgress] = useState<Map<string, ModInstallProgress>>(new Map())
+  const pendingProgress = useRef(new Map<string, ModInstallProgress>())
+  const progressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     const offProgress = window.ucMods?.onInstallProgress?.((p) => {
       if (!p || p.appid !== appid) return
       if (p.phase === "done" || p.phase === "error") {
+        pendingProgress.current.delete(p.modId)
         setProgress((m) => { const next = new Map(m); next.delete(p.modId); return next })
         if (p.phase === "done") toast(`${p.name || "Mod"} installed`, "success")
         else toast(`${p.name || "Mod"}: ${p.error }`, "error", 7000)
         return
       }
-      setProgress((m) => new Map(m).set(p.modId, p))
+      pendingProgress.current.set(p.modId, p)
+      if (!progressTimer.current) {
+        progressTimer.current = setTimeout(() => {
+          progressTimer.current = null
+          const batch = new Map(pendingProgress.current)
+          pendingProgress.current.clear()
+          setProgress((current) => {
+            const next = new Map(current)
+            for (const [id, update] of batch) next.set(id, update)
+            return next
+          })
+        }, 100)
+      }
     })
     const offNxm = window.ucMods?.onNxmUnmatched?.((d) => {
       toast(`nxm link for “${d?.domain || "?"}” (mod ${d?.modId || "?"}) didn't match any installed game`, "error", 7000)
     })
-    return () => { offProgress?.(); offNxm?.() }
+    return () => {
+      offProgress?.(); offNxm?.()
+      if (progressTimer.current) clearTimeout(progressTimer.current)
+      progressTimer.current = null
+      pendingProgress.current.clear()
+    }
   }, [appid, toast])
   const activeProgress = useMemo(() => [...progress.values()].sort((a, b) => a.modId.localeCompare(b.modId)), [progress])
 
@@ -339,7 +370,6 @@ export function GameModsPage() {
       const r = await window.ucMods?.gameSet?.(appid, { nexusDomain: domainDraft.trim() || null })
       if (r && !r.ok) toast(r.error || "could not save the Nexus domain", "error")
     } catch (err) { toast(String(err), "error") }
-    void reload()
   }
 
   const [targetDraft, setTargetDraft] = useState("")
@@ -356,7 +386,6 @@ export function GameModsPage() {
       if (r && !r.ok) toast(r.error || "could not save the deploy target", "error")
       else toast("deploy target saved", "success")
     } catch (err) { toast(String(err), "error") }
-    void reload()
   }
   const pickTarget = async () => {
     try {
@@ -399,7 +428,6 @@ export function GameModsPage() {
     } catch (err) { toast(String(err), "error", 6000) } finally {
       setRemoving(false)
       setConfirmRm(null)
-      void reload()
     }
   }
 
@@ -412,7 +440,8 @@ export function GameModsPage() {
         ? `activated ${r.fileCount ?? 0} mod${(r.fileCount ?? 0) === 1 ? "" : "s"} for launch`
         : `deployed ${r.fileCount ?? 0} file${(r.fileCount ?? 0) === 1 ? "" : "s"}`, "success")
       else toast(r?.error || "deploy failed", "error", 6000)
-    } catch (err) { toast(String(err), "error", 6000) } finally { setDeployBusy(null); void reload() }
+      if (r?.ok) setGs((state) => state ? { ...state, deployed: true } : state)
+    } catch (err) { toast(String(err), "error", 6000) } finally { setDeployBusy(null) }
   }
   const runUndeploy = async () => {
     setDeployBusy("undeploy")
@@ -420,7 +449,8 @@ export function GameModsPage() {
       const r = await window.ucMods?.undeploy?.(appid)
       if (r?.ok) toast(launchManaged ? "mods deactivated for launch" : "all mod files removed from the game folder", "success")
       else toast(r?.error || "undeploy failed", "error", 6000)
-    } catch (err) { toast(String(err), "error", 6000) } finally { setDeployBusy(null); void reload() }
+      if (r?.ok) setGs((state) => state ? { ...state, deployed: false } : state)
+    } catch (err) { toast(String(err), "error", 6000) } finally { setDeployBusy(null) }
   }
 
   const openModsFolder = async () => {
@@ -462,15 +492,23 @@ const nexusDomain = gs?.nexusDomain || null
   const [files, setFiles] = useState<NexusModFile[] | null>(null)
   const [filesError, setFilesError] = useState("")
   const [installingFileId, setInstallingFileId] = useState<number | null>(null)
+  const nexusDetails = useRef(new Map<string, Promise<NexusModFile[]>>())
+  const nexusDetailRequest = useRef(0)
 
   const openFilePicker = async (mod: BrowseMod) => {
     if (!nexusDomain) return
+    const requestId = ++nexusDetailRequest.current
     setFilePick(mod); setFiles(null); setFilesError("")
     try {
-      const r = await window.ucMods?.nexusModFiles?.(nexusDomain, mod.remoteId)
-      if (r?.ok) setFiles(r.files || [])
-      else setFilesError(r?.error || "could not list the mod's files")
-    } catch (err) { setFilesError(String(err)) }
+      const loaded = await cachedDetail(nexusDetails.current, `${nexusDomain}:${mod.remoteId}`, async () => {
+        const r = await window.ucMods?.nexusModFiles?.(nexusDomain, mod.remoteId)
+        if (!r?.ok) throw new Error(r?.error || "could not list the mod's files")
+        return r.files || []
+      })
+      if (requestId === nexusDetailRequest.current) setFiles(loaded)
+    } catch (err) {
+      if (requestId === nexusDetailRequest.current) setFilesError(String(err))
+    }
   }
 
   const installNexus = async (mod: BrowseMod, fileId: number) => {
@@ -577,22 +615,30 @@ const nexusDomain = gs?.nexusDomain || null
     try {
       const r = await window.ucMods?.gameSet?.(appid, { thunderstoreCommunity: identifier })
       if (r && !r.ok) toast(r.error || "failed", "error")
-    } catch (err) { toast(String(err), "error") } finally { setTsSaving(false); void reload() }
+    } catch (err) { toast(String(err), "error") } finally { setTsSaving(false) }
   }
 
   const [tsVersionPick, setTsVersionPick] = useState<BrowseMod | null>(null)
   const [tsVersions, setTsVersions] = useState<ThunderstoreVersion[] | null>(null)
   const [tsVersionsError, setTsVersionsError] = useState("")
   const [tsInstalling, setTsInstalling] = useState<string | null>(null)
+  const thunderstoreDetails = useRef(new Map<string, Promise<ThunderstoreVersion[]>>())
+  const thunderstoreDetailRequest = useRef(0)
 
   const openTsVersions = async (mod: BrowseMod) => {
     if (!tsCommunity) return
+    const requestId = ++thunderstoreDetailRequest.current
     setTsVersionPick(mod); setTsVersions(null); setTsVersionsError("")
     try {
-      const r = await window.ucMods?.thunderstoreVersions?.(tsCommunity, mod.remoteId)
-      if (r?.ok) setTsVersions(r.versions || [])
-      else setTsVersionsError(r?.error || "could not list the package versions")
-    } catch (err) { setTsVersionsError(String(err)) }
+      const loaded = await cachedDetail(thunderstoreDetails.current, `${tsCommunity}:${mod.remoteId}`, async () => {
+        const r = await window.ucMods?.thunderstoreVersions?.(tsCommunity, mod.remoteId)
+        if (!r?.ok) throw new Error(r?.error || "could not list the package versions")
+        return r.versions || []
+      })
+      if (requestId === thunderstoreDetailRequest.current) setTsVersions(loaded)
+    } catch (err) {
+      if (requestId === thunderstoreDetailRequest.current) setTsVersionsError(String(err))
+    }
   }
 
   const installThunderstore = async (mod: BrowseMod, version: string) => {
@@ -972,7 +1018,12 @@ const nexusDomain = gs?.nexusDomain || null
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(filePick)} onOpenChange={(open) => { if (!open && installingFileId == null) setFilePick(null) }}>
+      <Dialog open={Boolean(filePick)} onOpenChange={(open) => {
+        if (!open && installingFileId == null) {
+          nexusDetailRequest.current += 1
+          setFilePick(null)
+        }
+      }}>
         <DialogContent className="sm:max-w-[560px]">
           <DialogHeader>
             <DialogTitle>Install {filePick?.name}</DialogTitle>
@@ -1015,7 +1066,12 @@ const nexusDomain = gs?.nexusDomain || null
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(tsVersionPick)} onOpenChange={(open) => { if (!open && tsInstalling == null) setTsVersionPick(null) }}>
+      <Dialog open={Boolean(tsVersionPick)} onOpenChange={(open) => {
+        if (!open && tsInstalling == null) {
+          thunderstoreDetailRequest.current += 1
+          setTsVersionPick(null)
+        }
+      }}>
         <DialogContent className="sm:max-w-[560px]">
           <DialogHeader>
             <DialogTitle>Install {tsVersionPick?.name}</DialogTitle>

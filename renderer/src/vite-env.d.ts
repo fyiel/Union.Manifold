@@ -406,6 +406,7 @@ declare global {
       saveCatalogState: (payload: { games: any[]; gamesUpdatedAt?: number }) => Promise<{ ok: boolean; games?: number; updatedAt?: number; error?: string }>
       listLibrary: () => Promise<{ installed: any[]; installing: any[] }>
       listInstalled: () => Promise<any[]>
+      listInstalledAppids: () => Promise<string[]>
       getInstalled: (appid: string) => Promise<any | null>
       listInstalling: () => Promise<any[]>
       getInstalling: (appid: string) => Promise<any | null>

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
-import { GameModsPage } from "@/app/pages/GameModsPage"
+import { cachedDetail, GameModsPage } from "@/app/pages/GameModsPage"
 import { ToastProvider } from "@/context/toast-context"
 
 const nexusSearch = vi.fn(async () => ({ ok: true, mods: [], hasMore: false }))
@@ -78,5 +78,34 @@ describe("Nexus tab search input", () => {
     await waitFor(() => expect(nexusSearch).toHaveBeenCalled())
     fireEvent.keyDown(input, { key: "Escape" })
     await waitFor(() => expect((input as HTMLInputElement).value).toBe(""))
+  })
+})
+
+describe("mod detail request cache", () => {
+  it("shares an in-flight detail request and reuses its result", async () => {
+    const cache = new Map<string, Promise<string[]>>()
+    let finish!: (value: string[]) => void
+    const load = vi.fn(() => new Promise<string[]>((resolve) => { finish = resolve }))
+
+    const first = cachedDetail(cache, "nexus:1", load)
+    const second = cachedDetail(cache, "nexus:1", load)
+    expect(second).toBe(first)
+    expect(load).toHaveBeenCalledTimes(1)
+
+    finish(["main file"])
+    await expect(first).resolves.toEqual(["main file"])
+    await expect(cachedDetail(cache, "nexus:1", load)).resolves.toEqual(["main file"])
+    expect(load).toHaveBeenCalledTimes(1)
+  })
+
+  it("drops failed detail requests so retry can recover", async () => {
+    const cache = new Map<string, Promise<string[]>>()
+    const load = vi.fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce(["main file"])
+
+    await expect(cachedDetail(cache, "nexus:1", load)).rejects.toThrow("offline")
+    await expect(cachedDetail(cache, "nexus:1", load)).resolves.toEqual(["main file"])
+    expect(load).toHaveBeenCalledTimes(2)
   })
 })

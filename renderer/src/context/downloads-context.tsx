@@ -126,10 +126,6 @@ function normalizeArchivePromptPayload(payload: ArchiveDeletionPrompt): ArchiveD
   }
 }
 
-type DownloadsContextValue = {
-  downloads: DownloadItem[]
-}
-
 type DownloadsActionsValue = {
   startGameDownload: (game: Game, preferredHost?: PreferredDownloadHost, config?: DownloadConfig) => Promise<void>
   cancelGroup: (appid: string) => Promise<void>
@@ -145,7 +141,6 @@ type DownloadsActionsValue = {
   clearCompleted: () => void
 }
 
-const DownloadsContext = createContext<DownloadsContextValue | null>(null)
 const DownloadsActionsContext = createContext<DownloadsActionsValue | null>(null)
 type DownloadsStore = {
   subscribe: (listener: () => void) => () => void
@@ -1101,6 +1096,10 @@ const resolveWithTimeout = useCallback(async (host: string, targetUrl: string) =
       if (installedSnapshot) return installedSnapshot
       installedSnapshot = (async () => {
         try {
+          if (window.ucDownloads?.listInstalledAppids) {
+            const appids = await window.ucDownloads.listInstalledAppids()
+            return Array.isArray(appids) ? new Set(appids.filter(Boolean)) : undefined
+          }
           const installed = await window.ucDownloads?.listInstalled?.()
           if (!Array.isArray(installed)) return undefined
           return new Set(installed.map((item) => String(item?.appid || item?.metadata?.appid || "")).filter(Boolean))
@@ -1711,14 +1710,11 @@ const startGameDownload = useCallback(async (game: Game, preferredHostOverride?:
     [startGameDownload, cancelGroup, discardGroup, pauseGroup, pauseAll, resumeDownload, resumeGroup, resumeAll, upsertDownload, openPath, clearByAppid, clearCompleted]
   )
 
-  const dataValue = useMemo(() => ({ downloads }), [downloads])
-
   return (
     <DownloadsStoreContext.Provider value={store}>
       <DownloadsActionsContext.Provider value={actionsValue}>
-        <DownloadsContext.Provider value={dataValue}>
-          {children}
-          {currentArchiveDeletionPrompt && (
+        {children}
+        {currentArchiveDeletionPrompt && (
             <div className="fixed inset-0 z-[80] flex items-center justify-center px-4">
               <div className="absolute inset-0 bg-black/72 backdrop-blur-md" onClick={() => !archiveDeletionBusy && dismissArchiveDeletionPrompt()} />
               <div className="relative w-full max-w-lg rounded-3xl border border-white/[.07] bg-background/88 backdrop-blur-2xl p-5 shadow-[0_24px_80px_rgba(0,0,0,0.55)]">
@@ -1776,8 +1772,7 @@ const startGameDownload = useCallback(async (game: Game, preferredHostOverride?:
                 </div>
               </div>
             </div>
-          )}
-        </DownloadsContext.Provider>
+        )}
       </DownloadsActionsContext.Provider>
     </DownloadsStoreContext.Provider>
   )

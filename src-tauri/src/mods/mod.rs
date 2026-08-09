@@ -1,7 +1,7 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -47,6 +47,7 @@ pub struct GameMods {
     pub appid: String,
     pub nexus_domain: Option<String>,
     pub nexus_domain_auto: bool,
+    pub nexus_domain_checked: bool,
     pub steam_appid: Option<u64>,
     pub workshop_supported: Option<bool>,
     pub thunderstore_community: Option<String>,
@@ -68,6 +69,7 @@ struct Journal {
     files: BTreeMap<String, JournalEntry>,
 }
 
+#[derive(Clone)]
 pub(crate) struct InstallSpec {
     pub appid: String,
     pub provider: String,
@@ -179,6 +181,8 @@ pub(crate) fn period_days(period: &str) -> Option<i64> {
 
 static GAME_LOCKS: LazyLock<parking_lot::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
     LazyLock::new(|| parking_lot::Mutex::new(HashMap::new()));
+static DISCOVERING_GAMES: LazyLock<parking_lot::Mutex<HashSet<String>>> =
+    LazyLock::new(|| parking_lot::Mutex::new(HashSet::new()));
 
 pub(crate) fn game_lock(appid: &str) -> Arc<tokio::sync::Mutex<()>> {
     GAME_LOCKS
@@ -186,6 +190,23 @@ pub(crate) fn game_lock(appid: &str) -> Arc<tokio::sync::Mutex<()>> {
         .entry(appid.to_string())
         .or_default()
         .clone()
+}
+
+async fn blocking_game<T: Send + 'static>(
+    app: AppHandle,
+    appid: String,
+    f: impl FnOnce(&AppHandle, &AppState, &str) -> T + Send + 'static,
+) -> Result<T, String> {
+    tokio::task::spawn_blocking(move || {
+        // Keep the lock owned by the filesystem task itself: dropping a
+        // cancelled IPC future must not let the next mutation overtake it.
+        let lock = game_lock(&appid);
+        let _guard = lock.blocking_lock();
+        let state = app.state::<AppState>();
+        f(&app, &state, &appid)
+    })
+    .await
+    .map_err(|error| format!("mod filesystem task failed: {error}"))
 }
 
 pub(crate) fn emit_changed(app: &AppHandle, appid: &str) {
@@ -553,7 +574,7 @@ pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Resul
         old_journal: &Journal,
         target: &Path,
         rel: &str,
-        src: &Path,
+        matches_deployed: bool,
     ) -> Option<String> {
         match old_journal.files.get(rel) {
             Some(prior) => match &prior.backup {
@@ -565,7 +586,7 @@ pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Resul
                     // managed content or a later removal would restore stale
                     // mod files. Different content means the user or the
                     // game wrote over it — preserve that before overwriting.
-                    if dst.exists() && !same_file(&dst, src) {
+                    if dst.exists() && !matches_deployed {
                         Some(rel.to_string())
                     } else {
                         None
@@ -584,19 +605,27 @@ pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Resul
     for rel in &stale {
         journal.files.remove(rel);
     }
+    let mut planned = HashMap::with_capacity(desired.len());
     for (rel, src) in &desired {
-        let backup = plan_backup(&old_journal, target, rel, src);
+        let unchanged = old_journal.files.contains_key(rel)
+            && same_file(&rel_to_path(target, rel), src);
+        let backup = plan_backup(&old_journal, target, rel, unchanged);
         journal.files.insert(
             rel.clone(),
-            JournalEntry { backup },
+            JournalEntry {
+                backup: backup.clone(),
+            },
         );
+        planned.insert(rel.clone(), (backup, unchanged));
     }
 
     // Persist the new journal before mutating anything. undeploy/disable
     // only ever delete a file whose claimed backup exists on disk, so a
     // crash between this write and the mutations below cannot destroy an
     // original that was never backed up.
-    save_journal(game_dir, &journal)?;
+    if journal != old_journal {
+        save_journal(game_dir, &journal)?;
+    }
     drop(journal);
 
     // Apply the mutations, tracking every applied op. On failure the game
@@ -657,6 +686,12 @@ pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Resul
         }
 
         for (rel, src) in &desired {
+            let (planned_backup, unchanged) = planned
+                .get(rel)
+                .expect("every desired file has a deployment plan");
+            if *unchanged {
+                continue;
+            }
             let dst = rel_to_path(target, rel);
             if let Some(parent) = dst.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| format!("deploy {rel}: {e}"))?;
@@ -674,7 +709,8 @@ pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Resul
             };
             let mut backup_created = false;
             let backup: Option<PathBuf> =
-                plan_backup(&old_journal, target, rel, src)
+                planned_backup
+                    .clone()
                     .map(|b| -> Result<PathBuf, String> {
                         let bpath = rel_to_path(&backup_root, &b);
                         // The plan says the target held a file worth
@@ -1628,21 +1664,26 @@ fn game_title(state: &AppState, appid: &str) -> Option<String> {
     manifest_get(&m, "name").and_then(|v| v.as_str()).map(str::to_string)
 }
 
-async fn detect_steam_appid(state: &AppState, appid: &str) -> Option<u64> {
+fn local_steam_appid(state: &AppState, appid: &str) -> Option<u64> {
     if let Some(id) = appid
         .strip_prefix("steam-")
-        .and_then(|s| s.parse::<u64>().ok())
+        .and_then(|value| value.parse::<u64>().ok())
     {
         return Some(id);
     }
     let roots = library::scan_roots(state);
     let manifest = read_game_manifest(&roots, appid)?;
-    if let Some(id) = manifest_get(&manifest, "steamAppId")
-        .and_then(|v| v.as_u64())
+    manifest_get(&manifest, "steamAppId")
+        .and_then(Value::as_u64)
         .filter(|id| *id > 0)
-    {
+}
+
+async fn detect_steam_appid(state: &AppState, appid: &str) -> Option<u64> {
+    if let Some(id) = local_steam_appid(state, appid) {
         return Some(id);
     }
+    let roots = library::scan_roots(state);
+    let manifest = read_game_manifest(&roots, appid)?;
     let name = manifest_get(&manifest, "name").and_then(|v| v.as_str())?.to_string();
     crate::sources::steam::search_app_id(&name).await
 }
@@ -1677,6 +1718,7 @@ pub(crate) async fn download_to_file(
     let mut stream = resp.bytes_stream();
     let mut received: u64 = 0;
     let mut last: Option<u8> = total.map(|_| 0);
+    let mut last_emit = Instant::now();
     on_progress(last);
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("download stream: {e}"))?;
@@ -1685,13 +1727,22 @@ pub(crate) async fn download_to_file(
             .map_err(|e| format!("download write: {e}"))?;
         received += chunk.len() as u64;
         let pct = total.map(|t| ((received.saturating_mul(100)) / t.max(1)).min(100) as u8);
-        if pct != last {
+        if should_emit_download_progress(last, pct, last_emit.elapsed()) {
             last = pct;
+            last_emit = Instant::now();
             on_progress(pct);
         }
     }
     file.flush().await.ok();
     Ok(received)
+}
+
+fn should_emit_download_progress(
+    last: Option<u8>,
+    next: Option<u8>,
+    elapsed: Duration,
+) -> bool {
+    next != last && (next == Some(100) || elapsed >= Duration::from_millis(200))
 }
 
 fn filename_from_url(url: &str) -> Option<String> {
@@ -2133,9 +2184,33 @@ pub(crate) async fn finalize_install(
     move_src: bool,
 ) -> Result<usize, String> {
     let state = app.state::<AppState>();
+    let steam_appid = detect_steam_appid(&state, &spec.appid).await;
+    blocking_game(app.clone(), spec.appid.clone(), {
+        let spec = spec.clone();
+        let staged_src = staged_src.to_path_buf();
+        move |app, state, _| {
+            finalize_install_blocking(
+                app,
+                state,
+                &spec,
+                &staged_src,
+                move_src,
+                steam_appid,
+            )
+        }
+    })
+    .await?
+}
+
+fn finalize_install_blocking(
+    app: &AppHandle,
+    state: &AppState,
+    spec: &InstallSpec,
+    staged_src: &Path,
+    move_src: bool,
+    steam_appid: Option<u64>,
+) -> Result<usize, String> {
     let mod_id = spec.mod_id();
-    let lock = game_lock(&spec.appid);
-    let _g = lock.lock().await;
 
     let dir = game_mods_dir(&state.paths, &spec.appid);
     let final_dir = dir.join("staging").join(&mod_id);
@@ -2148,8 +2223,11 @@ pub(crate) async fn finalize_install(
     let selected_src = versioned_archive_root(staged_src, &spec.version);
     let staged_src = selected_src.as_deref().unwrap_or(staged_src);
     let mut cfg = load_config(&state.paths, &spec.appid);
-    let target = deploy_target_dir(&state, &spec.appid, &cfg)?;
-    let steam_appid = detect_steam_appid(&state, &spec.appid).await;
+    let steam_appid = steam_appid.or(cfg.steam_appid);
+    if cfg.steam_appid.is_none() {
+        cfg.steam_appid = steam_appid;
+    }
+    let target = deploy_target_dir(state, &spec.appid, &cfg)?;
     let mut plan = infer_deployment_plan_for_entry(
         &target,
         staged_src,
@@ -2189,7 +2267,7 @@ pub(crate) async fn finalize_install(
     // installed with nothing on disk. The failed deploy_to has already
     // reconciled the journal with the game directory, and the staging
     // folder is replaced on the next attempt.
-    let n = redeploy(&state, &spec.appid, &cfg)?;
+    let n = redeploy(state, &spec.appid, &cfg)?;
     save_config(&state.paths, &spec.appid, &cfg);
     emit_changed(app, &spec.appid);
     Ok(n)
@@ -2427,87 +2505,13 @@ fn refresh_deployment_plans(state: &AppState, appid: &str, cfg: &mut GameMods) -
     changed
 }
 
-#[tauri::command]
-pub async fn mods_game_get(state: State<'_, AppState>, appid: String) -> Result<Value, String> {
-    let lock = game_lock(&appid);
-    let _g = lock.lock().await;
-    let existed = config_path(&game_mods_dir(&state.paths, &appid)).is_file();
-    let mut cfg = load_config(&state.paths, &appid);
-    let title = game_title(&state, &appid);
-    let mut dirty = false;
-
-    if cfg.steam_appid.is_none() {
-        if let Some(id) = detect_steam_appid(&state, &appid).await {
-            cfg.steam_appid = Some(id);
-            dirty = true;
-        }
-    }
-    if cfg.nexus_domain.is_none() {
-        if let Some(key) = state
-            .settings
-            .get_string("nexusApiKey")
-            .map(|k| k.trim().to_string())
-            .filter(|k| !k.is_empty())
-        {
-            if let Some(title) = title.as_deref() {
-                if let Ok(Some(found)) = nexus::match_domain(&key, title).await {
-                    cfg.nexus_domain_auto = true;
-                    cfg.nexus_domain = Some(found);
-                    dirty = true;
-                }
-            }
-        }
-    }
-    if cfg.workshop_supported.is_none() {
-        if let Some(said) = cfg.steam_appid {
-            if let Some(supported) = workshop::detect_workshop_support(said).await {
-                cfg.workshop_supported = Some(supported);
-                dirty = true;
-            }
-        }
-    }
-    if cfg.thunderstore_community.is_none() && !cfg.thunderstore_checked {
-        if let Some(title) = title.as_deref() {
-            if let Ok(found) = thunderstore::match_community(title).await {
-                cfg.thunderstore_checked = true;
-                cfg.thunderstore_community_auto = found.is_some();
-                cfg.thunderstore_community = found.map(|c| c.identifier);
-                dirty = true;
-            }
-        }
-    }
-    let plan_dirty = if cfg.deployment_plan_version < DEPLOYMENT_PLAN_VERSION
-        || cfg
-            .mods
-            .iter()
-            .any(|installed| installed.deploy_reason.is_empty())
-    {
-        refresh_deployment_plans(&state, &appid, &mut cfg)
-    } else {
-        false
-    };
-    dirty |= plan_dirty;
-
-    if dirty || !existed {
-        save_config(&state.paths, &appid, &cfg);
-    }
-    if plan_dirty {
-        if let Err(error) = redeploy(&state, &appid, &cfg) {
-            crate::logging::write_line(
-                "warn",
-                &format!("mod deployment plan migration failed for {appid}: {error}"),
-            );
-        }
-    }
-    let deployed = !load_journal(&game_mods_dir(&state.paths, &appid))
-        .files
-        .is_empty()
-        || game_mods_dir(&state.paths, &appid)
-            .join(MEWGENICS_DEPLOY_MARKER)
-            .is_file();
-    let compatibility_target = deploy_target_dir(&state, &appid, &cfg).ok();
+fn game_state_value(state: &AppState, appid: &str, cfg: &GameMods) -> Value {
+    let dir = game_mods_dir(&state.paths, appid);
+    let deployed = !load_journal(&dir).files.is_empty()
+        || dir.join(MEWGENICS_DEPLOY_MARKER).is_file();
+    let compatibility_target = deploy_target_dir(state, appid, cfg).ok();
     let loaders = loader_compatibility(compatibility_target.as_deref(), cfg.steam_appid);
-    Ok(json!({
+    json!({
         "ok": true,
         "nexusDomain": cfg.nexus_domain,
         "nexusDomainAuto": cfg.nexus_domain_auto,
@@ -2520,7 +2524,221 @@ pub async fn mods_game_get(state: State<'_, AppState>, appid: String) -> Result<
         "deployed": deployed,
         "loaderCompatibility": loaders,
         "mods": serde_json::to_value(&cfg.mods).unwrap(),
-    }))
+    })
+}
+
+fn discovery_needed(state: &AppState, cfg: &GameMods) -> bool {
+    let has_nexus_key = state
+        .settings
+        .get_string("nexusApiKey")
+        .is_some_and(|key| !key.trim().is_empty());
+    discovery_needed_for(cfg, has_nexus_key)
+}
+
+fn discovery_needed_for(cfg: &GameMods, has_nexus_key: bool) -> bool {
+    cfg.steam_appid.is_none()
+        || cfg.workshop_supported.is_none()
+        || !cfg.thunderstore_checked
+        || (cfg.nexus_domain.is_none()
+            && !cfg.nexus_domain_checked
+            && has_nexus_key)
+}
+
+fn load_local_game_state(state: &AppState, appid: &str) -> (Value, bool) {
+    let existed = config_path(&game_mods_dir(&state.paths, appid)).is_file();
+    let mut cfg = load_config(&state.paths, appid);
+    let mut dirty = false;
+    let mut steam_changed = false;
+
+    if cfg.steam_appid.is_none() {
+        if let Some(id) = local_steam_appid(state, appid) {
+            cfg.steam_appid = Some(id);
+            dirty = true;
+            steam_changed = true;
+        }
+    }
+    let plan_dirty = if steam_changed
+        || cfg.deployment_plan_version < DEPLOYMENT_PLAN_VERSION
+        || cfg
+            .mods
+            .iter()
+            .any(|installed| installed.deploy_reason.is_empty())
+    {
+        refresh_deployment_plans(state, appid, &mut cfg)
+    } else {
+        false
+    };
+    dirty |= plan_dirty;
+
+    if dirty || !existed {
+        save_config(&state.paths, appid, &cfg);
+    }
+    if plan_dirty {
+        if let Err(error) = redeploy(state, appid, &cfg) {
+            crate::logging::write_line(
+                "warn",
+                &format!("mod deployment plan migration failed for {appid}: {error}"),
+            );
+        }
+    }
+    let discover = discovery_needed(state, &cfg);
+    (game_state_value(state, appid, &cfg), discover)
+}
+
+fn spawn_game_discovery(app: AppHandle, appid: String) {
+    if !DISCOVERING_GAMES.lock().insert(appid.clone()) {
+        return;
+    }
+    tauri::async_runtime::spawn(async move {
+        discover_game(app, &appid).await;
+        DISCOVERING_GAMES.lock().remove(&appid);
+    });
+}
+
+async fn discover_game(app: AppHandle, appid: &str) {
+    let initial = blocking_game(app.clone(), appid.to_string(), |_, state, appid| {
+        let cfg = load_config(&state.paths, appid);
+        let title = game_title(state, appid);
+        let nexus_key = state
+            .settings
+            .get_string("nexusApiKey")
+            .map(|key| key.trim().to_string())
+            .filter(|key| !key.is_empty());
+        (cfg, title, nexus_key)
+    })
+    .await;
+    let Ok((initial, title, nexus_key)) = initial else {
+        return;
+    };
+    let title_ref = title.as_deref();
+    let steam = async {
+        if initial.steam_appid.is_none() {
+            let state = app.state::<AppState>();
+            detect_steam_appid(&state, appid).await
+        } else {
+            None
+        }
+    };
+    let nexus = async {
+        if initial.nexus_domain.is_none() && !initial.nexus_domain_checked {
+            match (nexus_key.as_deref(), title_ref) {
+                (Some(key), Some(title)) => nexus::match_domain(key, title).await.ok(),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    };
+    let thunderstore = async {
+        if initial.thunderstore_community.is_none() && !initial.thunderstore_checked {
+            match title_ref {
+                Some(title) => thunderstore::match_community(title).await.ok(),
+                None => None,
+            }
+        } else {
+            None
+        }
+    };
+    let workshop = async {
+        if initial.workshop_supported.is_none() {
+            match initial.steam_appid {
+                Some(steam_appid) => workshop::detect_workshop_support(steam_appid).await,
+                None => None,
+            }
+        } else {
+            None
+        }
+    };
+    let (steam, nexus, thunderstore, workshop) =
+        tokio::join!(steam, nexus, thunderstore, workshop);
+    let workshop = if workshop.is_none()
+        && initial.workshop_supported.is_none()
+        && initial.steam_appid.is_none()
+    {
+        match steam {
+            Some(steam_appid) => workshop::detect_workshop_support(steam_appid).await,
+            None => None,
+        }
+    } else {
+        workshop
+    };
+
+    let app_for_merge = app.clone();
+    let merged = blocking_game(
+        app_for_merge,
+        appid.to_string(),
+        move |app, state, appid| {
+            let mut cfg = load_config(&state.paths, appid);
+            let mut dirty = false;
+            let mut steam_changed = false;
+            if cfg.steam_appid.is_none() {
+                if let Some(found) = steam {
+                    cfg.steam_appid = Some(found);
+                    dirty = true;
+                    steam_changed = true;
+                }
+            }
+            if cfg.nexus_domain.is_none() && !cfg.nexus_domain_checked {
+                if let Some(found) = nexus {
+                    cfg.nexus_domain_checked = true;
+                    cfg.nexus_domain_auto = found.is_some();
+                    cfg.nexus_domain = found;
+                    dirty = true;
+                }
+            }
+            if cfg.thunderstore_community.is_none() && !cfg.thunderstore_checked {
+                if let Some(found) = thunderstore {
+                    cfg.thunderstore_checked = true;
+                    cfg.thunderstore_community_auto = found.is_some();
+                    cfg.thunderstore_community = found.map(|community| community.identifier);
+                    dirty = true;
+                }
+            }
+            if cfg.workshop_supported.is_none() {
+                if let Some(found) = workshop {
+                    cfg.workshop_supported = Some(found);
+                    dirty = true;
+                }
+            }
+            let plan_dirty = steam_changed
+                || cfg.deployment_plan_version < DEPLOYMENT_PLAN_VERSION
+                || cfg
+                    .mods
+                    .iter()
+                    .any(|installed| installed.deploy_reason.is_empty());
+            let plan_dirty = plan_dirty && refresh_deployment_plans(state, appid, &mut cfg);
+            dirty |= plan_dirty;
+            if !dirty {
+                return;
+            }
+            save_config(&state.paths, appid, &cfg);
+            if plan_dirty {
+                if let Err(error) = redeploy(state, appid, &cfg) {
+                    crate::logging::write_line(
+                        "warn",
+                        &format!("mod deployment plan discovery failed for {appid}: {error}"),
+                    );
+                }
+            }
+            emit_changed(app, appid);
+        },
+    )
+    .await;
+    if let Err(error) = merged {
+        crate::logging::write_line("warn", &error);
+    }
+}
+
+#[tauri::command]
+pub async fn mods_game_get(app: AppHandle, appid: String) -> Result<Value, String> {
+    let (value, discover) = blocking_game(app.clone(), appid.clone(), |_, state, appid| {
+        load_local_game_state(state, appid)
+    })
+    .await?;
+    if discover {
+        spawn_game_discovery(app, appid);
+    }
+    Ok(value)
 }
 
 pub(crate) fn relativize_target(base: &Path, picked: &Path) -> Result<String, String> {
@@ -2553,167 +2771,158 @@ pub async fn mods_deploy_target_pick(
 }
 
 #[tauri::command]
-pub async fn mods_game_set(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    appid: String,
-    config: Value,
-) -> Result<Value, String> {
-    let lock = game_lock(&appid);
-    let _g = lock.lock().await;
-    let mut cfg = load_config(&state.paths, &appid);
-    let dir = game_mods_dir(&state.paths, &appid);
+pub async fn mods_game_set(app: AppHandle, appid: String, config: Value) -> Result<Value, String> {
+    blocking_game(app, appid, move |app, state, appid| {
+        let mut cfg = load_config(&state.paths, appid);
+        let dir = game_mods_dir(&state.paths, appid);
 
-    if let Some(v) = config.get("nexusDomain") {
-        let v = v.as_str().map(str::trim).filter(|s| !s.is_empty());
-        cfg.nexus_domain = v.map(str::to_string);
-        cfg.nexus_domain_auto = false;
-    }
-
-    if let Some(v) = config.get("thunderstoreCommunity") {
-        let v = v.as_str().map(str::trim).filter(|s| !s.is_empty());
-        cfg.thunderstore_community = v.map(str::to_string);
-        cfg.thunderstore_community_auto = false;
-        cfg.thunderstore_checked = v.is_some();
-    }
-
-    let res: Result<(), String> = (|| {
-        if let Some(v) = config.get("deployTarget").and_then(|v| v.as_str()) {
-            let new_target = v.trim().trim_matches('/').trim_matches('\\').to_string();
-            if new_target != cfg.deploy_target {
-                if let Ok(old) = deploy_target_dir(&state, &appid, &cfg) {
-                    undeploy_from(&dir, &old)?;
-                }
-                // Validate the NEW target before persisting: a bad target
-                // (e.g. one with a `..` segment) must not survive as the
-                // stored config.
-                cfg.deploy_target = new_target;
-                let target = deploy_target_dir(&state, &appid, &cfg)?;
-                refresh_deployment_plans(&state, &appid, &mut cfg);
-                deploy_to(&dir, &target, &cfg)?;
-            }
+        if let Some(v) = config.get("nexusDomain") {
+            let v = v.as_str().map(str::trim).filter(|s| !s.is_empty());
+            cfg.nexus_domain = v.map(str::to_string);
+            cfg.nexus_domain_auto = false;
+            cfg.nexus_domain_checked = true;
         }
-        Ok(())
-    })();
 
-    if res.is_ok() {
-        save_config(&state.paths, &appid, &cfg);
-    }
-    emit_changed(&app, &appid);
-    Ok(fold(res.map(|_| json!({ "ok": true }))))
+        if let Some(v) = config.get("thunderstoreCommunity") {
+            let v = v.as_str().map(str::trim).filter(|s| !s.is_empty());
+            cfg.thunderstore_community = v.map(str::to_string);
+            cfg.thunderstore_community_auto = false;
+            cfg.thunderstore_checked = v.is_some();
+        }
+
+        let res: Result<(), String> = (|| {
+            if let Some(v) = config.get("deployTarget").and_then(|v| v.as_str()) {
+                let new_target = v.trim().trim_matches('/').trim_matches('\\').to_string();
+                if new_target != cfg.deploy_target {
+                    if let Ok(old) = deploy_target_dir(state, appid, &cfg) {
+                        undeploy_from(&dir, &old)?;
+                    }
+                    // Validate the NEW target before persisting: a bad target
+                    // (e.g. one with a `..` segment) must not survive as the
+                    // stored config.
+                    cfg.deploy_target = new_target;
+                    let target = deploy_target_dir(state, appid, &cfg)?;
+                    refresh_deployment_plans(state, appid, &mut cfg);
+                    deploy_to(&dir, &target, &cfg)?;
+                }
+            }
+            Ok(())
+        })();
+
+        if res.is_ok() {
+            save_config(&state.paths, appid, &cfg);
+        }
+        emit_changed(app, appid);
+        fold(res.map(|_| json!({ "ok": true })))
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn mods_toggle(
     app: AppHandle,
-    state: State<'_, AppState>,
     appid: String,
     mod_id: String,
     enabled: bool,
 ) -> Result<Value, String> {
-    let lock = game_lock(&appid);
-    let _g = lock.lock().await;
-    let mut cfg = load_config(&state.paths, &appid);
-    let Some(m) = cfg.mods.iter_mut().find(|m| m.id == mod_id) else {
-        return Ok(json!({ "ok": false, "error": format!("mod {mod_id} not found") }));
-    };
-    m.enabled = enabled;
-    let res = redeploy(&state, &appid, &cfg);
-    if res.is_ok() {
-        // Persist only after the files actually moved, so a failed deploy
-        // leaves both the config and the game directory describing the
-        // previous state.
-        save_config(&state.paths, &appid, &cfg);
-    }
-    emit_changed(&app, &appid);
-    Ok(fold(res.map(|_| json!({ "ok": true }))))
+    blocking_game(app, appid, move |app, state, appid| {
+        let mut cfg = load_config(&state.paths, appid);
+        let Some(m) = cfg.mods.iter_mut().find(|m| m.id == mod_id) else {
+            return json!({ "ok": false, "error": format!("mod {mod_id} not found") });
+        };
+        m.enabled = enabled;
+        let res = redeploy(state, appid, &cfg);
+        if res.is_ok() {
+            // Persist only after the files actually moved, so a failed deploy
+            // leaves both the config and the game directory describing the
+            // previous state.
+            save_config(&state.paths, appid, &cfg);
+        }
+        emit_changed(app, appid);
+        fold(res.map(|_| json!({ "ok": true })))
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn mods_reorder(
     app: AppHandle,
-    state: State<'_, AppState>,
     appid: String,
     ordered_ids: Vec<String>,
 ) -> Result<Value, String> {
-    let lock = game_lock(&appid);
-    let _g = lock.lock().await;
-    let mut cfg = load_config(&state.paths, &appid);
-    let pos: HashMap<&str, usize> = ordered_ids
-        .iter()
-        .enumerate()
-        .map(|(i, id)| (id.as_str(), i))
-        .collect();
-    cfg.mods
-        .sort_by_key(|m| pos.get(m.id.as_str()).copied().unwrap_or(usize::MAX));
-    for (i, m) in cfg.mods.iter_mut().enumerate() {
-        m.order = i as u32;
-    }
-    let res = redeploy(&state, &appid, &cfg);
-    if res.is_ok() {
-        save_config(&state.paths, &appid, &cfg);
-    }
-    emit_changed(&app, &appid);
-    Ok(fold(res.map(|_| json!({ "ok": true }))))
+    blocking_game(app, appid, move |app, state, appid| {
+        let mut cfg = load_config(&state.paths, appid);
+        let pos: HashMap<&str, usize> = ordered_ids
+            .iter()
+            .enumerate()
+            .map(|(i, id)| (id.as_str(), i))
+            .collect();
+        cfg.mods
+            .sort_by_key(|m| pos.get(m.id.as_str()).copied().unwrap_or(usize::MAX));
+        for (i, m) in cfg.mods.iter_mut().enumerate() {
+            m.order = i as u32;
+        }
+        let res = redeploy(state, appid, &cfg);
+        if res.is_ok() {
+            save_config(&state.paths, appid, &cfg);
+        }
+        emit_changed(app, appid);
+        fold(res.map(|_| json!({ "ok": true })))
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn mods_uninstall(
     app: AppHandle,
-    state: State<'_, AppState>,
     appid: String,
     mod_id: String,
 ) -> Result<Value, String> {
-    let lock = game_lock(&appid);
-    let _g = lock.lock().await;
-    let mut cfg = load_config(&state.paths, &appid);
-    let before = cfg.mods.len();
-    cfg.mods.retain(|m| m.id != mod_id);
-    if cfg.mods.len() == before {
-        return Ok(json!({ "ok": false, "error": format!("mod {mod_id} not found") }));
-    }
-    let res = redeploy(&state, &appid, &cfg);
-    if res.is_ok() {
-        // Only forget the mod once its files are actually gone; a failed
-        // redeploy keeps the config so the UI can retry.
-        save_config(&state.paths, &appid, &cfg);
-        let dir = game_mods_dir(&state.paths, &appid);
-        std::fs::remove_dir_all(dir.join("staging").join(&mod_id)).ok();
-    }
-    emit_changed(&app, &appid);
-    Ok(fold(res.map(|_| json!({ "ok": true }))))
+    blocking_game(app, appid, move |app, state, appid| {
+        let mut cfg = load_config(&state.paths, appid);
+        let before = cfg.mods.len();
+        cfg.mods.retain(|m| m.id != mod_id);
+        if cfg.mods.len() == before {
+            return json!({ "ok": false, "error": format!("mod {mod_id} not found") });
+        }
+        let res = redeploy(state, appid, &cfg);
+        if res.is_ok() {
+            // Only forget the mod once its files are actually gone; a failed
+            // redeploy keeps the config so the UI can retry.
+            save_config(&state.paths, appid, &cfg);
+            let dir = game_mods_dir(&state.paths, appid);
+            std::fs::remove_dir_all(dir.join("staging").join(&mod_id)).ok();
+        }
+        emit_changed(app, appid);
+        fold(res.map(|_| json!({ "ok": true })))
+    })
+    .await
 }
 
 #[tauri::command]
-pub async fn mods_deploy(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    appid: String,
-) -> Result<Value, String> {
-    let lock = game_lock(&appid);
-    let _g = lock.lock().await;
-    let cfg = load_config(&state.paths, &appid);
-    let res = redeploy(&state, &appid, &cfg);
-    emit_changed(&app, &appid);
-    Ok(fold(res.map(|n| json!({ "ok": true, "fileCount": n }))))
+pub async fn mods_deploy(app: AppHandle, appid: String) -> Result<Value, String> {
+    blocking_game(app, appid, |app, state, appid| {
+        let cfg = load_config(&state.paths, appid);
+        let res = redeploy(state, appid, &cfg);
+        emit_changed(app, appid);
+        fold(res.map(|n| json!({ "ok": true, "fileCount": n })))
+    })
+    .await
 }
 
 #[tauri::command]
-pub async fn mods_undeploy(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    appid: String,
-) -> Result<Value, String> {
-    let lock = game_lock(&appid);
-    let _g = lock.lock().await;
-    let cfg = load_config(&state.paths, &appid);
-    let dir = game_mods_dir(&state.paths, &appid);
-    let res: Result<(), String> = (|| {
-        let target = deploy_target_dir(&state, &appid, &cfg)?;
-        undeploy_from(&dir, &target)
-    })();
-    emit_changed(&app, &appid);
-    Ok(fold(res.map(|_| json!({ "ok": true }))))
+pub async fn mods_undeploy(app: AppHandle, appid: String) -> Result<Value, String> {
+    blocking_game(app, appid, |app, state, appid| {
+        let cfg = load_config(&state.paths, appid);
+        let dir = game_mods_dir(&state.paths, appid);
+        let res: Result<(), String> = (|| {
+            let target = deploy_target_dir(state, appid, &cfg)?;
+            undeploy_from(&dir, &target)
+        })();
+        emit_changed(app, appid);
+        fold(res.map(|_| json!({ "ok": true })))
+    })
+    .await
 }
 
 #[tauri::command(async)]

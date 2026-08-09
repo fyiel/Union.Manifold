@@ -46,6 +46,7 @@ export function installBridge(): void {
     saveCatalogState: (payload: any) => call("catalog_state_save", { payload }),
     listLibrary: () => call("library_list"),
     listInstalled: () => call("installed_list"),
+    listInstalledAppids: () => call("installed_appids"),
     getInstalled: (appid: string) => call("installed_get", { appid }),
     listInstalling: () => call("installing_list"),
     getInstalling: (appid: string) => call("installing_get", { appid }),
