@@ -287,6 +287,8 @@ export function GameModsPage() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState("")
   const [tab, setTab] = useState<Tab>("installed")
+  const [tabsSeen, setTabsSeen] = useState<Set<string>>(() => new Set(["installed"]))
+  useEffect(() => { setTabsSeen((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab))) }, [tab])
 
   const reload = useCallback(async () => {
     try {
@@ -434,14 +436,17 @@ export function GameModsPage() {
     } catch (err) { toast(String(err), "error") }
   }
 
-  const nexusDomain = gs?.nexusDomain || null
+  function wrapBrowse<T>(r: { ok?: boolean; error?: string } | undefined | null, items: T[] | undefined, hasMore?: boolean): BrowsePage<T> {
+  if (!r) return { ok: false, error: "mods backend unavailable" }
+  return { ok: !!r.ok, items: items || [], hasMore: hasMore ?? false, error: r.error }
+}
+
+const nexusDomain = gs?.nexusDomain || null
   const [nxSort, setNxSort] = useState<NexusSort>("downloads")
   const [nxOrder, setNxOrder] = useState<"asc" | "desc">("desc")
   const [nxPeriod, setNxPeriod] = useState<Period>("all")
   const [nxQuery, setNxQuery] = useState("")
   const [nxSubmitted, setNxSubmitted] = useState("")
-  const [nxActive, setNxActive] = useState(false)
-  useEffect(() => { if (tab === "nexus") setNxActive(true) }, [tab])
 
   const nexusFetch = useCallback(async (page: number): Promise<BrowsePage<BrowseMod>> => {
     if (!nexusDomain) return { ok: false, error: "Nexus is not matched for this game" }
@@ -449,12 +454,11 @@ export function GameModsPage() {
     const r = q
       ? await window.ucMods?.nexusSearch?.(nexusDomain, q, page + 1)
       : await window.ucMods?.nexusBrowse?.(nexusDomain, nxSort, nxOrder, nxPeriod, page * 24)
-    if (!r) return { ok: false, error: "mods backend unavailable" }
-    return { ok: !!r.ok, items: r.mods, hasMore: r.hasMore, error: r.error }
+    return wrapBrowse(r, r?.mods, r?.hasMore)
   }, [nexusDomain, nxSubmitted, nxSort, nxOrder, nxPeriod])
 
   const nexusBrowse = useEndlessBrowse<BrowseMod>({
-    enabled: nxActive && !!nexusDomain,
+    enabled: tabsSeen.has("nexus") && !!nexusDomain,
     resetKey: `nexus|${nexusDomain || ""}|${nxSubmitted}|${nxSort}|${nxOrder}|${nxPeriod}`,
     keyOf: (m) => m.remoteId,
     fetchPage: nexusFetch,
@@ -508,19 +512,17 @@ export function GameModsPage() {
   const [wsPeriod, setWsPeriod] = useState<Period>("all")
   const [wsQuery, setWsQuery] = useState("")
   const [wsSubmitted, setWsSubmitted] = useState("")
-  const [wsActive, setWsActive] = useState(false)
+
   const [wsBusy, setWsBusy] = useState<string | null>(null)
-  useEffect(() => { if (tab === "workshop") setWsActive(true) }, [tab])
 
   const workshopFetch = useCallback(async (page: number): Promise<BrowsePage<WorkshopBrowseItem>> => {
     if (!steamAppid) return { ok: false, error: "no Steam appid" }
     const r = await window.ucMods?.workshopBrowse?.(steamAppid, wsSort, wsPeriod, page + 1, wsSubmitted.trim())
-    if (!r) return { ok: false, error: "mods backend unavailable" }
-    return { ok: !!r.ok, items: r.items, hasMore: r.hasMore, error: r.error }
+    return wrapBrowse(r, r?.items, r?.hasMore)
   }, [steamAppid, wsSort, wsPeriod, wsSubmitted])
 
   const workshopBrowse = useEndlessBrowse<WorkshopBrowseItem>({
-    enabled: wsActive && workshopOk,
+    enabled: tabsSeen.has("workshop") && workshopOk,
     resetKey: `ws|${steamAppid || ""}|${wsSort}|${wsPeriod}|${wsSubmitted}`,
     keyOf: (m) => m.remoteId,
     fetchPage: workshopFetch,
@@ -542,18 +544,15 @@ export function GameModsPage() {
   const [tsPeriod, setTsPeriod] = useState<Period>("all")
   const [tsQuery, setTsQuery] = useState("")
   const [tsSubmitted, setTsSubmitted] = useState("")
-  const [tsActive, setTsActive] = useState(false)
-  useEffect(() => { if (tab === "thunderstore") setTsActive(true) }, [tab])
 
   const thunderstoreFetch = useCallback(async (page: number): Promise<BrowsePage<BrowseMod>> => {
     if (!tsCommunity) return { ok: false, error: "no Thunderstore community" }
     const r = await window.ucMods?.thunderstoreBrowse?.(tsCommunity, tsSort, tsPeriod, page + 1, tsSubmitted.trim())
-    if (!r) return { ok: false, error: "mods backend unavailable" }
-    return { ok: !!r.ok, items: r.mods, hasMore: r.hasMore, error: r.error }
+    return wrapBrowse(r, r?.mods, r?.hasMore)
   }, [tsCommunity, tsSort, tsPeriod, tsSubmitted])
 
   const thunderstoreBrowse = useEndlessBrowse<BrowseMod>({
-    enabled: tsActive && tsSupported,
+    enabled: tabsSeen.has("thunderstore") && tsSupported,
     resetKey: `ts|${tsCommunity || ""}|${tsSort}|${tsPeriod}|${tsSubmitted}`,
     keyOf: (m) => m.remoteId,
     fetchPage: thunderstoreFetch,
