@@ -618,7 +618,6 @@ export function GameModsPage() {
           </div>
         </div>
 
-        {}
         {gs && (
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 9, marginTop: 14 }}>
             {domainEdit ? (
@@ -687,7 +686,6 @@ export function GameModsPage() {
           </div>
         )}
 
-        {}
         <div style={{ display: "flex", gap: 2, borderBottom: "1px solid var(--mf-line)", marginTop: 18 }}>
           {TABS.map((t) => {
             const active = tab === t.id
@@ -702,7 +700,7 @@ export function GameModsPage() {
       </header>
 
       <div className="mf-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "18px 36px 48px" }}>
-        {}
+
         {activeProgress.map((p) => (
           <div key={p.modId} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 10, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", marginBottom: 12 }}>
             <Spinner size={13} />
@@ -728,7 +726,7 @@ export function GameModsPage() {
           </CenterState>
         ) : tab === "installed" ? (
           <>
-            {}
+
             <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 9, marginBottom: 16 }}>
               <button type="button" className="mf-ghost" style={GHOST_BTN} onClick={() => void openModsFolder()}>
                 <FolderOpen size={13} strokeWidth={1.7} />Open mods folder
@@ -984,7 +982,6 @@ export function GameModsPage() {
         )}
       </div>
 
-      {}
       <Dialog open={Boolean(confirmRm)} onOpenChange={(open) => { if (!open && !removing) setConfirmRm(null) }}>
         <DialogContent>
           <DialogHeader>
@@ -1000,7 +997,6 @@ export function GameModsPage() {
         </DialogContent>
       </Dialog>
 
-      {}
       <Dialog open={Boolean(filePick)} onOpenChange={(open) => { if (!open && installingFileId == null) setFilePick(null) }}>
         <DialogContent className="sm:max-w-[560px]">
           <DialogHeader>
@@ -1044,7 +1040,6 @@ export function GameModsPage() {
         </DialogContent>
       </Dialog>
 
-      {}
       <Dialog open={Boolean(tsVersionPick)} onOpenChange={(open) => { if (!open && tsInstalling == null) setTsVersionPick(null) }}>
         <DialogContent className="sm:max-w-[560px]">
           <DialogHeader>

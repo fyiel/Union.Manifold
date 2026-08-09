@@ -271,7 +271,7 @@ export function SourceGamePage() {
 
   return (
     <div className="mf-scroll" style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto", overflowX: "hidden" }}>
-      {}
+
       <div style={{ position: "relative", height: 300, overflow: "hidden" }}>
         <div style={{ position: "absolute", inset: 0, background: heroFailed || !heroCandidates.length ? HERO_LINES : "#0f0f0f" }}>
           {!heroFailed && heroCandidates.length > 0 && (
@@ -284,7 +284,6 @@ export function SourceGamePage() {
         </button>
       </div>
 
-      {}
       <div style={{ position: "relative", maxWidth: 980, margin: "0 auto", padding: "0 40px" }}>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 22, marginTop: -118 }}>
           <div style={{ width: 152, height: 202, flexShrink: 0, borderRadius: 10, background: coverFailed || !coverCandidates.length ? COVER_LINES : "#0f0f0f", border: "1px solid var(--mf-line-2)", boxShadow: "0 20px 50px rgba(0,0,0,0.55)", display: "flex", alignItems: "flex-end", padding: 12, overflow: "hidden", position: "relative" }}>
@@ -337,7 +336,6 @@ export function SourceGamePage() {
           </div>
         </div>
 
-        {}
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 26 }}>
           {loading ? (
             <div style={{ display: "flex", alignItems: "center", gap: 9, fontFamily: MONO, fontSize: 13, color: "var(--mf-t4)" }}>
@@ -401,7 +399,6 @@ export function SourceGamePage() {
         </div>
         {optMsg[pk] && <p style={{ margin: "10px 0 0", fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)" }}>{optMsg[pk]}</p>}
 
-        {}
         {game?.description && (
           <p style={{ margin: "30px 0 0", fontSize: 14, lineHeight: 1.72, color: "var(--mf-t3)", maxWidth: 680, whiteSpace: "pre-line", overflowWrap: "anywhere" }}>{game.description}</p>
         )}
@@ -437,7 +434,6 @@ export function SourceGamePage() {
           </div>
         )}
 
-        {}
         {ordered.length > 0 && (
           <div style={{ marginTop: 24, paddingBottom: 56 }}>
             <button type="button" onClick={() => setSourcesOpen((v) => !v)} className="mf-ghost" style={{ display: "flex", alignItems: "center", gap: 11, width: "100%", padding: "13px 16px", borderRadius: 10, border: "1px solid var(--mf-line)", background: "var(--mf-panel-2)", color: "var(--mf-t2)", cursor: "pointer", textAlign: "left" }}>
