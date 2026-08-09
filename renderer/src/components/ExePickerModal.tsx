@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { GameExecutable, getExecutableRelativePath, rankGameExecutables } from "@/lib/utils"
+import { fmtBytes, GameExecutable, getExecutableRelativePath, rankGameExecutables } from "@/lib/utils"
 import { Folder, Search, Sparkles } from "@/components/icons"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
@@ -127,7 +127,7 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
           </div>
           <div className="truncate text-xs text-muted-foreground">{relativePath}</div>
           {typeof exe.size === "number" && exe.size > 0 ? (
-            <div className="text-[10px] text-muted-foreground/70">{formatFileSize(exe.size)}</div>
+            <div className="text-[10px] text-muted-foreground/70">{fmtBytes(exe.size)}</div>
           ) : null}
         </div>
         <Button
@@ -203,9 +203,3 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
   )
 }
 
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
-}

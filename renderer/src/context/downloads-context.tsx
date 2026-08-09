@@ -367,17 +367,6 @@ function createSyntheticDownloadFromInstallingManifest(
   }
 }
 
-function formatArchiveBytes(bytes: number) {
-  if (!bytes) return "0 B"
-  const units = ["B", "KB", "MB", "GB", "TB"]
-  let value = bytes
-  let index = 0
-  while (value >= 1024 && index < units.length - 1) {
-    value /= 1024
-    index += 1
-  }
-  return `${value.toFixed(value >= 10 || index === 0 ? 0 : 1)} ${units[index]}`
-}
 
 function resolveArchiveFolderPath(archivePaths: string[]): string | null {
   const firstPath = Array.isArray(archivePaths) ? archivePaths.find((value) => typeof value === "string" && value.length > 0) : null
@@ -1732,7 +1721,7 @@ const startGameDownload = useCallback(async (game: Game, preferredHostOverride?:
                 <div className="mt-4 rounded-xl border border-white/[.08] bg-card/70 p-4 text-sm text-foreground/90">
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">Archive size</span>
-                    <span className="font-mono">{formatArchiveBytes(currentArchiveDeletionPrompt.totalBytes)}</span>
+                    <span className="font-mono">{fmtBytes(currentArchiveDeletionPrompt.totalBytes)}</span>
                   </div>
                   <div className="mt-2 flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">Archive files</span>
