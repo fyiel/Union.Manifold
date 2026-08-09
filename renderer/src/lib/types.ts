@@ -55,4 +55,3 @@ export interface Game {
   game_executable_args?: string | null
 }
 
-export type GameStats = Record<string, { downloads: number; views: number }>

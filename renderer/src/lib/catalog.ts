@@ -375,11 +375,3 @@ export async function fetchCatalogGames(): Promise<CatalogGame[]> {
   return Array.isArray(data) ? normalizeCatalogGamesChunked(data) : []
 }
 
-export async function fetchCatalogStats(): Promise<GameStats> {
-  const response = await apiFetch("/api/downloads/all")
-  if (!response.ok) {
-    throw new Error(`Failed to load stats (${response.status})`)
-  }
-  const data = await response.json()
-  return data && typeof data === "object" ? data as GameStats : {}
-}
