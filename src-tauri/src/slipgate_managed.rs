@@ -113,7 +113,7 @@ async fn run_docker(args: &[String], timeout: Duration) -> Result<String, String
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000);
+        command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
     }
     let output = tokio::time::timeout(timeout, command.output())
         .await

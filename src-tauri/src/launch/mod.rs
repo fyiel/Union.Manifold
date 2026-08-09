@@ -432,7 +432,7 @@ fn spawn_and_track(
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000);
+        cmd.creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW);
         cmd.stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
@@ -796,7 +796,7 @@ fn kill_handle(handle: &RunHandle) {
         }
         std::process::Command::new("taskkill")
             .args(["/PID", &handle.pid.to_string(), "/T", "/F"])
-            .creation_flags(0x08000000)
+            .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW)
             .spawn()
             .ok();
     }

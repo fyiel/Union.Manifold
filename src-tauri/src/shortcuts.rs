@@ -80,7 +80,7 @@ pub fn create_desktop_shortcut(
         use std::os::windows::process::CommandExt;
         match std::process::Command::new("powershell")
             .args(["-NoProfile", "-Command", &script])
-            .creation_flags(0x08000000)
+            .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW)
             .output()
         {
             Ok(o) if o.status.success() => json!({ "ok": true }),
