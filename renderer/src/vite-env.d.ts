@@ -213,14 +213,9 @@ declare global {
 
   type StoragePrecheckResult = {
     ok: boolean
-    requiredBytes: number
-    freeBytes: number
-    shortfallBytes: number
     downloadBytes: number
     extractBytes: number
     alreadyReservedBytes: number
-    availableAfterReservation: number
-    mountRoot: string | null
     humanRequired?: string
     humanShortfall?: string
     humanAvailable?: string
@@ -449,8 +444,8 @@ declare global {
         archivePaths: string[]
         downloadId?: string
         metadata?: Record<string, any>
-      }) => Promise<{ ok: boolean; downloadId?: string; extracted?: number; error?: string; code?: string; spaceCheck?: DownloadUpdatePayload["spaceCheck"] }>
-      installDownloadedArchive: (appid: string) => Promise<{ ok: boolean; downloadId?: string; extracted?: number; error?: string; code?: string; spaceCheck?: DownloadUpdatePayload["spaceCheck"] }>
+      }) => Promise<{ ok: boolean; downloadId?: string; extracted?: number; error?: string; code?: string;  }>
+      installDownloadedArchive: (appid: string) => Promise<{ ok: boolean; downloadId?: string; extracted?: number; error?: string; code?: string;  }>
       deleteArchiveFiles: (payload: { archivePaths: string[] }) => Promise<{ ok: boolean; deletedCount?: number; error?: string }>
       browseForGameExe: (defaultPath?: string) => Promise<{ ok: boolean; path?: string }>
       importExe: (exePath: string, name?: string) => Promise<{ ok: boolean; appid?: string; name?: string; exePath?: string; existed?: boolean; steamAppId?: number | null; error?: string }>

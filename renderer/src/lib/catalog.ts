@@ -18,7 +18,6 @@ type CatalogMemoryCache = CatalogSnapshot & {
 }
 
 const CATALOG_TTL_MS = 1000 * 60 * 60 * 6
-export const CATALOG_STATS_TTL_MS = 1000 * 60 * 15
 
 const emptySnapshot = (): CatalogSnapshot => ({
   games: [],

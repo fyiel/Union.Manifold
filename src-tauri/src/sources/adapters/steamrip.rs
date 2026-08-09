@@ -389,7 +389,7 @@ fn orderby_for(sort: &str, has_text: bool) -> &'static str {
 }
 
 fn enc(s: &str) -> String {
-    percent_encoding::utf8_percent_encode(s, percent_encoding::NON_ALPHANUMERIC).to_string()
+    crate::mods::urlenc(s)
 }
 
 pub async fn query(params: &QueryParams) -> Option<Vec<SourceGame>> {

@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react"
 import { useConnectivityStatus } from "@/hooks/use-online-status"
-import type { GameStats } from "@/lib/types"
 import { gameLogger } from "@/lib/logger"
 import {
   fetchCatalogGames,
