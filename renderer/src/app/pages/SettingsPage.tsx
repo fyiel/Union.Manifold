@@ -32,6 +32,7 @@ const SECTIONS: Array<{ id: Section; label: string; sub: string }> = [
 ]
 
 const SELECT: React.CSSProperties = { ...SELECT_BASE, borderRadius: 8, fontSize: 12.5 }
+const MONO_INPUT: React.CSSProperties = { height: 38, padding: "0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12, outline: "none" }
 const GAMESCOPE_NUM: React.CSSProperties = { width: 90, boxSizing: "border-box", height: 36, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", borderRadius: 8, padding: "0 12px", fontFamily: MONO, fontSize: 12.5, color: "var(--mf-t1)", textAlign: "center", outline: "none" }
 
 export function SettingsPage() {
@@ -667,7 +668,7 @@ function SourcesTab() {
             placeholder="https://slipgate.example.com"
             autoComplete="off"
             spellCheck={false}
-            style={{ flex: 1, height: 38, padding: "0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12, outline: "none" }}
+            style={{ ...MONO_INPUT, flex: 1 }}
           />
           <button type="button" className="mf-ghost" disabled={slipgateTesting || !slipgateUrl.trim()} onClick={() => void testSlipgate()} style={{ display: "flex", alignItems: "center", gap: 7, padding: "0 15px", height: 38, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: !slipgateUrl.trim() ? "var(--mf-t4)" : "var(--mf-t1)", fontSize: 12, fontWeight: 600, cursor: slipgateTesting || !slipgateUrl.trim() ? "default" : "pointer", opacity: slipgateTesting ? 0.6 : 1, flexShrink: 0 }}>
             {slipgateTesting ? "Testing…" : "Test"}
@@ -1071,7 +1072,7 @@ function ModsTab({ onJumpToSources }: { onJumpToSources: () => void }) {
             placeholder="paste your API key…"
             autoComplete="off"
             spellCheck={false}
-            style={{ flex: 1, height: 38, padding: "0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12, outline: "none" }}
+            style={{ ...MONO_INPUT, flex: 1 }}
           />
           <RevealButton shown={reveal} onToggle={() => setReveal((v) => !v)} title="key" />
           <button type="button" className="mf-ghost" disabled={validating || !apiKey.trim()} onClick={() => void validate()} style={{ display: "flex", alignItems: "center", gap: 7, padding: "0 15px", height: 38, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: !apiKey.trim() ? "var(--mf-t4)" : "var(--mf-t1)", fontSize: 12, fontWeight: 600, cursor: validating || !apiKey.trim() ? "default" : "pointer", opacity: validating ? 0.6 : 1, flexShrink: 0 }}>
@@ -1119,7 +1120,7 @@ function ModsTab({ onJumpToSources }: { onJumpToSources: () => void }) {
             placeholder="nexusmods_session=…"
             autoComplete="off"
             spellCheck={false}
-            style={{ flex: 1, height: 38, padding: "0 13px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12, outline: "none" }}
+            style={{ ...MONO_INPUT, flex: 1 }}
           />
           <RevealButton shown={sessionRevealed} onToggle={() => setSessionRevealed((v) => !v)} title="cookie" />
         </div>
@@ -1133,7 +1134,7 @@ function ModsTab({ onJumpToSources }: { onJumpToSources: () => void }) {
           placeholder="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 …"
           autoComplete="off"
           spellCheck={false}
-          style={{ width: "100%", height: 38, padding: "0 13px", marginTop: 12, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12, outline: "none", boxSizing: "border-box" }}
+          style={{ ...MONO_INPUT, width: "100%" }}
         />
       </div>
 
