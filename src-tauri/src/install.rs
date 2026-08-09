@@ -747,7 +747,8 @@ pub async fn install_from_archive(
         .get("downloadId")
         .and_then(|v| v.as_str())
         .map(String::from)
-        .map(|s| archive_download_id(&appid, Some(s)));
+        .map(|s| archive_download_id(&appid, Some(s)))
+        .unwrap_or_else(|| archive_download_id(&appid, None));
     let archive_paths: Vec<PathBuf> = payload
         .get("archivePaths")
         .and_then(|v| v.as_array())
