@@ -1722,7 +1722,7 @@ const startGameDownload = useCallback(async (game: Game, preferredHostOverride?:
                 <div className="mt-4 rounded-xl border border-white/[.08] bg-card/70 p-4 text-sm text-foreground/90">
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">Archive size</span>
-                    <span className="font-mono">{fmtBytes(currentArchiveDeletionPrompt.totalBytes)}</span>
+                    <span className="font-mono">{fmtBytes(currentArchiveDeletionPrompt.totalBytes, "0 B")}</span>
                   </div>
                   <div className="mt-2 flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">Archive files</span>

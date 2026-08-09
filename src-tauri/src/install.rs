@@ -704,15 +704,7 @@ pub async fn auto_install(
             .ok();
         }
         Err(e) => {
-            mark_install_failed(&installing_dir, &e.to_string());
-            emit_status(
-                &app,
-                &download_id,
-                &appid,
-                &game_name,
-                "extract_failed",
-                Some(&e.to_string()),
-            );
+            fail_extract(&app, &download_id, &appid, &game_name, &installing_dir, &e.to_string());
             crate::notify::send_if(
                 &app,
                 "notifyInstallDone",
