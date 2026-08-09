@@ -307,14 +307,10 @@ fn write_mod_engine_profile(
         return Ok(None);
     };
     let staging_root = staging_root(game_dir);
-    let mut mods: Vec<&ModEntry> = cfg
-        .mods
-        .iter()
-        .filter(|entry| {
-            entry.enabled && !entry.deploy_blocked && entry.deploy_prefix == MOD_ENGINE_DEPLOY_ROOT
-        })
+    let mods: Vec<&ModEntry> = enabled_mods(cfg)
+        .into_iter()
+        .filter(|entry| entry.deploy_prefix == MOD_ENGINE_DEPLOY_ROOT)
         .collect();
-    mods.sort_by_key(|entry| entry.order);
 
     let mut profile = format!(
         "profileVersion = \"v1\"\n\n[[supports]]\ngame = {}\n",
@@ -495,12 +491,7 @@ fn enabled_mewgenics_mod_paths(game_dir: &Path, cfg: &GameMods) -> Vec<PathBuf> 
         return Vec::new();
     }
     let staging_root = staging_root(game_dir);
-    let mut enabled: Vec<&ModEntry> = cfg
-        .mods
-        .iter()
-        .filter(|entry| entry.enabled && !entry.deploy_blocked)
-        .collect();
-    enabled.sort_by_key(|entry| entry.order);
+    let enabled = enabled_mods(cfg);
     enabled
         .into_iter()
         .flat_map(|entry| launch_payload_paths_for_entry(&staging_root, entry))
@@ -886,9 +877,10 @@ fn redeploy(state: &AppState, appid: &str, cfg: &GameMods) -> Result<usize, Stri
 
 pub(crate) fn active_mod_engine_profile(state: &AppState, appid: &str) -> Option<PathBuf> {
     let cfg = load_config(&state.paths, appid);
-    if !cfg.mods.iter().any(|entry| {
-        entry.enabled && !entry.deploy_blocked && entry.deploy_prefix == MOD_ENGINE_DEPLOY_ROOT
-    }) {
+    if !enabled_mods(&cfg)
+        .iter()
+        .any(|entry| entry.deploy_prefix == MOD_ENGINE_DEPLOY_ROOT)
+    {
         return None;
     }
     let profile = deploy_target_dir(state, appid, &cfg)
