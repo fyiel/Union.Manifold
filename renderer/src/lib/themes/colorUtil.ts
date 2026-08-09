@@ -19,7 +19,7 @@ export function generateThemeId(prefix = "ct"): string {
   return `${prefix}-${time}-${rand}`
 }
 
-export function slugify(name: string): string {
+export function themeSlug(name: string): string {
   return name
     .toLowerCase()
     .trim()

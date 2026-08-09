@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
-import { querySources, sourceCapabilities, rememberGames, sourcesAvailable, listSources, sourceDirect, sourceIsDirect, mergeUnique, countMirrors, nextSortMode, sortModeLabel, SORT_NOUNS, type SourceSortMode } from "@/lib/sources"
+import { querySources, sourceCapabilities, rememberGames, sourcesAvailable, listSources, sourceDirect, sourceIsDirect, mergeUnique, countMirrors, nextSortMode, sortModeLabel, SORT_NOUNS, type SourceSortMode, sortUnifiedGames } from "@/lib/sources"
 import { getAdvancedCache, setAdvancedCache } from "@/lib/advanced-cache"
 import { GameCard } from "@/app/manifold/GameCard"
 import { MONO, SearchIcon, Spinner, CenterState } from "@/app/manifold/ui"
@@ -134,20 +134,8 @@ export function AdvancedSearchPage() {
   }, [query, enabled, cats, sizeMin, sizeMax, yearFrom, yearTo, directOnly, sort, games, total, genreOptions, paramsKey])
 
   const sorted = useMemo(() => {
-    let arr = games
-    if (directOnly) arr = arr.filter((g) => g.sources.some(sourceIsDirect))
-    arr = [...arr]
-    const q = query.trim().toLowerCase()
-    if (sort === "a-z") arr.sort((a, b) => a.title.localeCompare(b.title))
-    else if (sort === "size") arr.sort((a, b) => (b.sizeBytes || 0) - (a.sizeBytes || 0))
-    else if (sort === "sources") arr.sort((a, b) => b.sources.length - a.sources.length || (b.releaseYear || 0) - (a.releaseYear || 0))
-    else if (q) arr.sort((a, b) => {
-      const ra = a.title.toLowerCase().startsWith(q) ? 0 : 1
-      const rb = b.title.toLowerCase().startsWith(q) ? 0 : 1
-      return ra - rb || b.sources.length - a.sources.length || a.title.localeCompare(b.title)
-    })
-    else arr.sort((a, b) => (b.releaseYear || 0) - (a.releaseYear || 0))
-    return arr
+    const arr = directOnly ? games.filter((g) => g.sources.some(sourceIsDirect)) : games
+    return sortUnifiedGames(arr, sort, { query, fallbackLatest: true })
   }, [games, directOnly, sort, query])
 
   const sourceCounts = useMemo(() => {
@@ -177,7 +165,7 @@ export function AdvancedSearchPage() {
   const yearLabel = yLo <= YEAR_MIN && yHi >= YEAR_MAX ? "Any" : `${yLo}–${yHi}`
   const genreHint = cats.size ? `${cats.size} selected` : "any"
   const sortLabel = sortModeLabel(sort, query.trim().length > 0)
-  const mirrors = countMirrors(sorted).total
+  const mirrors = useMemo(() => countMirrors(sorted).total, [sorted])
   const hasMore = games.length < total
 
   const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
