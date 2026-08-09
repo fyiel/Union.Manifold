@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
-import { querySources, sourceCapabilities, rememberGames, sourcesAvailable, listSources, sourceDirect, sourceIsDirect, mergeUnique, countMirrors } from "@/lib/sources"
+import { querySources, sourceCapabilities, rememberGames, sourcesAvailable, listSources, sourceDirect, sourceIsDirect, mergeUnique, countMirrors, nextSortMode, sortModeLabel, SORT_NOUNS, type SourceSortMode } from "@/lib/sources"
 import { getAdvancedCache, setAdvancedCache } from "@/lib/advanced-cache"
 import { GameCard } from "@/app/manifold/GameCard"
 import { MONO, SearchIcon, Spinner, CenterState } from "@/app/manifold/ui"
 
-type AdvSort = "relevance" | "a-z" | "size" | "sources"
-const SORT_CYCLE: AdvSort[] = ["relevance", "a-z", "size", "sources"]
+type AdvSort = SourceSortMode
 const SIZE_MIN = 0, SIZE_MAX = 130, YEAR_MIN = 2010, YEAR_MAX = 2026
 const ADV_PAGE = 60
 
@@ -18,7 +17,6 @@ function toBackendSort(sort: AdvSort, hasText: boolean): SourceSortKey {
   if (sort === "a-z") return "title"
   return hasText ? "relevance" : "latest"
 }
-const SORT_NOUN: Record<AdvSort, string> = { relevance: "relevance", "a-z": "A–Z", size: "size", sources: "mirror count" }
 
 export function AdvancedSearchPage() {
   const cached = getAdvancedCache()
@@ -178,7 +176,7 @@ export function AdvancedSearchPage() {
   const sizeLabel = sLo <= SIZE_MIN && sHi >= SIZE_MAX ? "Any" : `${sLo}–${sHi} GB`
   const yearLabel = yLo <= YEAR_MIN && yHi >= YEAR_MAX ? "Any" : `${yLo}–${yHi}`
   const genreHint = cats.size ? `${cats.size} selected` : "any"
-  const sortLabel = { relevance: query.trim() ? "Relevance" : "Latest", "a-z": "A–Z", size: "Size", sources: "Most sources" }[sort]
+  const sortLabel = sortModeLabel(sort, query.trim().length > 0)
   const mirrors = countMirrors(sorted).total
   const hasMore = games.length < total
 
@@ -203,7 +201,7 @@ export function AdvancedSearchPage() {
     setYearFrom(YEAR_MIN); setYearTo(YEAR_MAX)
     setDirectOnly(false)
   }
-  const cycleSort = () => setSort((s) => SORT_CYCLE[(SORT_CYCLE.indexOf(s) + 1) % SORT_CYCLE.length])
+  const cycleSort = () => setSort((s) => nextSortMode(s))
 
   const SECTION_LABEL: React.CSSProperties = { fontFamily: MONO, fontSize: 9.5, letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--mf-t5)" }
 
@@ -249,9 +247,9 @@ export function AdvancedSearchPage() {
                   </span>
                   <span style={{ fontSize: 12.5, fontWeight: 500, color: on ? "var(--mf-t1)" : "var(--mf-t4)" }}>{s.name}</span>
                   {unsupported && (
-                    <span title={`${s.name} can't order by ${SORT_NOUN[sort]} — results from this source fall back to relevance`} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 6, background: "rgba(190,90,90,0.13)", border: "1px solid rgba(200,120,120,0.32)" }}>
+                    <span title={`${s.name} can't order by ${SORT_NOUNS[sort]} — results from this source fall back to relevance`} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 6, background: "rgba(190,90,90,0.13)", border: "1px solid rgba(200,120,120,0.32)" }}>
                       <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="#dd8a8a" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round"><path d="M8 1.8 1.5 13.5h13L8 1.8z" /><line x1="8" y1="6.5" x2="8" y2="9.5" /><circle cx="8" cy="11.4" r="0.6" fill="#dd8a8a" stroke="none" /></svg>
-                      <span style={{ fontFamily: MONO, fontSize: 8.5, letterSpacing: "0.04em", color: "#dd8a8a", whiteSpace: "nowrap" }}>no {SORT_NOUN[sort]}</span>
+                      <span style={{ fontFamily: MONO, fontSize: 8.5, letterSpacing: "0.04em", color: "#dd8a8a", whiteSpace: "nowrap" }}>no {SORT_NOUNS[sort]}</span>
                     </span>
                   )}
                   <span style={{ flex: 1 }} />

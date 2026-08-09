@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import { X } from "lucide-react"
-import { querySources, rememberGames, sourcesAvailable, listSources, onSourcesChanged, mergeUnique, countMirrors } from "@/lib/sources"
+import { querySources, rememberGames, sourcesAvailable, listSources, onSourcesChanged, mergeUnique, countMirrors, nextSortMode, sortModeLabel, type SourceSortMode } from "@/lib/sources"
 import { getBrowseCache, setBrowseCache, setBrowseScroll, consumeDiskRestore } from "@/lib/browse-cache"
 import { GameCard } from "@/app/manifold/GameCard"
 import { MONO, SearchIcon, SmartImage, Spinner, CenterState } from "@/app/manifold/ui"
 
-type SortMode = "relevance" | "a-z" | "size" | "sources"
-const SORT_CYCLE: SortMode[] = ["relevance", "a-z", "size", "sources"]
 type SrcStatus = "idle" | "searching" | "done" | "failed"
 const PAGE = 48
 type ZoomedCover = { game: UnifiedSourceGame; candidates: string[] }
@@ -16,7 +14,7 @@ export function BrowsePage() {
   const cached = getBrowseCache()
   const [query, setQuery] = useState(() => cached?.query ?? "")
   const [committed, setCommitted] = useState(() => cached?.committed ?? "")
-  const [sortMode, setSortMode] = useState<SortMode>(() => (cached?.sortMode as SortMode) ?? "relevance")
+  const [sortMode, setSourceSortMode] = useState<SourceSortMode>(() => (cached?.sortMode as SourceSortMode) ?? "relevance")
   const [games, setGames] = useState<UnifiedSourceGame[]>(() => cached?.games ?? [])
   const [total, setTotal] = useState(() => cached?.total ?? 0)
   const [sources, setSources] = useState<SourceInfo[]>([])
@@ -207,7 +205,7 @@ export function BrowsePage() {
 
   const mirrors = useMemo(() => sorted.reduce((n, g) => n + g.sources.length, 0), [sorted])
   const resultSummary = searching ? `${sorted.length} so far…` : `${sorted.length}${hasMore ? "+" : ""} titles · ${mirrors} mirrors`
-  const sortLabel = { relevance: hasQuery ? "Relevance" : "Latest", "a-z": "A–Z", size: "Size", sources: "Most sources" }[sortMode]
+  const sortLabel = sortModeLabel(sortMode, hasQuery)
 
   const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget
@@ -316,7 +314,7 @@ export function BrowsePage() {
             <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)" }}>{resultSummary}</span>
             <button
               type="button"
-              onClick={() => setSortMode((m) => SORT_CYCLE[(SORT_CYCLE.indexOf(m) + 1) % SORT_CYCLE.length])}
+              onClick={() => setSourceSortMode((m) => nextSortMode(m))}
               className="mf-textbtn"
               style={{ display: "flex", alignItems: "center", gap: 7, padding: "7px 13px", borderRadius: 8, border: "1px solid color-mix(in srgb, var(--mf-t0) 9%, transparent)", background: "transparent", color: "var(--mf-t3)", fontFamily: MONO, fontSize: 11, cursor: "pointer" }}
             >

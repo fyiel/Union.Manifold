@@ -4,6 +4,20 @@ import { sourceLogger } from "@/lib/logger"
 
 const api = () => (typeof window !== "undefined" ? window.ucSources : undefined)
 
+export type SourceSortMode = "relevance" | "a-z" | "size" | "sources"
+export const SORT_MODES: readonly SourceSortMode[] = ["relevance", "a-z", "size", "sources"]
+export const SORT_LABELS: Record<SourceSortMode, string> = { relevance: "Relevance", "a-z": "A–Z", size: "Size", sources: "Most sources" }
+export const SORT_NOUNS: Record<SourceSortMode, string> = { relevance: "relevance", "a-z": "A–Z", size: "size", sources: "mirror count" }
+
+export function nextSortMode(mode: SourceSortMode): SourceSortMode {
+  return SORT_MODES[(SORT_MODES.indexOf(mode) + 1) % SORT_MODES.length]
+}
+
+export function sortModeLabel(mode: SourceSortMode, hasQuery: boolean): string {
+  if (mode === "relevance") return hasQuery ? "Relevance" : "Latest"
+  return SORT_LABELS[mode]
+}
+
 export function mergeUnique<T extends { dedupKey: string }>(prev: T[], next: T[]): T[] {
   const seen = new Set(prev.map((g) => g.dedupKey))
   return [...prev, ...next.filter((g) => !seen.has(g.dedupKey))]
