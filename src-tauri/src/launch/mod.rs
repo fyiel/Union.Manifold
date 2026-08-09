@@ -104,15 +104,26 @@ fn configured_launch_args(
     shlex::split(raw).ok_or_else(|| "launch options contain an unclosed quote".to_string())
 }
 
+/// systemd-run wrapper that starts `command` in a transient user scope.
+/// The probe and the spawned executable are the SAME resolution (via
+/// linux::which), so a found systemd-run always spawns successfully.
 #[cfg(target_os = "linux")]
-fn systemd_run_available() -> bool {
-    std::env::var("PATH")
-        .ok()
-        .map(|path| {
-            path.split(':')
-                .any(|d| Path::new(d).join("systemd-run").is_file())
-        })
-        .unwrap_or(false)
+pub(crate) fn systemd_scope_command(
+    unit: &str,
+    command: &str,
+    args: &[String],
+) -> Option<std::process::Command> {
+    let systemd_run = crate::launch::linux::which("systemd-run")?;
+    let mut c = std::process::Command::new(systemd_run);
+    c.arg("--user")
+        .arg("--scope")
+        .arg("--collect")
+        .arg("--quiet")
+        .arg(format!("--unit={unit}"))
+        .arg("--")
+        .arg(command)
+        .args(args);
+    Some(c)
 }
 
 fn already_running() -> std::io::Error {
@@ -394,7 +405,7 @@ fn spawn_and_track(
     #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
     let mut scope: Option<String> = None;
     #[cfg(target_os = "linux")]
-    let mut cmd = if systemd_run_available() {
+    let mut cmd = {
         let unit = format!(
             "uc-game-{}-{}",
             std::process::id(),
@@ -403,21 +414,17 @@ fn spawn_and_track(
                 .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
                 .collect::<String>()
         );
-        let mut c = std::process::Command::new("systemd-run");
-        c.arg("--user")
-            .arg("--scope")
-            .arg("--collect")
-            .arg("--quiet")
-            .arg(format!("--unit={unit}"))
-            .arg("--")
-            .arg(command)
-            .args(args);
-        scope = Some(format!("{unit}.scope"));
-        c
-    } else {
-        let mut c = std::process::Command::new(command);
-        c.args(args);
-        c
+        match systemd_scope_command(&unit, command, args) {
+            Some(c) => {
+                scope = Some(format!("{unit}.scope"));
+                c
+            }
+            None => {
+                let mut c = std::process::Command::new(command);
+                c.args(args);
+                c
+            }
+        }
     };
     #[cfg(not(target_os = "linux"))]
     let mut cmd = {
@@ -864,7 +871,7 @@ mod tests {
 
     #[test]
     fn kill_handle_reaps_detached_tree() {
-        if !systemd_run_available() {
+        if crate::launch::linux::which("systemd-run").is_none() {
             eprintln!("skipping, no systemd-run");
             return;
         }
