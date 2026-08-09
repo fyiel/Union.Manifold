@@ -2071,30 +2071,22 @@ mod tests {
         assert!(!scanned.state_loaded);
     }
 
-
     #[test]
     fn absolute_or_join_clamps_relative_climbs_and_keeps_absolute_paths() {
-        let root = std::path::Path::new("/games/title/settings");
+        let root = std::env::current_dir().unwrap().join("games/title/settings");
+        assert_eq!(absolute_or_join(&root, "saves"), root.join("saves"));
+        assert_eq!(absolute_or_join(&root, "../saves"), root.join("saves"));
         assert_eq!(
-            absolute_or_join(root, "saves"),
-            std::path::PathBuf::from("/games/title/settings/saves")
+            absolute_or_join(&root, "../../../../etc/passwd"),
+            root.join("etc/passwd")
         );
+        assert_eq!(absolute_or_join(&root, "./a/../b"), root.join("b"));
+        let absolute = std::env::current_dir()
+            .unwrap()
+            .join("home/user/Documents/saves");
         assert_eq!(
-            absolute_or_join(root, "../saves"),
-            std::path::PathBuf::from("/games/title/settings/saves")
-        );
-        assert_eq!(
-            absolute_or_join(root, "../../../../etc/passwd"),
-            std::path::PathBuf::from("/games/title/settings/etc/passwd")
-        );
-        assert_eq!(
-            absolute_or_join(root, "./a/../b"),
-            std::path::PathBuf::from("/games/title/settings/b")
-        );
-        assert_eq!(
-            absolute_or_join(root, "/home/user/Documents/saves"),
-            std::path::PathBuf::from("/home/user/Documents/saves")
+            absolute_or_join(&root, absolute.to_str().unwrap()),
+            absolute
         );
     }
-
 }

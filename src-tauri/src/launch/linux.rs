@@ -1159,6 +1159,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn umu_uses_proton_directory_and_wine_prefix() {
         assert_eq!(
