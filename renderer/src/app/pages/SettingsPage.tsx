@@ -15,6 +15,7 @@ import {
 } from "@/lib/sources"
 import { BRAND } from "@/lib/brand"
 import { MONO, SELECT_BASE } from "@/app/manifold/ui"
+import { cacheStartPage, readCachedStartPage } from "@/app/route-loaders"
 import { fmtBytes } from "@/lib/utils"
 import type { LinuxDetectionOption } from "@/lib/linux-presets"
 
@@ -58,7 +59,7 @@ export function SettingsPage() {
   const [maxConcurrent, setMaxConcurrent] = useState(3)
   const [connsPerDl, setConnsPerDl] = useState(8)
   const [diskMargin, setDiskMargin] = useState(2)
-  const [startPage, setStartPage] = useState<"browse" | "library">("browse")
+  const [startPage, setStartPage] = useState<"browse" | "library">(() => readCachedStartPage() || "browse")
   const [closeOnLaunch, setCloseOnLaunch] = useState(false)
   const [achievementNotifications, setAchievementNotifications] = useState(true)
   const [achievementSystemNotifications, setAchievementSystemNotifications] = useState(true)
@@ -105,7 +106,9 @@ export function SettingsPage() {
         if (Number(maxC) >= 1) setMaxConcurrent(Math.min(8, Number(maxC)))
         if (Number(conns) >= 1) setConnsPerDl(Math.min(16, Number(conns)))
         if (margin != null && Number(margin) >= 0) setDiskMargin(Math.min(64, Number(margin)))
-        if (sp === "library") setStartPage("library")
+        const resolvedStartPage = sp === "library" ? "library" : "browse"
+        setStartPage(resolvedStartPage)
+        cacheStartPage(resolvedStartPage)
         setLaunchAtLogin(Boolean(auto?.enabled))
         setCloseOnLaunch(col === true)
         setAchievementNotifications(achievementPopups !== false)
@@ -120,6 +123,11 @@ export function SettingsPage() {
       if (d.key === "pauseDownloadsWhilePlaying") setPauseWhilePlaying(d.value === true)
       if (d.key === "achievementNotifications") setAchievementNotifications(d.value !== false)
       if (d.key === "achievementSystemNotifications") setAchievementSystemNotifications(d.value !== false)
+      if (d.key === "startPage") {
+        const value = d.value === "library" ? "library" : "browse"
+        setStartPage(value)
+        cacheStartPage(value)
+      }
     })
     return () => { alive = false; off?.() }
   }, [])
@@ -188,7 +196,7 @@ export function SettingsPage() {
                   </select>
                 </Row>
                 <Row title="Startup page" desc="Which page the app opens on after launch">
-                  <select className="uc-select" value={startPage} onChange={(e) => { const v = e.target.value === "library" ? "library" : "browse"; setStartPage(v); void window.ucSettings?.set?.("startPage", v) }} style={{ ...SELECT, minWidth: 150 }}>
+                  <select className="uc-select" value={startPage} onChange={(e) => { const v = e.target.value === "library" ? "library" : "browse"; setStartPage(v); cacheStartPage(v); void window.ucSettings?.set?.("startPage", v) }} style={{ ...SELECT, minWidth: 150 }}>
                     <option value="browse">Browse</option>
                     <option value="library">Library</option>
                   </select>

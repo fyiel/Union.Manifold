@@ -4,6 +4,7 @@ import { Minus, Square, X } from "lucide-react"
 import { Sidebar } from "@/app/manifold/Sidebar"
 import { BrowsePage } from "@/app/pages/BrowsePage"
 import {
+  cacheStartPage,
   loadAchievementsPage,
   loadAdvancedSearchPage,
   loadDownloadsPage,
@@ -11,6 +12,7 @@ import {
   loadPlayLaterPage,
   loadSettingsPage,
   preloadPrimaryPage,
+  wasCachedStartPageApplied,
 } from "@/app/route-loaders"
 import { usePauseDownloadsWhilePlaying } from "@/hooks/use-pause-on-launch"
 import { TabVisibleProvider } from "@/context/tab-visibility"
@@ -68,10 +70,13 @@ export function ForkLayout() {
     void (async () => {
       try {
         const sp = await window.ucSettings?.get?.("startPage")
+        cacheStartPage(sp === "library" ? "library" : "browse")
         const route = window.location.hash.replace(/^#/, "").split("?")[0] || "/"
         if (sp === "library" && route === "/") {
           preloadPrimaryPage("/library")
           navigate("/library", { replace: true })
+        } else if (sp !== "library" && wasCachedStartPageApplied() && route === "/library") {
+          navigate("/", { replace: true })
         }
       } catch {  }
     })()

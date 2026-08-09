@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState } from "react"
+import { createContext, lazy, Suspense, useCallback, useContext, useMemo, useState } from "react"
 import type { Game } from "@/lib/types"
 import {
   getPreferredDownloadHost,
@@ -9,7 +9,9 @@ import {
 import { apiFetch } from "@/lib/api"
 import { useDownloadsActions, useDownloadsSelector } from "@/context/downloads-context"
 import { useToast } from "@/context/toast-context"
-import { DownloadCheckModal } from "@/components/DownloadCheckModal"
+
+const loadDownloadCheckModal = () => import("@/components/DownloadCheckModal")
+const DownloadCheckModal = lazy(() => loadDownloadCheckModal().then((m) => ({ default: m.DownloadCheckModal })))
 
 type DownloadFlowValue = {
   requestDownload: (game: Game) => Promise<void>
@@ -86,6 +88,8 @@ export function DownloadFlowProvider({ children }: { children: React.ReactNode }
         return
       }
 
+      void loadDownloadCheckModal().catch(() => undefined)
+
       let full: Game = game
       try {
         const res = await apiFetch(`/api/games/${encodeURIComponent(appid)}`)
@@ -129,15 +133,19 @@ export function DownloadFlowProvider({ children }: { children: React.ReactNode }
   return (
     <DownloadFlowContext.Provider value={value}>
       {children}
-      <DownloadCheckModal
-        open={state.open}
-        game={state.game}
-        downloadToken={state.token}
-        defaultHost={state.defaultHost}
-        autoConfirmIfGreen={state.autoConfirm}
-        onConfirm={handleConfirm}
-        onClose={() => setState(CLOSED)}
-      />
+      {state.open ? (
+        <Suspense fallback={null}>
+          <DownloadCheckModal
+            open
+            game={state.game}
+            downloadToken={state.token}
+            defaultHost={state.defaultHost}
+            autoConfirmIfGreen={state.autoConfirm}
+            onConfirm={handleConfirm}
+            onClose={() => setState(CLOSED)}
+          />
+        </Suspense>
+      ) : null}
     </DownloadFlowContext.Provider>
   )
 }

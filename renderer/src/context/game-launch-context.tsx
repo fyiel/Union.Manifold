@@ -1,13 +1,31 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
-import { ExePickerModal } from "@/components/ExePickerModal"
-import { DesktopShortcutModal } from "@/components/DesktopShortcutModal"
-import { ElevationPromptModal } from "@/components/ElevationPromptModal"
-import { GameLaunchFailedModal } from "@/components/GameLaunchFailedModal"
-import { GameLaunchPreflightModal, type LaunchPreflightResult } from "@/components/GameLaunchPreflightModal"
+import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
+import type { LaunchPreflightResult } from "@/components/GameLaunchPreflightModal"
 import { getUnambiguousExecutable, hasOnlineMode, matchAdminExecutable, type GameExecutable } from "@/lib/utils"
 import { reportPlayEvent } from "@/lib/cloud-collections"
 import { setRunningOptimistic, isRunningGameSync } from "@/hooks/use-running-games"
 import { gameLogger } from "@/lib/logger"
+
+const loadExePickerModal = () => import("@/components/ExePickerModal")
+const loadDesktopShortcutModal = () => import("@/components/DesktopShortcutModal")
+const loadElevationPromptModal = () => import("@/components/ElevationPromptModal")
+const loadGameLaunchFailedModal = () => import("@/components/GameLaunchFailedModal")
+const loadGameLaunchPreflightModal = () => import("@/components/GameLaunchPreflightModal")
+
+const ExePickerModal = lazy(() => loadExePickerModal().then((m) => ({ default: m.ExePickerModal })))
+const DesktopShortcutModal = lazy(() => loadDesktopShortcutModal().then((m) => ({ default: m.DesktopShortcutModal })))
+const ElevationPromptModal = lazy(() => loadElevationPromptModal().then((m) => ({ default: m.ElevationPromptModal })))
+const GameLaunchFailedModal = lazy(() => loadGameLaunchFailedModal().then((m) => ({ default: m.GameLaunchFailedModal })))
+const GameLaunchPreflightModal = lazy(() => loadGameLaunchPreflightModal().then((m) => ({ default: m.GameLaunchPreflightModal })))
+
+function preloadGameLaunchUi(): void {
+  void Promise.all([
+    loadExePickerModal(),
+    loadDesktopShortcutModal(),
+    loadElevationPromptModal(),
+    loadGameLaunchFailedModal(),
+    loadGameLaunchPreflightModal(),
+  ]).catch(() => undefined)
+}
 
 export type LaunchableGame = {
   appid: string
@@ -296,6 +314,7 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
     if (!g?.appid) return
     if (isRunningGameSync(g.appid)) return
     if (!window.ucDownloads?.listGameExecutables || !window.ucDownloads?.launchGameExecutable) return
+    preloadGameLaunchUi()
     disarmQuickExit()
     setFailureReason(null)
     setElevationError(null)
@@ -394,6 +413,7 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
 
   const requestSetExecutable = useCallback(async (g: LaunchableGame, opts?: { currentPath?: string | null }) => {
     if (!g?.appid) return
+    preloadGameLaunchUi()
     setGame(g)
     setPickerMode("set")
     setPickerActionLabel("Set")
@@ -464,8 +484,9 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
     <GameLaunchContext.Provider value={value}>
       {children}
 
-      <ExePickerModal
-        open={pickerOpen}
+      <Suspense fallback={null}>
+      {pickerOpen ? <ExePickerModal
+        open
         title={pickerTitle}
         message={pickerMessage}
         exes={pickerExes}
@@ -475,10 +496,10 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
         actionLabel={pickerActionLabel}
         onSelect={(p) => void handleExePicked(p)}
         onClose={() => setPickerOpen(false)}
-      />
+      /> : null}
 
-      <DesktopShortcutModal
-        open={shortcutOpen}
+      {shortcutOpen ? <DesktopShortcutModal
+        open
         gameName={game?.name || ""}
         defaultAlwaysCreate={shortcutAlwaysCreate}
         onCreateShortcut={async (alwaysCreate) => {
@@ -506,10 +527,10 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
           setPendingPath(null)
           setShortcutAlwaysCreate(false)
         }}
-      />
+      /> : null}
 
-      <GameLaunchPreflightModal
-        open={preflightOpen}
+      {preflightOpen ? <GameLaunchPreflightModal
+        open
         gameName={game?.name || ""}
         result={preflightResult}
         onClose={() => {
@@ -529,20 +550,20 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
               }
             : undefined
         }
-      />
+      /> : null}
 
-      <ElevationPromptModal
-        open={elevationOpen}
+      {elevationOpen ? <ElevationPromptModal
+        open
         gameName={game?.name || ""}
         executablePath={pendingPath || ""}
         busy={elevationBusy}
         error={elevationError}
         onCancel={cancelElevation}
         onConfirm={() => void confirmElevation()}
-      />
+      /> : null}
 
-      <GameLaunchFailedModal
-        open={failedOpen}
+      {failedOpen ? <GameLaunchFailedModal
+        open
         gameName={game?.name || ""}
         reason={failureReason}
         hasOnlineSupport={hasOnlineMode(game?.hasCoOp)}
@@ -551,7 +572,8 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
           setFailureReason(null)
         }}
         onPickExecutable={() => void reopenLaunchPicker(game)}
-      />
+      /> : null}
+      </Suspense>
     </GameLaunchContext.Provider>
   )
 }
