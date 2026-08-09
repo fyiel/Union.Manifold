@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import { X } from "lucide-react"
-import { querySources, nextSourceRequestId, rememberGames, sourcesAvailable, listSources, onSourcesChanged, mergeUnique, countMirrors, nextSortMode, sortModeLabel, type SourceSortMode, sortUnifiedGames } from "@/lib/sources"
+import { cancelSourceQuery, querySources, nextSourceRequestId, rememberGames, sourcesAvailable, listSources, onSourcesChanged, mergeUnique, countMirrors, nextSortMode, sortModeLabel, type SourceSortMode, sortUnifiedGames } from "@/lib/sources"
 import { getBrowseCache, setBrowseCache, setBrowseScroll, consumeDiskRestore } from "@/lib/browse-cache"
 import { GameCard } from "@/app/manifold/GameCard"
 import { MONO, SearchIcon, SmartImage, Spinner, CenterState } from "@/app/manifold/ui"
 
 type SrcStatus = "idle" | "searching" | "done" | "failed"
 const PAGE = 48
+const MEMORY_REFRESH_MS = 90_000
 type ZoomedCover = { game: UnifiedSourceGame; candidates: string[] }
 
 export function BrowsePage() {
@@ -32,6 +33,7 @@ export function BrowsePage() {
   const offsetRef = useRef(cached?.offset ?? 0)
   const scrollerRef = useRef<HTMLDivElement | null>(null)
   const restoreScroll = useRef(cached?.scrollTop ?? 0)
+  const fetchedAtRef = useRef(cached?.fetchedAt ?? 0)
 
   useEffect(() => {
     if (!restoreScroll.current) return
@@ -58,8 +60,10 @@ export function BrowsePage() {
   }, [])
 
   useEffect(() => {
-    setBrowseCache({ query, committed, games, counts: sourceCounts, sortMode, offset: offsetRef.current, total })
+    setBrowseCache({ query, committed, games, counts: sourceCounts, sortMode, offset: offsetRef.current, total, fetchedAt: fetchedAtRef.current })
   }, [query, committed, games, sourceCounts, sortMode, total])
+
+  useEffect(() => () => cancelSourceQuery(reqId.current), [])
 
   useEffect(() => {
     if (!zoomedCover) return
@@ -114,6 +118,7 @@ export function BrowsePage() {
       const nextGames = append ? mergeUnique(gamesRef.current, res.games) : res.games
       gamesRef.current = nextGames
       setGames(nextGames)
+      fetchedAtRef.current = Date.now()
       offsetRef.current = startOffset + PAGE
       setTotal(append && res.games.length === 0 ? nextGames.length : res.total)
       setSourceError(null)
@@ -164,7 +169,8 @@ export function BrowsePage() {
           for (const s of sources) if (s.enabled) next[s.id] = "done"
           return next
         })
-        if (!consumeDiskRestore()) return
+        const restoredFromDisk = consumeDiskRestore()
+        if (!restoredFromDisk && Date.now() - fetchedAtRef.current < MEMORY_REFRESH_MS) return
       }
     }
     if (debounce.current) clearTimeout(debounce.current)
@@ -212,7 +218,13 @@ export function BrowsePage() {
       if (debounce.current) clearTimeout(debounce.current)
       void runQuery(query)
     }
-    if (e.key === "Escape") setQuery("")
+    if (e.key === "Escape") onQueryChange("")
+  }
+
+  const onQueryChange = (value: string) => {
+    cancelSourceQuery(reqId.current)
+    reqId.current = nextSourceRequestId()
+    setQuery(value)
   }
 
   const hasQuery = committed.length > 0
@@ -253,7 +265,7 @@ export function BrowsePage() {
               <SearchIcon style={{ position: "absolute", left: 13, top: "50%", transform: "translateY(-50%)" }} />
               <input
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                onChange={(e) => onQueryChange(e.target.value)}
                 onKeyDown={onKey}
                 placeholder="search every source…"
                 style={{
@@ -277,7 +289,7 @@ export function BrowsePage() {
                 <button
                   type="button"
                   title="clear"
-                  onClick={() => setQuery("")}
+                  onClick={() => onQueryChange("")}
                   className="mf-iconbtn"
                   style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: 6, border: "none", background: "color-mix(in srgb, var(--mf-t0) 7%, transparent)", color: "var(--mf-t3)", cursor: "pointer" }}
                 >

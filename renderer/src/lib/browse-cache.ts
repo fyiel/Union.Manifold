@@ -7,6 +7,7 @@ export type BrowseCache = {
   offset: number
   total: number
   scrollTop: number
+  fetchedAt: number
 }
 
 const LS_KEY = "uc_browse_snapshot_v1"
@@ -35,14 +36,17 @@ function flushBrowseCacheToDisk(): void {
   persistTimer = null
   if (!cache) return
   try {
-    const snap: BrowseCache = { ...cache, games: cache.games.slice(0, 48), offset: Math.min(cache.offset, 48) }
+    const games = cache.games.slice(0, 48).map((game) => {
+      const { description: _description, ...summary } = game
+      return summary as UnifiedSourceGame
+    })
+    const snap: BrowseCache = { ...cache, games, offset: Math.min(cache.offset, 48) }
     localStorage.setItem(LS_KEY, JSON.stringify(snap))
   } catch {  }
 }
 
 export function setBrowseCache(next: Omit<BrowseCache, "scrollTop"> & { scrollTop?: number }): void {
   cache = { ...next, scrollTop: next.scrollTop ?? cache?.scrollTop ?? 0 }
-  diskRestore = false
   if (persistTimer !== null) window.clearTimeout(persistTimer)
   persistTimer = window.setTimeout(flushBrowseCacheToDisk, 500)
 }

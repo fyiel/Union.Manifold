@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
-import { querySources, nextSourceRequestId, sourceCapabilities, rememberGames, sourcesAvailable, listSources, sourceDirect, sourceIsDirect, mergeUnique, countMirrors, nextSortMode, sortModeLabel, SORT_NOUNS, type SourceSortMode, sortUnifiedGames } from "@/lib/sources"
+import { cancelSourceQuery, querySources, nextSourceRequestId, sourceCapabilities, rememberGames, sourcesAvailable, listSources, sourceDirect, sourceIsDirect, mergeUnique, countMirrors, nextSortMode, sortModeLabel, SORT_NOUNS, type SourceSortMode, sortUnifiedGames } from "@/lib/sources"
 import { getAdvancedCache, setAdvancedCache } from "@/lib/advanced-cache"
 import { GameCard } from "@/app/manifold/GameCard"
 import { MONO, SearchIcon, Spinner, CenterState } from "@/app/manifold/ui"
@@ -8,6 +8,7 @@ import { MONO, SearchIcon, Spinner, CenterState } from "@/app/manifold/ui"
 type AdvSort = SourceSortMode
 const SIZE_MIN = 0, SIZE_MAX = 130, YEAR_MIN = 2010, YEAR_MAX = 2026
 const ADV_PAGE = 60
+const MEMORY_REFRESH_MS = 90_000
 
 function capKeyForSort(sort: AdvSort): "title" | "size" | null {
   if (sort === "a-z") return "title"
@@ -76,6 +77,7 @@ export function AdvancedSearchPage() {
   const loadingMoreRef = useRef(false)
   const appendReqRef = useRef<number | null>(null)
   const bootedRef = useRef(false)
+  const fetchedAtRef = useRef(cached?.fetchedAt ?? 0)
 
   useEffect(() => {
     let alive = true
@@ -114,6 +116,7 @@ export function AdvancedSearchPage() {
 
   useEffect(() => {
     if (debounce.current) clearTimeout(debounce.current)
+    cancelSourceQuery(reqId.current)
     const id = nextSourceRequestId()
     reqId.current = id
     appendReqRef.current = null
@@ -125,7 +128,7 @@ export function AdvancedSearchPage() {
     }
     if (!bootedRef.current) {
       bootedRef.current = true
-      if (cached && cached.paramsKey === paramsKey && cached.games.length) return
+      if (cached && cached.paramsKey === paramsKey && cached.games.length && Date.now() - fetchedAtRef.current < MEMORY_REFRESH_MS) return
     }
     offsetRef.current = 0
     setSourceNotice(null)
@@ -151,6 +154,7 @@ export function AdvancedSearchPage() {
           rememberGames(res.games)
           gamesRef.current = res.games
           setGames(res.games)
+          fetchedAtRef.current = Date.now()
           setTotal(res.total)
           setSourceNotice(res.sourcesErrored ? "partial" : null)
           offsetRef.current = ADV_PAGE
@@ -167,7 +171,10 @@ export function AdvancedSearchPage() {
         })
     }
     debounce.current = setTimeout(run, slowChanged ? 280 : 0)
-    return () => { if (debounce.current) clearTimeout(debounce.current) }
+    return () => {
+      if (debounce.current) clearTimeout(debounce.current)
+      cancelSourceQuery(id)
+    }
   }, [paramsKey, slowParamsKey, available, sources.length, retryToken])
 
   useEffect(() => {
@@ -217,6 +224,7 @@ export function AdvancedSearchPage() {
     setAdvancedCache({
       query, enabled, cats: [...cats], sizeMin, sizeMax, yearFrom, yearTo, directOnly, sort,
       games, total, genreOptions, offset: offsetRef.current, paramsKey,
+      fetchedAt: fetchedAtRef.current,
     })
   }, [query, enabled, cats, sizeMin, sizeMax, yearFrom, yearTo, directOnly, sort, games, total, genreOptions, paramsKey])
 

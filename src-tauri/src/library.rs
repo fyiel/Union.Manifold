@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use serde_json::{json, Value};
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 use crate::downloads::{now_ms, MANIFEST_NAME};
 use crate::state::AppState;
@@ -21,7 +21,8 @@ const INSTALLING: &[&str] = &[
     "cancelled",
 ];
 
-type ScanSnapshot = (Instant, Vec<(PathBuf, Value)>);
+type ScanEntries = Arc<Vec<(PathBuf, Value)>>;
+type ScanSnapshot = (Instant, ScanEntries);
 static SCAN_CACHE: LazyLock<Mutex<HashMap<String, ScanSnapshot>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static SCAN_GATE: Mutex<()> = Mutex::new(());
@@ -76,7 +77,7 @@ fn roots_key(roots: &[PathBuf]) -> String {
         .join("\u{0}")
 }
 
-fn cached_scan(key: &str) -> Option<Vec<(PathBuf, Value)>> {
+fn cached_scan(key: &str) -> Option<ScanEntries> {
     let mut guard = SCAN_CACHE.lock();
     if let Some((at, data)) = guard.get(key) {
         if at.elapsed() < SCAN_TTL {
@@ -87,7 +88,7 @@ fn cached_scan(key: &str) -> Option<Vec<(PathBuf, Value)>> {
     None
 }
 
-fn load_all_cached(roots: &[PathBuf]) -> Vec<(PathBuf, Value)> {
+fn load_all_cached(roots: &[PathBuf]) -> ScanEntries {
     let key = roots_key(roots);
     if let Some(data) = cached_scan(&key) {
         return data;
@@ -96,7 +97,7 @@ fn load_all_cached(roots: &[PathBuf]) -> Vec<(PathBuf, Value)> {
     if let Some(data) = cached_scan(&key) {
         return data;
     }
-    let data = load_all(roots);
+    let data = Arc::new(load_all(roots));
     SCAN_CACHE
         .lock()
         .insert(key, (Instant::now(), data.clone()));
@@ -156,29 +157,28 @@ fn load_all(roots: &[PathBuf]) -> Vec<(PathBuf, Value)> {
     }
     out
 }
-fn status_of(v: &Value) -> String {
+fn status_of(v: &Value) -> &str {
     v.get("installStatus")
         .and_then(|s| s.as_str())
         .unwrap_or("")
-        .to_string()
 }
 
 fn list_by(roots: &[PathBuf], statuses: &[&str]) -> Vec<Value> {
     load_all_cached(roots)
-        .into_iter()
-        .filter(|(_, v)| statuses.contains(&status_of(v).as_str()))
-        .map(|(_, v)| v)
+        .iter()
+        .filter(|(_, v)| statuses.contains(&status_of(v)))
+        .map(|(_, v)| v.clone())
         .collect()
 }
 
 fn get_by(roots: &[PathBuf], appid: &str, statuses: &[&str]) -> Option<Value> {
     load_all_cached(roots)
-        .into_iter()
+        .iter()
         .find(|(_, v)| {
             v.get("appid").and_then(|a| a.as_str()) == Some(appid)
-                && statuses.contains(&status_of(v).as_str())
+                && statuses.contains(&status_of(v))
         })
-        .map(|(_, v)| v)
+        .map(|(_, v)| v.clone())
 }
 
 pub(crate) fn installed_manifests(state: &AppState) -> Vec<Value> {
@@ -191,29 +191,45 @@ pub(crate) fn installed_manifest(state: &AppState, appid: &str) -> Option<Value>
 
 pub(crate) fn find_dir(roots: &[PathBuf], appid: &str) -> Option<PathBuf> {
     load_all_cached(roots)
-        .into_iter()
+        .iter()
         .find(|(_, v)| v.get("appid").and_then(|a| a.as_str()) == Some(appid))
-        .map(|(dir, _)| dir)
+        .map(|(dir, _)| dir.clone())
 }
 
 pub(crate) fn all_appids(roots: &[PathBuf]) -> Vec<String> {
     load_all_cached(roots)
-        .into_iter()
+        .iter()
         .filter_map(|(_, v)| v.get("appid").and_then(|a| a.as_str()).map(str::to_string))
         .collect()
 }
 
 pub(crate) fn game_files_dir(roots: &[PathBuf], appid: &str) -> Option<PathBuf> {
-    let (dir, v) = load_all_cached(roots)
-        .into_iter()
+    let entries = load_all_cached(roots);
+    let (dir, v) = entries
+        .iter()
         .find(|(_, v)| v.get("appid").and_then(|a| a.as_str()) == Some(appid))?;
     if let Some(p) = v.get("installPath").and_then(|p| p.as_str()) {
         let path = PathBuf::from(p);
-        if path != dir && path.is_dir() {
+        if path != *dir && path.is_dir() {
             return Some(path);
         }
     }
-    Some(dir)
+    Some(dir.clone())
+}
+
+fn lists_by_status(roots: &[PathBuf]) -> (Vec<Value>, Vec<Value>) {
+    let entries = load_all_cached(roots);
+    let mut installed = Vec::new();
+    let mut installing = Vec::new();
+    for (_, value) in entries.iter() {
+        let status = status_of(value);
+        if INSTALLED.contains(&status) {
+            installed.push(value.clone());
+        } else if INSTALLING.contains(&status) {
+            installing.push(value.clone());
+        }
+    }
+    (installed, installing)
 }
 
 /// Merge manifest updates: null values delete keys, `metadata` is
@@ -265,24 +281,49 @@ pub(crate) fn merge_into_manifest(roots: &[PathBuf], appid: &str, updates: &Valu
     false
 }
 
-#[tauri::command(async)]
-pub fn installed_list(state: State<'_, AppState>) -> Vec<Value> {
-    list_by(&scan_roots(&state), INSTALLED)
+#[tauri::command]
+pub async fn library_list(app: AppHandle) -> Value {
+    let roots = scan_roots(&app.state::<AppState>());
+    let (installed, installing) = tokio::task::spawn_blocking(move || lists_by_status(&roots))
+        .await
+        .unwrap_or_default();
+    json!({ "installed": installed, "installing": installing })
 }
 
-#[tauri::command(async)]
-pub fn installed_get(state: State<'_, AppState>, appid: String) -> Value {
-    get_by(&scan_roots(&state), &appid, INSTALLED).unwrap_or(Value::Null)
+#[tauri::command]
+pub async fn installed_list(app: AppHandle) -> Vec<Value> {
+    let roots = scan_roots(&app.state::<AppState>());
+    tokio::task::spawn_blocking(move || list_by(&roots, INSTALLED))
+        .await
+        .unwrap_or_default()
 }
 
-#[tauri::command(async)]
-pub fn installing_list(state: State<'_, AppState>) -> Vec<Value> {
-    list_by(&scan_roots(&state), INSTALLING)
+#[tauri::command]
+pub async fn installed_get(app: AppHandle, appid: String) -> Value {
+    let roots = scan_roots(&app.state::<AppState>());
+    tokio::task::spawn_blocking(move || get_by(&roots, &appid, INSTALLED))
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(Value::Null)
 }
 
-#[tauri::command(async)]
-pub fn installing_get(state: State<'_, AppState>, appid: String) -> Value {
-    get_by(&scan_roots(&state), &appid, INSTALLING).unwrap_or(Value::Null)
+#[tauri::command]
+pub async fn installing_list(app: AppHandle) -> Vec<Value> {
+    let roots = scan_roots(&app.state::<AppState>());
+    tokio::task::spawn_blocking(move || list_by(&roots, INSTALLING))
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+pub async fn installing_get(app: AppHandle, appid: String) -> Value {
+    let roots = scan_roots(&app.state::<AppState>());
+    tokio::task::spawn_blocking(move || get_by(&roots, &appid, INSTALLING))
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or(Value::Null)
 }
 
 #[tauri::command(async)]

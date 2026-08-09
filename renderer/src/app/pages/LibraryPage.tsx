@@ -53,6 +53,7 @@ type SortMode = "recent" | "a-z" | "installed"
 const SORT_CYCLE: SortMode[] = ["recent", "a-z", "installed"]
 const SORT_LABEL: Record<SortMode, string> = { recent: "Recent", "a-z": "A–Z", installed: "Installed" }
 const RECENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+const LIBRARY_RENDER_PAGE = 120
 
 function lastPlayedLabel(ms?: number): string {
   if (!ms) return "—"
@@ -206,6 +207,7 @@ export function LibraryPage() {
 
   const [query, setQuery] = useState("")
   const [filter, setFilter] = useState<FilterKey>("All")
+  const [renderLimit, setRenderLimit] = useState(LIBRARY_RENDER_PAGE)
   const [sort, setSortState] = useState<SortMode>(() => {
     try { const v = localStorage.getItem("uc_library_sort"); if (v === "recent" || v === "a-z" || v === "installed") return v } catch {  }
     return "recent"
@@ -237,8 +239,15 @@ export function LibraryPage() {
       const metaRequest = Promise.resolve(window.ucSettings?.get?.("libraryGameMeta")).catch(() => undefined)
       const cacheRequest = Promise.resolve(window.ucSettings?.get?.(GAME_CACHE_KEY)).catch(() => undefined)
       const onlineFixRequest = Promise.resolve(window.ucSources?.onlinefixStatus?.()).catch(() => undefined)
-      const installedRequest = Promise.resolve(window.ucDownloads?.listInstalled?.() || []).catch(() => [])
-      const installingRequest = Promise.resolve(window.ucDownloads?.listInstalling?.() || []).catch(() => [])
+      const libraryRequest = window.ucDownloads?.listLibrary
+        ? Promise.resolve(window.ucDownloads.listLibrary()).catch(() => null)
+        : null
+      const installedRequest = libraryRequest
+        ? libraryRequest.then((result) => result?.installed ?? window.ucDownloads?.listInstalled?.() ?? []).catch(() => [])
+        : Promise.resolve(window.ucDownloads?.listInstalled?.() || []).catch(() => [])
+      const installingRequest = libraryRequest
+        ? libraryRequest.then((result) => result?.installing ?? window.ucDownloads?.listInstalling?.() ?? []).catch(() => [])
+        : Promise.resolve(window.ucDownloads?.listInstalling?.() || []).catch(() => [])
 
       const installedList = await installedRequest
       if (!current()) return
@@ -329,15 +338,19 @@ export function LibraryPage() {
       const now = Date.now()
       const targets = installed.filter((g) => {
         if (g.appid.startsWith("local-") && g.steamAppId == null) return false
+        const hasIdentity = Boolean(g.image && g.name && g.name !== g.appid)
+        const hasSize = g.sizeBytes != null || Boolean(g.sizeText)
+        if (hasIdentity && hasSize) return false
         if (enrichTried.current.has(g.appid)) return false
         const c = gameCacheRef.current[g.appid]
         return !(c && c.game && now - (c.cachedAt || 0) < GAME_CACHE_TTL_MS)
-      })
+      }).slice(0, renderLimit)
       if (!targets.length) return
       activeTargets = targets
       targets.forEach((g) => enrichTried.current.add(g.appid))
       void (async () => {
         const CONC = 4
+        let cacheChanged = false
         for (let i = 0; i < targets.length && !cancelled; i += CONC) {
           const resolved = new Map<string, UnifiedSourceGame>()
           await Promise.all(targets.slice(i, i + CONC).map(async (g) => {
@@ -348,6 +361,7 @@ export function LibraryPage() {
               rememberGames([full])
               rememberGameAs(g.appid, full)
               gameCacheRef.current[g.appid] = { cachedAt: Date.now(), game: full }
+              cacheChanged = true
               resolved.set(g.appid, full)
             } catch { if (!cancelled) enrichTried.current.delete(g.appid) }
           }))
@@ -364,9 +378,9 @@ export function LibraryPage() {
                 sizeBytes: x.sizeBytes ?? full.sizeBytes,
               }
             }))
-            void window.ucSettings?.set?.(GAME_CACHE_KEY, { ...gameCacheRef.current })
           }
         }
+        if (cacheChanged && !cancelled) void window.ucSettings?.set?.(GAME_CACHE_KEY, { ...gameCacheRef.current })
       })()
     }
     let timer: number | null = null
@@ -382,7 +396,7 @@ export function LibraryPage() {
       if (idle !== null && typeof cancelIdleCallback === "function") cancelIdleCallback(idle)
       if (timer !== null) window.clearTimeout(timer)
     }
-  }, [cacheHydrated, installed.length, visible])
+  }, [cacheHydrated, installed.length, renderLimit, visible])
 
   const updates = useMemo(() => {
     const byId = new Map(catalog.map((g) => [g.appid, g.version || ""]))
@@ -418,6 +432,9 @@ export function LibraryPage() {
     else arr.sort((a, b) => (b.lastPlayedAt || 0) - (a.lastPlayedAt || 0) || a.name.localeCompare(b.name))
     return arr
   }, [installed, query, filter, sort, updates])
+
+  useEffect(() => setRenderLimit(LIBRARY_RENDER_PAGE), [query, filter, sort, view])
+  const rendered = shown.slice(0, renderLimit)
 
   const installedIds = useMemo(() => new Set(installed.map((g) => g.appid)), [installed])
 
@@ -580,7 +597,16 @@ export function LibraryPage() {
         </div>
       </header>
 
-      <div className="mf-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "22px 36px 40px" }}>
+      <div
+        className="mf-scroll"
+        onScroll={(event) => {
+          const el = event.currentTarget
+          if (rendered.length < shown.length && el.scrollHeight - el.scrollTop - el.clientHeight < 700) {
+            setRenderLimit((limit) => Math.min(shown.length, limit + LIBRARY_RENDER_PAGE))
+          }
+        }}
+        style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "22px 36px 40px" }}
+      >
         <InstallingStrip installingMeta={installingMeta} installedIds={installedIds} filter={filter} query={query} />
 
         {loading ? null : shown.length === 0 ? (
@@ -592,7 +618,7 @@ export function LibraryPage() {
           </CenterState>
         ) : view === "grid" ? (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(168px, 1fr))", gap: 18, alignContent: "start" }}>
-            {shown.map((g) => (
+            {rendered.map((g) => (
               <LibCard key={g.appid} game={g} hasUpdate={updates.has(g.appid)} onOpen={openDetail} onContextMenu={openRowMenuAt} onPlay={play} onStop={onStop} onMenu={openMenu} />
             ))}
           </div>
@@ -606,7 +632,7 @@ export function LibraryPage() {
               <span />
             </div>
             <div style={{ display: "flex", flexDirection: "column", paddingTop: 4 }}>
-              {shown.map((g) => (
+              {rendered.map((g) => (
                 <LibRow key={g.appid} game={g} hasUpdate={updates.has(g.appid)} onOpen={openDetail} onContextMenu={openRowMenuAt} onPlay={play} onStop={onStop} onMenu={openMenu} />
               ))}
             </div>

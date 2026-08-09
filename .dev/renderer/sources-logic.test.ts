@@ -15,6 +15,7 @@ import {
   nextSourceRequestId,
   sourceAbbr,
   sourceDirect,
+  sourceIsDirect,
   sourceName,
   sourceRank,
   startBestDownload,
@@ -123,6 +124,10 @@ describe("source ordering helpers", () => {
     expect(sourceAbbr("mystery")).toBe("MY")
     expect(sourceDirect("steamrip")).toBe(true)
     expect(sourceDirect("unheard-of")).toBe(true)
+  })
+
+  it("keeps direct-download badges on compact browse summaries", () => {
+    expect(sourceIsDirect({ ...src("steamrip", []), direct: true })).toBe(true)
   })
 })
 

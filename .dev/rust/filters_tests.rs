@@ -173,6 +173,52 @@ fn finalize_pool_facets_reflect_filtered_set_not_raw_pool() {
 }
 
 #[test]
+#[ignore = "measurement helper; run explicitly with --ignored --nocapture"]
+fn benchmark_large_source_pool_finalize_and_page_json() {
+    let mut pool = Vec::with_capacity(2_400);
+    for i in 0..2_400 {
+        let mut entry = game(&format!("source-{}", i % 8), &format!("Synthetic game {i}"));
+        entry.source_slug = format!("game-{i}");
+        entry.source_url = format!("https://source.test/games/{i}");
+        entry.description = Some("A representative source description. ".repeat(30));
+        entry.image = Some(format!("https://cdn.test/{i}/library_600x900.jpg"));
+        entry.download_options = (0..4)
+            .map(|part| crate::sources::schema::DownloadOption {
+                label: format!("Part {part}"),
+                host_type: "pixeldrain".to_string(),
+                url: Some(format!(
+                    "https://files.test/{i}/{part}?token={}",
+                    "x".repeat(80)
+                )),
+                page_url: Some(format!("https://source.test/{i}/{part}")),
+                size_bytes: Some(1_234_567_890),
+                size_text: None,
+                resolvable: true,
+            })
+            .collect();
+        pool.push(entry);
+    }
+
+    let started = std::time::Instant::now();
+    let (games, _, total) = finalize_pool(pool, &params());
+    let finalize = started.elapsed();
+    assert_eq!(total, 2_400);
+    let started = std::time::Instant::now();
+    let page: Vec<_> = games[..48]
+        .iter()
+        .map(UnifiedGame::browse_summary)
+        .collect();
+    let json = serde_json::to_vec(&page).unwrap();
+    let serialize = started.elapsed();
+    eprintln!(
+        "source_2400 finalize_ms={} page48_bytes={} page48_serialize_ms={}",
+        finalize.as_millis(),
+        json.len(),
+        serialize.as_micros() as f64 / 1_000.0,
+    );
+}
+
+#[test]
 fn finalize_pool_balanced_interleaves_sources_round_robin() {
     let pool = vec![
         game("alpha", "A1"),

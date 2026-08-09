@@ -200,6 +200,10 @@ export async function querySources(params: SourceQueryParams, reqId?: number): P
   return res
 }
 
+export function cancelSourceQuery(reqId: number): void {
+  if (reqId > 0) void api()?.cancelQuery?.(reqId).catch(() => undefined)
+}
+
 export async function sourceCapabilities(sourceIds?: string[]): Promise<SourceCapabilityReport | null> {
   const res = await api()?.capabilities?.(sourceIds)
   return res?.ok ? res.capabilities : null
@@ -252,7 +256,7 @@ export function sourceAbbr(id: string): string {
 }
 
 export function sourceIsDirect(source: SourceGame): boolean {
-  return (source.downloadOptions || []).some((o) => o.resolvable)
+  return source.direct === true || (source.downloadOptions || []).some((o) => o.resolvable)
 }
 
 export const SOURCE_DIRECT: Record<string, boolean> = {

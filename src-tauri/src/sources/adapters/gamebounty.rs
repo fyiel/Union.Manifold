@@ -269,6 +269,7 @@ fn post_to_game(post: &Value) -> Option<SourceGame> {
         size_bytes,
         size_text: size_human,
         download_options: mirrors_to_options(post.get("container")),
+        direct: false,
     })
 }
 

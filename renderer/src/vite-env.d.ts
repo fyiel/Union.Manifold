@@ -74,6 +74,7 @@ declare global {
     sizeBytes?: number
     sizeText?: string
     downloadOptions?: SourceDownloadOption[]
+    direct?: boolean
   }
   type UnifiedSourceGame = {
     dedupKey: string
@@ -403,6 +404,7 @@ declare global {
       savePersistedState: (downloads: any[]) => Promise<{ ok: boolean; count?: number; error?: string }>
       loadCatalogState: () => Promise<{ ok: boolean; games: any[]; stats: Record<string, { downloads: number; views: number }>; updatedAt: number; gamesUpdatedAt: number; statsUpdatedAt: number; error?: string }>
       saveCatalogState: (payload: { games: any[]; gamesUpdatedAt?: number }) => Promise<{ ok: boolean; games?: number; updatedAt?: number; error?: string }>
+      listLibrary: () => Promise<{ installed: any[]; installing: any[] }>
       listInstalled: () => Promise<any[]>
       getInstalled: (appid: string) => Promise<any | null>
       listInstalling: () => Promise<any[]>
@@ -570,6 +572,7 @@ declare global {
       onSourcesUpdated: (cb: (p: unknown) => void) => () => void
       steamMeta: (appid: number) => Promise<{ ok: boolean; meta: SteamMeta }>
       query: (params: SourceQueryParams, reqId?: number) => Promise<SourceQueryResult>
+      cancelQuery: (reqId: number) => Promise<{ ok: boolean }>
       onBrowsePartial: (cb: (payload: { reqId: number; games: UnifiedSourceGame[]; total: number; doneSources: string[]; failedSources: string[] }) => void) => () => void
       capabilities: (sourceIds?: string[]) => Promise<{ ok: boolean; capabilities: SourceCapabilityReport; error?: string }>
       onlinefixStatus: () => Promise<{ ok: boolean; enabled: boolean; available: boolean; error?: string }>

@@ -9,6 +9,7 @@ pub mod schema;
 pub mod steam;
 
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
 
 use serde::{Deserialize, Serialize};
@@ -20,6 +21,34 @@ use crate::state::AppState;
 use schema::SourceGame;
 
 const POOL_SIZE: usize = 300;
+const MAX_PAGE_SIZE: usize = 100;
+
+static LATEST_STREAM_REQUEST: AtomicU64 = AtomicU64::new(0);
+static CANCELLED_THROUGH: AtomicU64 = AtomicU64::new(0);
+static STREAM_REQUEST_CHANGED: LazyLock<tokio::sync::Notify> =
+    LazyLock::new(tokio::sync::Notify::new);
+
+fn notify_stream_requests() {
+    STREAM_REQUEST_CHANGED.notify_one();
+    STREAM_REQUEST_CHANGED.notify_waiters();
+}
+
+fn start_stream_request(req_id: u64) {
+    let previous = LATEST_STREAM_REQUEST.fetch_max(req_id, Ordering::SeqCst);
+    if req_id > previous {
+        notify_stream_requests();
+    }
+}
+
+fn cancel_stream_request(req_id: u64) {
+    CANCELLED_THROUGH.fetch_max(req_id, Ordering::SeqCst);
+    notify_stream_requests();
+}
+
+fn stream_request_current(req_id: u64) -> bool {
+    LATEST_STREAM_REQUEST.load(Ordering::SeqCst) == req_id
+        && CANCELLED_THROUGH.load(Ordering::SeqCst) < req_id
+}
 
 #[derive(Clone)]
 struct CachedPool {
@@ -559,8 +588,8 @@ fn page_from(
         .ordered
         .iter()
         .skip(params.offset)
-        .take(params.limit)
-        .cloned()
+        .take(params.limit.min(MAX_PAGE_SIZE))
+        .map(schema::UnifiedGame::browse_summary)
         .collect();
     filters::QueryResult {
         ok: true,
@@ -596,6 +625,9 @@ async fn run_query_stream(
     params: QueryParams,
 ) -> filters::QueryResult {
     use futures::stream::{FuturesUnordered, StreamExt};
+    if !stream_request_current(req_id) {
+        return page_from(&empty_pool(), &params, &[], reg);
+    }
     let ids = reg.active_ids(&params.sources);
     let sig = pool_sig(&params, &ids);
     let pool_cache = pool_for(&params);
@@ -623,8 +655,23 @@ async fn run_query_stream(
             let mut failed: Vec<String> = Vec::new();
             let mut status: Vec<filters::SourceStatus> = Vec::new();
             let mut errored = false;
-            let mut latest = empty_pool();
-            while let Some((id, games)) = futs.next().await {
+            let mut latest_ordered = Vec::new();
+            let mut latest_facets = filters::Facets { tags: Vec::new() };
+            let mut latest_total = 0;
+            while !futs.is_empty() {
+                if !stream_request_current(req_id) {
+                    return None;
+                }
+                let next = tokio::select! {
+                    _ = STREAM_REQUEST_CHANGED.notified() => {
+                        if !stream_request_current(req_id) {
+                            return None;
+                        }
+                        continue;
+                    }
+                    next = futs.next() => next,
+                };
+                let Some((id, games)) = next else { break };
                 match games {
                     Some(g) if g.is_empty() => {
                         done.push(id.clone());
@@ -663,8 +710,8 @@ async fn run_query_stream(
                 let page: Vec<schema::UnifiedGame> = ordered
                     .iter()
                     .skip(page_params.offset)
-                    .take(page_params.limit)
-                    .cloned()
+                    .take(page_params.limit.min(MAX_PAGE_SIZE))
+                    .map(schema::UnifiedGame::browse_summary)
                     .collect();
                 app.emit(
                     "uc:browse-partial",
@@ -677,16 +724,19 @@ async fn run_query_stream(
                     }),
                 )
                 .ok();
-                latest = std::sync::Arc::new(CachedPool {
-                    ordered,
-                    facets,
-                    total,
-                    errored,
-                    status: status.clone(),
-                    raw: pool.clone(),
-                    fetched_at_ms: now_ms(),
-                });
+                latest_ordered = ordered;
+                latest_facets = facets;
+                latest_total = total;
             }
+            let latest = std::sync::Arc::new(CachedPool {
+                ordered: latest_ordered,
+                facets: latest_facets,
+                total: latest_total,
+                errored,
+                status,
+                raw: pool,
+                fetched_at_ms: now_ms(),
+            });
             record_health(&latest.status);
             Some(latest)
         })
@@ -759,10 +809,17 @@ pub async fn sources_query(
 ) -> Result<filters::QueryResult> {
     match req_id {
         Some(rid) if params.offset == 0 => {
+            start_stream_request(rid);
             Ok(run_query_stream(&app, rid, &state.sources, params).await)
         }
         _ => Ok(run_query(&state.sources, params).await),
     }
+}
+
+#[tauri::command]
+pub fn sources_cancel(req_id: u64) -> Value {
+    cancel_stream_request(req_id);
+    json!({ "ok": true })
 }
 
 #[tauri::command]
@@ -782,7 +839,10 @@ pub async fn sources_search(
     for mut v in results {
         pool.append(&mut v);
     }
-    let games = schema::merge_games(pool);
+    let games: Vec<_> = schema::merge_games(pool)
+        .iter()
+        .map(schema::UnifiedGame::browse_summary)
+        .collect();
     Ok(json!({ "ok": true, "games": games }))
 }
 
@@ -987,6 +1047,56 @@ mod tests {
         assert!(Registry::source_available_with(
             onlinefix, true, false, true
         ));
+    }
+
+    #[test]
+    fn cancellation_only_supersedes_the_owned_stream_request() {
+        let id = LATEST_STREAM_REQUEST.fetch_add(10_000, Ordering::SeqCst) + 10_000;
+        start_stream_request(id);
+        assert!(stream_request_current(id));
+        cancel_stream_request(id);
+        assert!(!stream_request_current(id));
+        start_stream_request(id + 1);
+        assert!(stream_request_current(id + 1));
+    }
+
+    #[test]
+    fn page_response_is_bounded_and_uses_browse_summaries() {
+        let source = |i| SourceGame {
+            source_id: "test".into(),
+            source_slug: format!("game-{i}"),
+            title: format!("Game {i}"),
+            description: Some("detail-only".repeat(100)),
+            download_options: vec![schema::DownloadOption {
+                label: "Direct".into(),
+                resolvable: true,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let (ordered, facets, total) =
+            filters::finalize_pool((0..150).map(source).collect(), &QueryParams::default());
+        let pool = CachedPool {
+            ordered,
+            facets,
+            total,
+            errored: false,
+            status: Vec::new(),
+            raw: Vec::new(),
+            fetched_at_ms: now_ms(),
+        };
+        let result = page_from(
+            &pool,
+            &QueryParams {
+                limit: usize::MAX,
+                ..Default::default()
+            },
+            &[],
+            &Registry::new(&[]),
+        );
+        assert_eq!(result.games.len(), MAX_PAGE_SIZE);
+        assert!(result.games[0].sources[0].download_options.is_empty());
+        assert!(result.games[0].sources[0].direct);
     }
 }
 

@@ -135,6 +135,25 @@ fn list_by_separates_installed_from_installing_statuses() {
 }
 
 #[test]
+fn combined_library_lists_partition_one_snapshot() {
+    let tmp = tempfile::tempdir().unwrap();
+    stub(
+        tmp.path(),
+        "done",
+        &json!({ "appid": "done", "installStatus": "installed" }),
+    );
+    stub(
+        tmp.path(),
+        "busy",
+        &json!({ "appid": "busy", "installStatus": "extracting" }),
+    );
+    let roots = vec![tmp.path().to_path_buf()];
+    let (installed, installing) = lists_by_status(&roots);
+    assert_eq!(installed[0]["appid"], json!("done"));
+    assert_eq!(installing[0]["appid"], json!("busy"));
+}
+
+#[test]
 fn loaded_manifests_gain_folder_and_install_path_fields() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = stub(
@@ -155,4 +174,40 @@ fn dirs_without_manifest_are_invisible_to_the_library() {
     std::fs::write(tmp.path().join("loose-file.txt"), "x").unwrap();
     let roots = vec![tmp.path().to_path_buf()];
     assert!(all_appids(&roots).is_empty());
+}
+
+#[test]
+#[ignore = "measurement helper; run explicitly with --ignored --nocapture"]
+fn benchmark_large_library_scan_and_warm_lists() {
+    let tmp = tempfile::tempdir().unwrap();
+    for i in 0..2_000 {
+        stub(
+            tmp.path(),
+            &format!("game-{i}"),
+            &json!({
+                "appid": format!("steam-{i}"),
+                "installStatus": if i % 10 == 0 { "installing" } else { "installed" },
+                "metadata": {
+                    "name": format!("Synthetic game {i}"),
+                    "image": format!("https://cdn.test/{i}/library_600x900.jpg"),
+                    "description": "A representative installed game manifest used for repeatable scan measurements."
+                }
+            }),
+        );
+    }
+    let roots = vec![tmp.path().to_path_buf()];
+    invalidate_scan();
+
+    let cold = std::time::Instant::now();
+    assert_eq!(list_by(&roots, INSTALLED).len(), 1_800);
+    let cold = cold.elapsed();
+    let warm = std::time::Instant::now();
+    assert_eq!(list_by(&roots, INSTALLING).len(), 200);
+    let warm = warm.elapsed();
+
+    eprintln!(
+        "library_2000 cold_scan_ms={} warm_list_ms={}",
+        cold.as_millis(),
+        warm.as_micros() as f64 / 1_000.0,
+    );
 }

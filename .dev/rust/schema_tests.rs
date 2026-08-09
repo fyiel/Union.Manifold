@@ -1,6 +1,46 @@
 use super::*;
 
 #[test]
+fn browse_summary_keeps_card_and_directness_but_drops_detail_payload() {
+    let mut source = SourceGame {
+        source_id: "steamrip".into(),
+        source_slug: "portal-2".into(),
+        source_url: "https://source.test/portal-2".into(),
+        title: "Portal 2".into(),
+        description: Some("long source detail".repeat(100)),
+        image: Some("https://cdn.test/portal-2.jpg".into()),
+        ..Default::default()
+    };
+    source.download_options.push(DownloadOption {
+        label: "Pixeldrain".into(),
+        host_type: "pixeldrain".into(),
+        url: Some(format!(
+            "https://files.test/portal-2?token={}",
+            "x".repeat(500)
+        )),
+        resolvable: true,
+        ..Default::default()
+    });
+    let full = UnifiedGame {
+        dedup_key: "steam:620".into(),
+        steam_app_id: Some(620),
+        title: "Portal 2".into(),
+        description: Some("Visible card-to-detail description".into()),
+        image: Some("https://cdn.test/portal-2.jpg".into()),
+        sources: vec![source],
+        ..Default::default()
+    };
+
+    let summary = full.browse_summary();
+    assert_eq!(summary.description, full.description);
+    assert_eq!(summary.sources[0].source_slug, "portal-2");
+    assert!(summary.sources[0].direct);
+    assert!(summary.sources[0].description.is_none());
+    assert!(summary.sources[0].download_options.is_empty());
+    assert!(serde_json::to_vec(&summary).unwrap().len() * 4 < serde_json::to_vec(&full).unwrap().len());
+}
+
+#[test]
 fn normalize_title_unifies_accents_ampersands_and_trademarks() {
     assert_eq!(normalize_title("Pok\u{00e9}mon"), "pokemon");
     assert_eq!(

@@ -105,4 +105,30 @@ describe("Browse source query failures", () => {
     await act(async () => { final.resolve(result("final result")); await final.promise })
     expect(screen.getByText("final result")).toBeTruthy()
   })
+
+  it("cancels and invalidates the active native query as soon as input changes", async () => {
+    vi.useFakeTimers()
+    const stale = deferred<ReturnType<typeof result>>()
+    const cancelQuery = vi.fn(async () => ({ ok: true }))
+    Object.defineProperty(window, "ucSources", {
+      configurable: true,
+      writable: true,
+      value: { cancelQuery, onBrowsePartial: () => () => {} },
+    })
+    querySources.mockReset()
+      .mockReturnValueOnce(stale.promise)
+      .mockResolvedValueOnce(result("fresh result"))
+
+    render(<MemoryRouter><BrowsePage /></MemoryRouter>)
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { vi.advanceTimersByTime(0); await Promise.resolve() })
+    expect(querySources).toHaveBeenCalledTimes(1)
+    fireEvent.change(screen.getByPlaceholderText("search every source…"), { target: { value: "fresh" } })
+    expect(cancelQuery).toHaveBeenCalledTimes(1)
+
+    await act(async () => { stale.resolve(result("stale result")); await stale.promise })
+    expect(screen.queryByText("stale result")).toBeNull()
+    await act(async () => { vi.advanceTimersByTime(300); await Promise.resolve() })
+    expect(screen.getByText("fresh result")).toBeTruthy()
+  })
 })

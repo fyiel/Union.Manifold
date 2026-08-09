@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { LibraryPage } from "@/app/pages/LibraryPage"
@@ -79,5 +79,63 @@ describe("Library first paint", () => {
     status.resolve({ available: false, enabled: false })
     installing.resolve([])
     artwork.resolve({})
+  })
+
+  it("loads installed and installing manifests through one library IPC", async () => {
+    const listLibrary = vi.fn(async () => ({
+      installed: [{ appid: "one-call", metadata: { name: "One Call Library", image: "https://cdn.test/one.jpg" } }],
+      installing: [],
+    }))
+    const listInstalled = vi.fn(async () => [])
+    const listInstalling = vi.fn(async () => [])
+    Object.defineProperty(window, "ucSettings", {
+      configurable: true,
+      value: { get: vi.fn(async () => ({})), set: vi.fn(async () => ({ ok: true })) },
+    })
+    Object.defineProperty(window, "ucSources", {
+      configurable: true,
+      value: { onlinefixStatus: vi.fn(async () => ({ available: false, enabled: false })), onSourcesUpdated: vi.fn(() => () => {}) },
+    })
+    Object.defineProperty(window, "ucDownloads", {
+      configurable: true,
+      value: { listLibrary, listInstalled, listInstalling },
+    })
+
+    render(<MemoryRouter><LibraryPage /></MemoryRouter>)
+    expect((await screen.findAllByText("One Call Library")).length).toBeGreaterThan(0)
+    expect(listLibrary).toHaveBeenCalledTimes(1)
+    expect(listInstalled).not.toHaveBeenCalled()
+    expect(listInstalling).not.toHaveBeenCalled()
+  })
+
+  it("bounds the first library render and appends another chunk near the end", async () => {
+    const installed = Array.from({ length: 200 }, (_, index) => ({
+      appid: `game-${index}`,
+      metadata: { name: `Library game ${String(index).padStart(3, "0")}`, image: `https://cdn.test/${index}.jpg` },
+    }))
+    Object.defineProperty(window, "ucSettings", {
+      configurable: true,
+      value: { get: vi.fn(async () => ({})), set: vi.fn(async () => ({ ok: true })) },
+    })
+    Object.defineProperty(window, "ucSources", {
+      configurable: true,
+      value: { onlinefixStatus: vi.fn(async () => ({ available: false, enabled: false })), onSourcesUpdated: vi.fn(() => () => {}) },
+    })
+    Object.defineProperty(window, "ucDownloads", {
+      configurable: true,
+      value: { listLibrary: vi.fn(async () => ({ installed, installing: [] })) },
+    })
+
+    const { container } = render(<MemoryRouter><LibraryPage /></MemoryRouter>)
+    await screen.findByText("Library game 119")
+    expect(screen.queryByText("Library game 120")).toBeNull()
+    const scroller = container.querySelector(".mf-scroll") as HTMLDivElement
+    Object.defineProperties(scroller, {
+      scrollHeight: { configurable: true, value: 2_000 },
+      scrollTop: { configurable: true, value: 1_500 },
+      clientHeight: { configurable: true, value: 500 },
+    })
+    fireEvent.scroll(scroller)
+    expect(await screen.findByText("Library game 120")).toBeTruthy()
   })
 })

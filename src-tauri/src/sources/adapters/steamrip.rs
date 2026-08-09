@@ -358,6 +358,7 @@ fn build_game(post: &Value, appid: Option<u64>, cats: &Cats) -> SourceGame {
         size_bytes: find_size(content),
         size_text: None,
         download_options: extract_download_options(content),
+        direct: false,
     }
 }
 

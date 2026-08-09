@@ -245,6 +245,7 @@ fn normalize(uc: &Value) -> SourceGame {
             resolvable: true,
             ..Default::default()
         }],
+        direct: true,
     }
 }
 

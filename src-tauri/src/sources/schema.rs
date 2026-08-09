@@ -51,6 +51,8 @@ pub struct SourceGame {
     pub size_text: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub download_options: Vec<DownloadOption>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub direct: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -83,6 +85,61 @@ pub struct UnifiedGame {
     pub sources: Vec<SourceGame>,
     #[serde(default)]
     pub fully_resolved: bool,
+}
+
+impl SourceGame {
+    fn browse_summary(&self) -> Self {
+        Self {
+            source_id: self.source_id.clone(),
+            source_slug: self.source_slug.clone(),
+            source_url: self.source_url.clone(),
+            steam_app_id: self.steam_app_id,
+            dedup_key: self.dedup_key.clone(),
+            title: self.title.clone(),
+            description: None,
+            image: self.image.clone(),
+            hero_image: self.hero_image.clone(),
+            genres: self.genres.clone(),
+            developer: self.developer.clone(),
+            release_date: self.release_date.clone(),
+            release_year: self.release_year,
+            added_at: self.added_at,
+            updated_at: self.updated_at,
+            version: self.version.clone(),
+            size_bytes: self.size_bytes,
+            size_text: self.size_text.clone(),
+            download_options: Vec::new(),
+            direct: self.direct || self.download_options.iter().any(|option| option.resolvable),
+        }
+    }
+}
+
+impl UnifiedGame {
+    pub fn browse_summary(&self) -> Self {
+        Self {
+            dedup_key: self.dedup_key.clone(),
+            steam_app_id: self.steam_app_id,
+            title: self.title.clone(),
+            description: self.description.clone(),
+            image: self.image.clone(),
+            hero_image: self.hero_image.clone(),
+            genres: self.genres.clone(),
+            developer: self.developer.clone(),
+            release_date: self.release_date.clone(),
+            release_year: self.release_year,
+            added_at: self.added_at,
+            updated_at: self.updated_at,
+            version: self.version.clone(),
+            size_bytes: self.size_bytes,
+            size_text: self.size_text.clone(),
+            sources: self
+                .sources
+                .iter()
+                .map(SourceGame::browse_summary)
+                .collect(),
+            fully_resolved: false,
+        }
+    }
 }
 
 static EDITION_NOISE: &[&str] = &[
@@ -286,7 +343,12 @@ pub fn merge_games(records: Vec<SourceGame>) -> Vec<UnifiedGame> {
                     game.genres.push(g.clone());
                 }
             }
-            game.sources.push(r.clone());
+            let mut source = r.clone();
+            source.direct |= source
+                .download_options
+                .iter()
+                .any(|option| option.resolvable);
+            game.sources.push(source);
         }
         game.steam_app_id = appid;
         game.dedup_key = dedup_key_for(appid, &game.title);

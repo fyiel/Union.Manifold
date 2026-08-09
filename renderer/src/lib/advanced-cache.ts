@@ -13,6 +13,7 @@ export type AdvancedCache = {
   genreOptions: string[]
   offset: number
   paramsKey: string
+  fetchedAt: number
 }
 
 let cache: AdvancedCache | null = null
