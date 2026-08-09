@@ -52,8 +52,8 @@ fn install_guard(downloads: &std::sync::Arc<DownloadEngine>, appid: &str) -> Opt
     None
 }
 
-fn archive_download_id(appid: &str, existing: Option<String>) -> String {
-    existing.unwrap_or_else(|| format!("{appid}-archive-{}", now_ms()))
+fn archive_download_id(appid: &str) -> String {
+    format!("{appid}-archive-{}", now_ms())
 }
 
 /// Extract an archive into `out_dir`, clearing the engine's extracting
@@ -744,8 +744,7 @@ pub async fn install_from_archive(
         .get("downloadId")
         .and_then(|v| v.as_str())
         .map(String::from)
-        .map(|s| archive_download_id(&appid, Some(s)))
-        .unwrap_or_else(|| archive_download_id(&appid, None));
+        .unwrap_or_else(|| archive_download_id(&appid));
     let archive_paths: Vec<PathBuf> = payload
         .get("archivePaths")
         .and_then(|v| v.as_array())
@@ -829,8 +828,7 @@ pub async fn install_downloaded_archive(
                     .and_then(|s| s.get("downloadId"))
                     .and_then(|v| v.as_str())
                     .map(String::from)
-                    .map(|s| archive_download_id(&appid, Some(s)))
-                    .unwrap_or_else(|| archive_download_id(&appid, None));
+                    .unwrap_or_else(|| archive_download_id(&appid));
                 (dir, save, name, id)
             }
             None => return Ok(json!({ "ok": false, "error": "no downloaded archive found" })),
