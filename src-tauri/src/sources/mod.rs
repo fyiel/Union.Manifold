@@ -310,7 +310,26 @@ pub fn capabilities_for(id: &str) -> Capabilities {
     }
 }
 
+fn simple_text_query(params: &QueryParams) -> Option<&str> {
+    let query = params.text.as_deref()?.trim();
+    (!query.is_empty()
+        && params.tags.is_empty()
+        && params.min_year.is_none()
+        && params.max_year.is_none()
+        && params.min_size_bytes.is_none()
+        && params.max_size_bytes.is_none()
+        && matches!(params.sort.as_deref(), None | Some("relevance"))
+        && params.order.is_none()
+        && !params.balanced)
+        .then_some(query)
+}
+
 async fn adapter_query(id: &str, params: &QueryParams) -> Option<Vec<SourceGame>> {
+    if id == "unioncrax" {
+        if let Some(query) = simple_text_query(params) {
+            return Some(adapters::unioncrax::search(query, params.limit).await);
+        }
+    }
     match id {
         "unioncrax" => adapters::unioncrax::query(params).await,
         "gamebounty" => adapters::gamebounty::query(params).await,
@@ -1098,6 +1117,41 @@ mod tests {
         assert_eq!(result.games.len(), MAX_PAGE_SIZE);
         assert!(result.games[0].sources[0].download_options.is_empty());
         assert!(result.games[0].sources[0].direct);
+    }
+
+    #[test]
+    fn only_plain_relevance_queries_use_source_search() {
+        let plain = QueryParams {
+            text: Some(" wuchang ".to_string()),
+            sort: Some("relevance".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(simple_text_query(&plain), Some("wuchang"));
+
+        for filtered in [
+            QueryParams {
+                tags: vec!["RPG".to_string()],
+                ..plain.clone()
+            },
+            QueryParams {
+                min_year: Some(2025),
+                ..plain.clone()
+            },
+            QueryParams {
+                sort: Some("latest".to_string()),
+                ..plain.clone()
+            },
+            QueryParams {
+                order: Some("asc".to_string()),
+                ..plain.clone()
+            },
+            QueryParams {
+                balanced: true,
+                ..plain.clone()
+            },
+        ] {
+            assert_eq!(simple_text_query(&filtered), None);
+        }
     }
 }
 

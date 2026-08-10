@@ -27,6 +27,23 @@ async fn live_steamrip_query_finds_ballionaire() {
 
 #[tokio::test]
 #[ignore]
+async fn live_unioncrax_fast_search_preserves_wuchang_identity() {
+    let games = adapters::unioncrax::search("wuchang", 48).await;
+    let game = games
+        .iter()
+        .find(|game| game.title == "Wuchang: Fallen Feathers")
+        .expect("Wuchang search result");
+    assert_eq!(game.source_slug, "171225");
+
+    let detail = adapters::unioncrax::get_detail(&game.source_slug)
+        .await
+        .expect("Wuchang detail");
+    assert_eq!(detail.steam_app_id, Some(2_277_560));
+    assert!(!detail.download_options.is_empty());
+}
+
+#[tokio::test]
+#[ignore]
 async fn live_zeigames_query_returns_current_downloads() {
     let games = adapters::zeigames::query(&QueryParams {
         limit: 10,
