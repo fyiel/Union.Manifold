@@ -442,7 +442,7 @@ fn present_toast(app: &AppHandle, payload: &AchievementUnlock) {
 }
 
 fn build_toast_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
-    let window = WebviewWindowBuilder::new(
+    let builder = WebviewWindowBuilder::new(
         app,
         "achievement-toast",
         WebviewUrl::App("index.html#/achievement-toast".into()),
@@ -450,7 +450,6 @@ fn build_toast_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     .title("Achievement unlocked")
     .inner_size(420.0, 112.0)
     .decorations(false)
-    .transparent(true)
     .always_on_top(true)
     .skip_taskbar(true)
     .resizable(false)
@@ -459,8 +458,13 @@ fn build_toast_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     .closable(false)
     .visible(false)
     .focused(false)
-    .shadow(false)
-    .build()?;
+    .shadow(false);
+    // Transparent windows on macOS require tauri's `macos-private-api`
+    // feature, which the app does not enable; the toast is opaque there,
+    // matching the pre-3.6.0 config-based window behavior.
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.transparent(true);
+    let window = builder.build()?;
     crate::enable_smooth_scrolling(&window);
     Ok(window)
 }
