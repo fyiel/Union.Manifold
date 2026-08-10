@@ -104,6 +104,17 @@ fn install_panic_hook() {
     }));
 }
 
+// WebKitGTK wheel scrolling is discrete by default: each notch is one jump,
+// which reads as "chunky". enable-smooth-scrolling animates scroll deltas.
+pub(crate) fn enable_smooth_scrolling(window: &tauri::WebviewWindow) {
+    let _ = window.with_webview(|webview| {
+        use webkit2gtk::{SettingsExt, WebViewExt};
+        if let Some(settings) = webview.inner().settings() {
+            settings.set_enable_smooth_scrolling(true);
+        }
+    });
+}
+
 pub fn run() {
     install_panic_hook();
     tauri::Builder::default()
@@ -214,6 +225,9 @@ pub fn run() {
                 sources::warm_hydralinks(hydra_handle).await;
             });
             build_tray(app)?;
+            if let Some(window) = app.get_webview_window("main") {
+                enable_smooth_scrolling(&window);
+            }
             {
                 let state: tauri::State<AppState> = app.state();
                 let start_minimized = state
