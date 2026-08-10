@@ -106,6 +106,9 @@ fn install_panic_hook() {
 
 // WebKitGTK wheel scrolling is discrete by default: each notch is one jump,
 // which reads as "chunky". enable-smooth-scrolling animates scroll deltas.
+// webkit2gtk is a Linux-only dependency, so the helper is a no-op elsewhere
+// (Windows/macOS use the JS shim in renderer/src/lib/wheel-smooth.ts).
+#[cfg(target_os = "linux")]
 pub(crate) fn enable_smooth_scrolling(window: &tauri::WebviewWindow) {
     let _ = window.with_webview(|webview| {
         use webkit2gtk::{SettingsExt, WebViewExt};
@@ -114,6 +117,9 @@ pub(crate) fn enable_smooth_scrolling(window: &tauri::WebviewWindow) {
         }
     });
 }
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn enable_smooth_scrolling(_window: &tauri::WebviewWindow) {}
 
 pub fn run() {
     install_panic_hook();
