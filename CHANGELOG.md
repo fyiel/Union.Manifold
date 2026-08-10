@@ -25,6 +25,9 @@ All notable changes to Union.Manifold. This project is a fork of
 - Game-detail and installed-game enrichment requests are shared while in
   flight, source details resolve with bounded parallelism, and background card
   hover no longer starts speculative network work.
+- Browse result streaming now merges source pools incrementally instead of
+  re-merging the whole pool per partial, flattening per-partial latency as
+  sources complete.
 
 ### Fixed
 
