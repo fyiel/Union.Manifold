@@ -284,6 +284,33 @@ impl DownloadEngine {
         } else {
             default_dir
         };
+        // A fresh part group supersedes the completed rows of any earlier
+        // group in the same directory: readiness must never count a
+        // superseded part toward the new group's part_total.
+        // A fresh group starts at part 1 with a brand-new id (re-downloads mint
+// fresh ids, retries reuse the failed row's id), so a superseded group's
+// completed rows are purged only when the caller is really starting a new
+// group — never when a failed part 1 is retried mid-group. Rows of the old
+// group that are still in flight are left alone: the in-flight block in
+// multi_part_ready (same appid+dir+part_total) keeps them from flipping the
+// new group's readiness early, and the renderer's per-game busy gate stops a
+// second group from starting while the first still works.
+if part_index.unwrap_or(1) == 1
+            && part_total.is_some_and(|t| t > 1)
+            && !st.by_id.contains_key(&id)
+        {
+            let purged: Vec<Download> = superseded_completed_rows(&st.by_id, &appid, &dir)
+                .into_iter()
+                .cloned()
+                .collect();
+            for row in purged {
+                let mut snap = row;
+                snap.status = "cancelled".to_string();
+                self.emit(&snap);
+                st.by_id.remove(&snap.id);
+                st.queue.retain(|x| x != &snap.id);
+            }
+        }
         // Wipe stale partials only when no other part of this update is
         // still downloading, queued or paused: removing the shared .updates
         // dir out from under an in-flight aria2 part unlinks its save file,
@@ -474,8 +501,13 @@ impl DownloadEngine {
         };
         st.queue.retain(|x| x != id);
         st.active.remove(id);
+        let should_reevaluate = snap.status == "cancelled";
         self.emit(&snap);
         drop(st);
+        if should_reevaluate {
+            // Outside the state lock: reevaluate_ready re-locks it.
+            self.reevaluate_ready(&snap);
+        }
         if archive_complete {
             write_manifest(&snap);
         }
@@ -707,6 +739,10 @@ impl DownloadEngine {
                 None
             }
         };
+        if let Some(dl) = &snap {
+            // Outside the state lock: reevaluate_ready re-locks it.
+            self.reevaluate_ready(dl);
+        }
         if let Some(dl) = snap {
             self.emit(&dl);
             write_manifest(&dl);
@@ -930,14 +966,7 @@ impl DownloadEngine {
         let ready = {
             let st = self.state.lock();
             match dl.part_total {
-                Some(total) if total > 1 => {
-                    let done = st
-                        .by_id
-                        .values()
-                        .filter(|d| d.appid == dl.appid && d.status == "completed")
-                        .count() as u64;
-                    done >= total
-                }
+                Some(total) if total > 1 => multi_part_ready(&st.by_id, &dl),
                 _ => !st.by_id.values().any(|d| {
                     d.appid == dl.appid
                         && d.id != dl.id
@@ -948,6 +977,10 @@ impl DownloadEngine {
         if !ready {
             return;
         }
+        self.try_auto_install(dl).await;
+    }
+
+    async fn try_auto_install(self: &Arc<Self>, dl: Download) {
         if !self.try_install_lock(&dl.appid) {
             return;
         }
@@ -964,6 +997,84 @@ impl DownloadEngine {
         .await;
         self.install_unlock(&appid);
     }
+
+    /// A part that terminates without completing (failed/cancelled) may be
+    /// the last straggler of an otherwise-complete group. on_complete never
+    /// runs for it, so without this the group would miss its install
+    /// entirely; the count gate keeps a genuinely incomplete group safe
+    /// (cancelled/failed rows do not count as done).
+    fn reevaluate_ready(self: &Arc<Self>, row: &Download) {
+        let Some(total) = row.part_total.filter(|t| *t > 1) else {
+            return;
+        };
+        let probe = {
+            let st = self.state.lock();
+            st.by_id
+                .values()
+                .filter(|d| {
+                    d.appid == row.appid
+                        && d.installing_dir == row.installing_dir
+                        && d.part_total == Some(total)
+                        && d.status == "completed"
+                })
+                .find(|p| multi_part_ready(&st.by_id, p))
+                .cloned()
+        };
+        if let Some(probe) = probe {
+            let this = self.clone();
+            tauri::async_runtime::spawn(async move {
+                this.try_auto_install(probe).await;
+            });
+        }
+    }
+}
+
+/// True when every part of `dl`'s group is downloaded and none of its parts
+/// is still working. Only rows of the same group count: same appid, same
+/// install directory (installs and updates use different dirs) and same
+/// part_total — plus the group must have no downloading/queued/paused row,
+/// so a superseded part that outlived the purge cannot flip readiness early.
+fn multi_part_ready(by_id: &HashMap<String, Download>, dl: &Download) -> bool {
+    let total = match dl.part_total {
+        Some(t) => t,
+        None => return false,
+    };
+    let done = by_id
+        .values()
+        .filter(|d| {
+            d.appid == dl.appid
+                && d.installing_dir == dl.installing_dir
+                && d.part_total == Some(total)
+                && d.status == "completed"
+        })
+        .count() as u64;
+    done >= total
+        && !by_id.values().any(|d| {
+            d.appid == dl.appid
+                && d.installing_dir == dl.installing_dir
+                && d.part_total == Some(total)
+                && matches!(d.status.as_str(), "downloading" | "queued" | "paused")
+        })
+}
+
+/// Completed part rows an enqueued group supersedes: same appid, same
+/// directory, from an earlier multi-part group (a re-download of the same
+/// game, or a mirror switch after parts failed). Single-part artifacts are
+/// left alone — pre-existing behavior.
+fn superseded_completed_rows<'a>(
+    by_id: &'a HashMap<String, Download>,
+    appid: &str,
+    dir: &Path,
+) -> Vec<&'a Download> {
+    by_id
+        .values()
+        .filter(|d| {
+            d.appid == appid
+                && d.installing_dir == dir
+                && d.status == "completed"
+                && d.part_total.is_some_and(|t| t > 1)
+        })
+        .collect()
 }
 
 fn write_manifest(dl: &Download) {
