@@ -18,7 +18,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::error::Result;
 use crate::state::AppState;
-use schema::SourceGame;
+use schema::{PartialPool, SourceGame};
 
 const POOL_SIZE: usize = 300;
 const MAX_PAGE_SIZE: usize = 100;
@@ -670,14 +670,14 @@ async fn run_query_stream(
                     (id, games)
                 });
             }
-            let mut acc = filters::PartialPool::new();
+            let mut pool: Vec<SourceGame> = Vec::new();
+            // Per-request incremental dedup index: built inside the get_or
+            // closure so it is never shared across requests or cache epochs.
+            let mut acc = PartialPool::new();
             let mut done: Vec<String> = Vec::new();
             let mut failed: Vec<String> = Vec::new();
             let mut status: Vec<filters::SourceStatus> = Vec::new();
             let mut errored = false;
-            let mut latest_ordered = Vec::new();
-            let mut latest_facets = filters::Facets { tags: Vec::new() };
-            let mut latest_total = 0;
             while !futs.is_empty() {
                 if !stream_request_current(req_id) {
                     return None;
@@ -705,7 +705,11 @@ async fn run_query_stream(
                     Some(g) => {
                         done.push(id.clone());
                         let n = g.len();
-                        acc.add_source(g);
+                        for game in g {
+                            let i = pool.len();
+                            pool.push(game);
+                            acc.push(&mut pool, i);
+                        }
                         status.push(filters::SourceStatus {
                             id,
                             ok: true,
@@ -726,35 +730,39 @@ async fn run_query_stream(
                         });
                     }
                 }
-                let (ordered, facets, total) = acc.snapshot(&p);
-                let page: Vec<schema::UnifiedGame> = ordered
-                    .iter()
-                    .skip(page_params.offset)
-                    .take(page_params.limit.min(MAX_PAGE_SIZE))
-                    .map(schema::UnifiedGame::browse_summary)
-                    .collect();
-                app.emit(
-                    "uc:browse-partial",
-                    json!({
-                        "reqId": req_id,
-                        "games": page,
-                        "total": total,
-                        "doneSources": done,
-                        "failedSources": failed,
-                    }),
-                )
-                .ok();
-                latest_ordered = ordered;
-                latest_facets = facets;
-                latest_total = total;
+                {
+                    let games = acc.snapshot();
+                    let (ordered, _facets, total) = filters::order_and_filter(games, &p);
+                    let page: Vec<schema::UnifiedGame> = ordered
+                        .iter()
+                        .skip(page_params.offset)
+                        .take(page_params.limit.min(MAX_PAGE_SIZE))
+                        .map(|g| g.browse_summary())
+                        .collect();
+                    app.emit(
+                        "uc:browse-partial",
+                        json!({
+                            "reqId": req_id,
+                            "games": page,
+                            "total": total,
+                            "doneSources": done,
+                            "failedSources": failed,
+                        }),
+                    )
+                    .ok();
+                }
             }
+            // Final pool goes through the batch path so the cached pool (and
+            // the last partial) is exactly what finalize_pool_cached produces
+            // for the complete pool.
+            let (ordered, facets, total) = filters::finalize_pool_cached(&mut pool, &p);
             let latest = std::sync::Arc::new(CachedPool {
-                ordered: latest_ordered,
-                facets: latest_facets,
-                total: latest_total,
+                ordered,
+                facets,
+                total,
                 errored,
                 status,
-                raw: acc.into_raw(),
+                raw: pool,
                 fetched_at_ms: now_ms(),
             });
             record_health(&latest.status);

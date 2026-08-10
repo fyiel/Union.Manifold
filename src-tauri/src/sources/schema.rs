@@ -145,6 +145,12 @@ impl UnifiedGame {
     }
 }
 
+impl AsRef<UnifiedGame> for UnifiedGame {
+    fn as_ref(&self) -> &UnifiedGame {
+        self
+    }
+}
+
 static EDITION_NOISE: &[&str] = &[
     "deluxe",
     "goty",
@@ -259,63 +265,74 @@ pub fn merge_games(mut records: Vec<SourceGame>) -> Vec<UnifiedGame> {
     merge_games_cached(&mut records)
 }
 
-pub(crate) fn positive_appid(r: &SourceGame) -> Option<u64> {
-    r.steam_app_id.filter(|v| *v > 0)
+pub(crate) fn merge_games_cached(records: &mut [SourceGame]) -> Vec<UnifiedGame> {
+    let mut pool = PartialPool::new();
+    for i in 0..records.len() {
+        pool.push(records, i);
+    }
+    pool.finalize_games()
 }
 
-pub(crate) fn titles_conflict(a: Option<u64>, b: Option<u64>) -> bool {
-    matches!((a, b), (Some(x), Some(y)) if x != y)
+/// Accumulated fold of one dedup group. The merge precedence rules from the
+/// former batch-only fold live here and in `fold_into`, so the batch path
+/// (`merge_games_cached` via `PartialPool`) and the incremental streaming path
+/// (`PartialPool` reused across partials) cannot drift.
+#[derive(Default)]
+struct GroupState {
+    title: String,
+    appid: Option<u64>,
+    description: Option<String>,
+    image: Option<String>,
+    hero_image: Option<String>,
+    developer: Option<String>,
+    release_date: Option<String>,
+    version: Option<String>,
+    size_bytes: Option<u64>,
+    size_text: Option<String>,
+    release_year: Option<i32>,
+    added_at: Option<i64>,
+    updated_at: Option<i64>,
+    genres: Vec<String>,
+    sources: Vec<SourceGame>,
 }
 
-/// Fold one source record into a unified game, applying the field precedence
-/// contract of the batch merge: title first-wins by record index, first
-/// positive appid, longest description, first image/hero/developer/release
-/// date/version/size, max year/added/updated, genres append-deduplicated,
-/// per-record sources pushed in record order, and a dedup_key recomputed as
-/// the accumulated appid or normalized title. This is the single fold used by
-/// both merge_games_cached and filters::PartialPool so the two paths cannot
-/// drift.
-pub(crate) fn fold_record_into(game: &mut UnifiedGame, r: &SourceGame) {
-    if game.title.is_empty() {
-        game.title = r.title.clone();
-        if game.steam_app_id.is_none() {
-            game.dedup_key = dedup_key_for(None, &game.title);
-        }
+/// Fold one record into a group state following the shared precedence rules:
+/// title first-wins by record index, first positive appid, longest description,
+/// first-wins image/hero/developer/release_date/version/size, max timestamps and
+/// year, genres append-dedup, sources in record order.
+fn fold_into(state: &mut GroupState, r: &SourceGame) {
+    if state.title.is_empty() {
+        state.title = r.title.clone();
     }
-    if game.steam_app_id.is_none() {
-        if let Some(id) = positive_appid(r) {
-            game.steam_app_id = Some(id);
-            game.dedup_key = dedup_key_for(Some(id), &game.title);
-        }
+    state.appid = state.appid.or(r.steam_app_id.filter(|v| *v > 0));
+    if better(&state.description, &r.description) {
+        state.description = r.description.clone();
     }
-    if better(&game.description, &r.description) {
-        game.description = r.description.clone();
+    if state.image.is_none() {
+        state.image = r.image.clone();
     }
-    if game.image.is_none() {
-        game.image = r.image.clone();
+    if state.hero_image.is_none() {
+        state.hero_image = r.hero_image.clone();
     }
-    if game.hero_image.is_none() {
-        game.hero_image = r.hero_image.clone();
+    if state.developer.is_none() {
+        state.developer = r.developer.clone();
     }
-    if game.developer.is_none() {
-        game.developer = r.developer.clone();
+    if state.release_date.is_none() {
+        state.release_date = r.release_date.clone();
     }
-    if game.release_date.is_none() {
-        game.release_date = r.release_date.clone();
+    if state.version.is_none() {
+        state.version = r.version.clone();
     }
-    if game.version.is_none() {
-        game.version = r.version.clone();
+    if state.size_bytes.is_none() {
+        state.size_bytes = r.size_bytes;
+        state.size_text = r.size_text.clone();
     }
-    if game.size_bytes.is_none() {
-        game.size_bytes = r.size_bytes;
-        game.size_text = r.size_text.clone();
-    }
-    game.release_year = max_opt(game.release_year, r.release_year);
-    game.added_at = max_opt(game.added_at, r.added_at);
-    game.updated_at = max_opt(game.updated_at, r.updated_at);
+    state.release_year = max_opt(state.release_year, r.release_year);
+    state.added_at = max_opt(state.added_at, r.added_at);
+    state.updated_at = max_opt(state.updated_at, r.updated_at);
     for g in &r.genres {
-        if !game.genres.contains(g) {
-            game.genres.push(g.clone());
+        if !state.genres.contains(g) {
+            state.genres.push(g.clone());
         }
     }
     let mut source = r.clone();
@@ -323,71 +340,225 @@ pub(crate) fn fold_record_into(game: &mut UnifiedGame, r: &SourceGame) {
         .download_options
         .iter()
         .any(|option| option.resolvable);
-    game.sources.push(source);
+    state.sources.push(source);
 }
 
-pub(crate) fn merge_games_cached(records: &mut [SourceGame]) -> Vec<UnifiedGame> {
-    for record in records.iter_mut() {
-        if record.normalized_title.is_empty() {
-            record.normalized_title = normalize_title(&record.title);
-        }
+fn materialize(state: &GroupState) -> UnifiedGame {
+    let appid = state.appid;
+    UnifiedGame {
+        steam_app_id: appid,
+        title: state.title.clone(),
+        description: state.description.clone(),
+        image: state.image.clone(),
+        hero_image: state.hero_image.clone(),
+        genres: state.genres.clone(),
+        developer: state.developer.clone(),
+        release_date: state.release_date.clone(),
+        release_year: state.release_year,
+        added_at: state.added_at,
+        updated_at: state.updated_at,
+        version: state.version.clone(),
+        size_bytes: state.size_bytes,
+        size_text: state.size_text.clone(),
+        sources: state.sources.clone(),
+        dedup_key: dedup_key_for(appid, &state.title),
+        fully_resolved: false,
     }
-    let n = records.len();
-    let mut parent: Vec<usize> = (0..n).collect();
-    fn find(parent: &mut [usize], mut x: usize) -> usize {
-        while parent[x] != x {
-            parent[x] = parent[parent[x]];
-            x = parent[x];
-        }
-        x
-    }
-    fn union(parent: &mut [usize], a: usize, b: usize) {
-        let ra = find(parent, a);
-        let rb = find(parent, b);
-        if ra != rb {
-            parent[ra] = rb;
+}
+
+struct Group {
+    /// Index of the group's earliest record: the stable sort key for output
+    /// order (groups are emitted by ascending first-record index, matching the
+    /// batch path).
+    first: usize,
+    /// Member record indices in ascending order. Needed to re-fold in index
+    /// order when two established groups merge through a bridging record.
+    members: Vec<usize>,
+    state: GroupState,
+    /// Last materialized game for this group, reused across partials until the
+    /// group is dirty, so streaming snapshots avoid re-cloning every game.
+    materialized: Option<UnifiedGame>,
+    dirty: bool,
+}
+
+/// Incremental dedup index over a streamed record pool. Mirrors exactly the
+/// dedup/conflict semantics of `merge_games_cached`: records link by positive
+/// steam appid, or by normalized title unless the first title claimant holds a
+/// different positive appid (conflict keeps them separate). Records arrive in
+/// index order, so each record folds into its group once; only the rare bridge
+/// case (a record linking two established groups) re-folds.
+pub struct PartialPool {
+    parent: Vec<usize>,
+    size: Vec<usize>,
+    by_appid: HashMap<u64, usize>,
+    by_title: HashMap<String, usize>,
+    groups: HashMap<usize, Group>,
+}
+
+impl PartialPool {
+    pub fn new() -> Self {
+        PartialPool {
+            parent: Vec::new(),
+            size: Vec::new(),
+            by_appid: HashMap::new(),
+            by_title: HashMap::new(),
+            groups: HashMap::new(),
         }
     }
 
-    let mut by_appid: HashMap<u64, usize> = HashMap::new();
-    let mut by_title: HashMap<String, usize> = HashMap::new();
-    for (i, r) in records.iter().enumerate() {
-        if let Some(id) = positive_appid(r) {
-            if let Some(&j) = by_appid.get(&id) {
-                union(&mut parent, i, j);
+    /// Index record `i` (which must already be in `records`) and fold it into
+    /// its dedup group. Memoizes `normalized_title` on the record (frozen
+    /// pipeline), so repeated calls on the same slice stay cached.
+    pub fn push(&mut self, records: &mut [SourceGame], i: usize) {
+        if records[i].normalized_title.is_empty() {
+            records[i].normalized_title = normalize_title(&records[i].title);
+        }
+        while self.parent.len() <= i {
+            self.parent.push(self.parent.len());
+            self.size.push(1);
+        }
+        self.groups.insert(
+            i,
+            Group {
+                first: i,
+                members: vec![i],
+                state: GroupState::default(),
+                materialized: None,
+                dirty: true,
+            },
+        );
+        let appid = records[i].steam_app_id.filter(|v| *v > 0);
+        let key = records[i].normalized_title.clone();
+        if let Some(id) = appid {
+            if let Some(&j) = self.by_appid.get(&id) {
+                self.join(records, i, j);
             } else {
-                by_appid.insert(id, i);
+                self.by_appid.insert(id, i);
             }
         }
-        let key = &r.normalized_title;
         if !key.is_empty() {
-            if let Some(&j) = by_title.get(key) {
-                if !titles_conflict(positive_appid(r), positive_appid(&records[j])) {
-                    union(&mut parent, i, j);
+            if let Some(&j) = self.by_title.get(&key) {
+                let other = records[j].steam_app_id.filter(|v| *v > 0);
+                let conflict = matches!((appid, other), (Some(x), Some(y)) if x != y);
+                if !conflict {
+                    self.join(records, i, j);
                 }
             } else {
-                by_title.insert(key.clone(), i);
+                self.by_title.insert(key, i);
             }
         }
-    }
-
-    let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
-    for i in 0..n {
-        let root = find(&mut parent, i);
-        groups.entry(root).or_default().push(i);
-    }
-    let mut groups: Vec<Vec<usize>> = groups.into_values().collect();
-    groups.sort_by_key(|idxs| idxs[0]);
-
-    let mut out = Vec::new();
-    for idxs in groups {
-        let mut game = UnifiedGame::default();
-        for &i in &idxs {
-            fold_record_into(&mut game, &records[i]);
+        if self.groups.contains_key(&i) {
+            let group = self.groups.get_mut(&i).unwrap();
+            fold_into(&mut group.state, &records[i]);
         }
-        out.push(game);
     }
-    out
+
+    /// Materialize every dirty group and return references to all games in
+    /// first-record-index order. Clean groups reuse their previous
+    /// materialization, so repeated partials only clone groups that changed.
+    pub fn snapshot(&mut self) -> Vec<&UnifiedGame> {
+        let roots: Vec<usize> = self.groups.keys().copied().collect();
+        for root in roots {
+            let group = self.groups.get_mut(&root).unwrap();
+            if group.dirty {
+                group.materialized = Some(materialize(&group.state));
+                group.dirty = false;
+            }
+        }
+        let mut ordered: Vec<(usize, usize)> = self
+            .groups
+            .iter()
+            .map(|(&root, group)| (group.first, root))
+            .collect();
+        ordered.sort_unstable();
+        ordered
+            .into_iter()
+            .map(|(_, root)| self.groups.get(&root).unwrap().materialized.as_ref().unwrap())
+            .collect()
+    }
+
+    /// One-shot owned materialization of every group in first-record-index
+    /// order (the batch path).
+    pub fn finalize_games(&self) -> Vec<UnifiedGame> {
+        let mut ordered: Vec<(usize, usize)> = self
+            .groups
+            .iter()
+            .map(|(&root, group)| (group.first, root))
+            .collect();
+        ordered.sort_unstable();
+        ordered
+            .into_iter()
+            .map(|(_, root)| materialize(&self.groups.get(&root).unwrap().state))
+            .collect()
+    }
+
+    fn find(&mut self, mut x: usize) -> usize {
+        let mut root = x;
+        while self.parent[root] != root {
+            root = self.parent[root];
+        }
+        while self.parent[x] != root {
+            let next = self.parent[x];
+            self.parent[x] = root;
+            x = next;
+        }
+        root
+    }
+
+    /// Merge record `i`'s group with the group containing `j`. When `i` is a
+    /// freshly pushed singleton this is an O(1) incremental fold; when two
+    /// established groups meet (the bridging-record case) the combined members
+    /// are re-folded in index order from the records.
+    fn join(&mut self, records: &[SourceGame], i: usize, j: usize) {
+        let ri = self.find(i);
+        let rj = self.find(j);
+        if ri == rj {
+            return;
+        }
+        let fresh = self.groups[&ri].members.len() == 1 && self.groups[&ri].members[0] == i;
+        if fresh {
+            self.parent[ri] = rj;
+            self.size[rj] += 1;
+            let group = self.groups.get_mut(&rj).unwrap();
+            group.members.push(i);
+            fold_into(&mut group.state, &records[i]);
+            group.materialized = None;
+            group.dirty = true;
+            self.groups.remove(&ri);
+            return;
+        }
+        let (big, small) = if self.size[ri] >= self.size[rj] {
+            (ri, rj)
+        } else {
+            (rj, ri)
+        };
+        self.parent[small] = big;
+        self.size[big] += self.size[small];
+        let small_group = self.groups.remove(&small).unwrap();
+        let big_group = self.groups.get_mut(&big).unwrap();
+        let mut members = Vec::with_capacity(big_group.members.len() + small_group.members.len());
+        let (mut a, mut b) = (0, 0);
+        while a < big_group.members.len() && b < small_group.members.len() {
+            if big_group.members[a] < small_group.members[b] {
+                members.push(big_group.members[a]);
+                a += 1;
+            } else {
+                members.push(small_group.members[b]);
+                b += 1;
+            }
+        }
+        members.extend_from_slice(&big_group.members[a..]);
+        members.extend_from_slice(&small_group.members[b..]);
+        big_group.members = members;
+        big_group.first = big_group.first.min(small_group.first);
+        let mut state = GroupState::default();
+        for &m in &big_group.members {
+            fold_into(&mut state, &records[m]);
+        }
+        big_group.state = state;
+        big_group.materialized = None;
+        big_group.dirty = true;
+    }
 }
 
 fn better(cur: &Option<String>, cand: &Option<String>) -> bool {

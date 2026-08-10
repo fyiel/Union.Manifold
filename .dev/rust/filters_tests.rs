@@ -270,6 +270,46 @@ fn benchmark_progressive_source_finalization() {
 }
 
 #[test]
+#[ignore = "measurement helper; run explicitly with --ignored --nocapture"]
+fn benchmark_incremental_pool_merge() {
+    let mut p = params();
+    p.balanced = true;
+    let source_pool = large_source_pool(true);
+    let batches: Vec<Vec<_>> = source_pool
+        .chunks(300)
+        .map(<[SourceGame]>::to_vec)
+        .collect();
+
+    let mut pool: Vec<SourceGame> = Vec::with_capacity(2_400);
+    let batch_started = std::time::Instant::now();
+    for mut batch in batches.clone() {
+        pool.append(&mut batch);
+        std::hint::black_box(finalize_pool_cached(&mut pool, &p));
+    }
+    let batch_progressive = batch_started.elapsed();
+
+    let mut acc = crate::sources::schema::PartialPool::new();
+    let mut pool: Vec<SourceGame> = Vec::with_capacity(2_400);
+    let incremental_started = std::time::Instant::now();
+    for batch in batches {
+        for game in batch {
+            let i = pool.len();
+            pool.push(game);
+            acc.push(&mut pool, i);
+        }
+        let games = acc.snapshot();
+        std::hint::black_box(order_and_filter(games, &p));
+    }
+    let incremental = incremental_started.elapsed();
+    eprintln!(
+        "source_progressive_batch_ms={} incremental_partial_ms={} speedup={:.1}x",
+        batch_progressive.as_millis(),
+        incremental.as_millis(),
+        batch_progressive.as_secs_f64() / incremental.as_secs_f64(),
+    );
+}
+
+#[test]
 fn finalize_pool_balanced_interleaves_sources_round_robin() {
     let pool = vec![
         game("alpha", "A1"),

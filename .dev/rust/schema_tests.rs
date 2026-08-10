@@ -239,3 +239,111 @@ fn merge_games_appid_bridges_title_variants_transitively() {
     assert_eq!(out[0].dedup_key, "steam:777");
     assert_eq!(out[0].sources.len(), 3);
 }
+
+fn pool_game(source: &str, title: &str, appid: Option<u64>, genres: &[&str]) -> SourceGame {
+    let mut g = SourceGame {
+        source_id: source.to_string(),
+        title: title.to_string(),
+        steam_app_id: appid,
+        ..Default::default()
+    };
+    g.genres = genres.iter().map(|s| s.to_string()).collect();
+    g
+}
+
+#[test]
+fn partial_pool_matches_batch_merge_at_every_prefix() {
+    let records: Vec<SourceGame> = vec![
+        pool_game("steamrip", "Portal 2 Deluxe", Some(620), &["Action"]),
+        pool_game("gamebounty", "Portal 2", Some(620), &["Puzzle"]),
+        pool_game("onlinefix", "Portal 2 (v1.0)", None, &["Co-op"]),
+        pool_game("steamrip", "Dark Souls Remastered", None, &["RPG"]),
+        pool_game("gamebounty", "Dark Souls", None, &["Action"]),
+        pool_game("steamrip", "Overcooked", Some(100), &["Party"]),
+        pool_game("gamebounty", "Overcooked", Some(200), &["Party"]),
+        pool_game("kaoskrew", "Outer Wilds (Director's Cut)", None, &["Exploration"]),
+        pool_game("steamrip", "Outer Wilds", None, &["Mystery"]),
+        pool_game("gog", "Bridger", None, &[]),
+        pool_game("empress", "Something Else", Some(4242), &["Racing"]),
+        pool_game("onlinefix", "Bridger Remastered", Some(4242), &["Open World"]),
+    ];
+    let mut all = records.clone();
+    let mut acc = PartialPool::new();
+    for i in 0..records.len() {
+        acc.push(&mut all, i);
+        let incremental = serde_json::to_value(acc.snapshot()).unwrap();
+        let batch = serde_json::to_value(merge_games_cached(&mut all[..=i])).unwrap();
+        assert_eq!(incremental, batch, "prefix {i} diverged");
+    }
+}
+
+#[test]
+fn partial_pool_snapshot_is_stable_and_matches_finalize() {
+    let mut all: Vec<SourceGame> = vec![
+        pool_game("steamrip", "Hades", Some(1145360), &["Roguelike"]),
+        pool_game("gamebounty", "Hades II", Some(1145350), &["Roguelike"]),
+        pool_game("onlinefix", "Hades", None, &["Action"]),
+    ];
+    let mut acc = PartialPool::new();
+    for i in 0..all.len() {
+        acc.push(&mut all, i);
+    }
+    let first = serde_json::to_value(acc.snapshot()).unwrap();
+    let second = serde_json::to_value(acc.snapshot()).unwrap();
+    assert_eq!(first, second);
+    assert_eq!(first, serde_json::to_value(acc.finalize_games()).unwrap());
+}
+
+#[test]
+fn partial_pool_emits_batch_equal_results_across_source_batches() {
+    let batches = [
+        vec![
+            pool_game("steamrip", "Elden Ring", Some(1245620), &["Action"]),
+            pool_game("steamrip", "Sekiro", Some(814380), &["Action"]),
+        ],
+        vec![
+            pool_game("gamebounty", "Elden Ring Deluxe", Some(1245620), &["RPG"]),
+            pool_game("gamebounty", "Hollow Knight", None, &["Metroidvania"]),
+        ],
+        vec![
+            pool_game("onlinefix", "Elden Ring (v1.12)", None, &["Co-op"]),
+            pool_game("onlinefix", "Sekiro Shadows Die Twice", Some(814380), &["Stealth"]),
+        ],
+    ];
+    let mut all: Vec<SourceGame> = Vec::new();
+    let mut acc = PartialPool::new();
+    for (k, batch) in batches.iter().enumerate() {
+        for game in batch {
+            let i = all.len();
+            all.push(game.clone());
+            acc.push(&mut all, i);
+        }
+        let incremental = serde_json::to_value(acc.snapshot()).unwrap();
+        let batch_merge = serde_json::to_value(merge_games_cached(&mut all)).unwrap();
+        assert_eq!(incremental, batch_merge, "after batch {k} diverged");
+    }
+}
+
+#[test]
+fn partial_pool_first_claimant_appid_governs_title_conflicts() {
+    // The conflict check compares against the FIRST title claimant's appid
+    // only: a no-appid claimant admits later records regardless of their
+    // (different) appids, exactly like the batch path.
+    let records = vec![
+        pool_game("a", "Shared", None, &[]),
+        pool_game("b", "Shared", Some(1), &[]),
+        pool_game("c", "Shared", Some(2), &[]),
+        pool_game("d", "Shared", None, &[]),
+    ];
+    let mut all = records.clone();
+    let mut acc = PartialPool::new();
+    for i in 0..records.len() {
+        acc.push(&mut all, i);
+        let incremental = serde_json::to_value(acc.snapshot()).unwrap();
+        let batch = serde_json::to_value(merge_games_cached(&mut all[..=i])).unwrap();
+        assert_eq!(incremental, batch, "prefix {i} diverged");
+    }
+    let merged = merge_games(records);
+    assert_eq!(merged.len(), 1);
+    assert_eq!(merged[0].sources.len(), 4);
+}
