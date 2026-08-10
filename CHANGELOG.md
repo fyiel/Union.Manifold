@@ -3,6 +3,31 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.6.0
+
+### Added
+
+- Smooth inertial wheel scrolling: discrete wheel ticks now convert into a
+  velocity and glide with exponential decay, so mouse wheels and trackpads no
+  longer snap between positions. Native WebKitGTK smooth scrolling is also
+  enabled for keyboard and programmatic scrolls.
+
+- Dev-only performance harness (`UM_PERF=1`): boot marks, frame-interval
+  histogram, scroll-phase jank tracking, invoke latency, and scheduled JSONL
+  dumps. Inert in normal use.
+
+### Performance
+
+- The Browse grid renders a bounded window of the loaded catalog instead of
+  every game: DOM 3,464 -> ~1,290 nodes and img elements 163 -> 53 on a full
+  catalog, web-process memory -135 MB, and scroll frame max 100 ms -> 8 ms.
+  The window grows near the viewport bottom and trims on scroll-up.
+
+- The achievement-toast window is created on the first unlock instead of at
+  startup, dropping a second idle WebKitWebProcess (~240 MB) from every
+  session. First-unlock toasts pull their payload after the page mounts, which
+  also fixes a race that could show an empty toast that never auto-hid.
+
 ## 3.5.9
 
 ### Added
