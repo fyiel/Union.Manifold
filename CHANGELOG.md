@@ -7,6 +7,16 @@ All notable changes to Union.Manifold. This project is a fork of
 
 ### Added
 
+- GameBounty mirrors that split a title across several download links (for
+  example four RAR parts on one host) are now treated as a single multi-part
+  download group with a `(N parts)` label. All parts resolve together — any
+  part failing falls back to the browser instead of installing a partial
+  archive set — and the game auto-installs only once every part is on disk.
+  The "n parts" count also covers file hosts whose part folders contain more
+  than one file. Re-downloading a game, switching mirrors, or updating
+  supersedes the old part group, and a straggler that dies late can no longer
+  stall or prematurely complete the group's install.
+
 - WUCHANG: Fallen Feathers now has a native Nexus deployment profile. The
   Wuchang Mod Enabler keeps its `Project_Plague` tree at the game root, while
   ordinary `.pak`, `.utoc`, and `.ucas` mods install under
