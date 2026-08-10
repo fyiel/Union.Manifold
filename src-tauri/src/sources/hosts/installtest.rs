@@ -1,7 +1,6 @@
 use crate::http::{self, FetchOpts};
 use crate::install;
 use crate::sources::adapters;
-use crate::sources::hosts;
 use crate::sources::schema::{DownloadOption, SourceGame};
 use crate::sources::{QueryParams, ResolveResult};
 use futures::StreamExt;
@@ -74,10 +73,7 @@ async fn detail_of(source: &str, slug: &str) -> Option<SourceGame> {
 }
 
 async fn resolve_any(source: &str, opt: &DownloadOption) -> ResolveResult {
-    match source {
-        "unioncrax" => adapters::unioncrax::resolve_download(opt).await,
-        _ => hosts::resolve_url(opt).await,
-    }
+    crate::sources::adapter_resolve(source, opt).await
 }
 
 async fn download_to(

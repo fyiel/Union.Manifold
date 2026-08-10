@@ -371,10 +371,89 @@ async fn adapter_detail(id: &str, slug: &str) -> Option<SourceGame> {
     }
 }
 
-async fn adapter_resolve(id: &str, option: &schema::DownloadOption) -> ResolveResult {
+/// Resolve every part of a multi-part mirror and merge them into one result.
+/// All parts must resolve — a partial set of archives cannot extract, so the
+/// option falls back to the browser unless the whole mirror comes through.
+/// Parts of one mirror share a host, so the first part's headers apply to all.
+async fn resolve_mirror_parts(option: &schema::DownloadOption) -> ResolveResult {
+    let urls: Vec<String> = std::iter::once(option.url.clone().unwrap_or_default())
+        .chain(option.parts.iter().cloned())
+        .filter(|u| !u.is_empty())
+        .collect();
+    if urls.is_empty() {
+        return ResolveResult {
+            resolvable: false,
+            reason: Some("multi-part option has no part urls".to_string()),
+            ..Default::default()
+        };
+    }
+    let mut files: Vec<ResolvedFile> = Vec::new();
+    let mut headers: Option<std::collections::HashMap<String, String>> = None;
+    for (i, url) in urls.iter().enumerate() {
+        let part = schema::DownloadOption {
+            url: Some(url.clone()),
+            ..Default::default()
+        };
+        let res = hosts::resolve_url(&part).await;
+        if !res.resolvable {
+            let reason = res.reason.unwrap_or_default();
+            let suffix = if reason.is_empty() {
+                String::new()
+            } else {
+                format!(": {reason}")
+            };
+            return ResolveResult {
+                resolvable: false,
+                open_url: Some(url.clone()),
+                reason: Some(format!("part {} of {} failed{suffix}", i + 1, urls.len())),
+                ..Default::default()
+            };
+        }
+        match res.files {
+            Some(mut fs) => {
+                fs.retain(|f| !files.iter().any(|g| g.url == f.url && g.file_name == f.file_name));
+                files.append(&mut fs)
+            }
+            None => {
+                if let Some(url) = res.url {
+                    let file = ResolvedFile {
+                        url: url.clone(),
+                        file_name: res.file_name,
+                        size_bytes: res.size_bytes,
+                    };
+                    if !files.iter().any(|g| g.url == file.url) {
+                        // Same host serves part archives once; URL variants
+                        // (trailing slash, query, case) would double-enqueue.
+                        files.push(file);
+                    }
+                }
+            }
+        }
+        if headers.is_none() {
+            headers = res.headers.filter(|h| !h.is_empty());
+        }
+    }
+    if files.is_empty() {
+        return ResolveResult {
+            resolvable: false,
+            open_url: Some(urls[0].clone()),
+            reason: Some("no part resolved to a downloadable file".to_string()),
+            ..Default::default()
+        };
+    }
+    ResolveResult {
+        resolvable: true,
+        files: Some(files),
+        headers,
+        ..Default::default()
+    }
+}
+
+pub(crate) async fn adapter_resolve(id: &str, option: &schema::DownloadOption) -> ResolveResult {
     match id {
         "unioncrax" => adapters::unioncrax::resolve_download(option).await,
-        _ => hosts::resolve_url(option).await,
+        _ if option.parts.is_empty() => hosts::resolve_url(option).await,
+        _ => resolve_mirror_parts(option).await,
     }
 }
 
@@ -907,9 +986,9 @@ pub async fn sources_resolve(
     source_id: String,
     option: schema::DownloadOption,
 ) -> Result<Value> {
-    // Non-unioncrax sources resolve through hosts::resolve_url, which falls
-    // back to Slipgate for gated hosts (datanodes/datavaults/gate) when the
-    // native resolver cannot clear the page.
+    // Non-unioncrax sources resolve through hosts::resolve_url (with a
+    // Slipgate fallback for gated hosts); multi-part mirrors resolve every
+    // part and merge the files so the renderer enqueues the whole set.
     let result = adapter_resolve(&source_id, &option).await;
     Ok(json!({ "ok": true, "result": result }))
 }

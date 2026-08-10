@@ -54,6 +54,7 @@ declare global {
     sizeBytes?: number
     sizeText?: string
     resolvable: boolean
+    parts?: string[]
   }
   type SourceGame = {
     sourceId: string

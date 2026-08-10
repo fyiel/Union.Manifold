@@ -17,6 +17,10 @@ pub struct DownloadOption {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size_text: Option<String>,
     pub resolvable: bool,
+    /// Extra part URLs of a multi-part mirror. `url` is part one; extraction
+    /// only succeeds once every part is downloaded into the same directory.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]

@@ -223,6 +223,7 @@ fn large_source_pool(overlap: bool) -> Vec<SourceGame> {
                     size_bytes: Some(1_234_567_890),
                     size_text: None,
                     resolvable: true,
+                    parts: Vec::new(),
                 })
                 .collect();
             pool.push(entry);

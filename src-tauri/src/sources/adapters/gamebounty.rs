@@ -148,30 +148,56 @@ fn mirrors_to_options(container: Option<&Value>) -> Vec<DownloadOption> {
             .and_then(|l| l.as_array())
             .cloned()
             .unwrap_or_default();
+        let mut urls: Vec<String> = Vec::new();
         for link in &links {
-            let url = match get_str(link, "url") {
-                Some(u) => u,
-                None => continue,
-            };
-            let host_type = detect_host_type(&url);
-            let link_size = get_str(link, "file_size");
-            let size_bytes = link_size
+            if let Some(url) = get_str(link, "url") {
+                if !urls.contains(&url) {
+                    urls.push(url);
+                }
+            }
+        }
+        if urls.is_empty() {
+            continue;
+        }
+        // A mirror with several links is one game split into parts: every
+        // link must download before extraction can start. Group them into a
+        // single option carrying the remaining part URLs.
+        let multi = urls.len() > 1;
+        let host_type = detect_host_type(&urls[0]);
+        let label = mirror_name.unwrap_or_else(|| host_type.clone());
+        let label = if multi {
+            format!("{label} ({} parts)", urls.len())
+        } else {
+            label
+        };
+        // Parts carry no per-link sizes in the API, so the container's
+        // aggregate size is the honest number for a multi-part mirror.
+        let link_size = get_str(&links[0], "file_size");
+        let size_bytes = if multi {
+            data_size_bytes
+                .or_else(|| data_size_human.as_deref().and_then(schema::parse_size_to_bytes))
+        } else {
+            link_size
                 .as_deref()
                 .or(data_size_human.as_deref())
                 .and_then(schema::parse_size_to_bytes)
-                .or(data_size_bytes);
-            let size_text = link_size.clone().or_else(|| data_size_human.clone());
-            let resolvable = is_resolvable(&url);
-            options.push(DownloadOption {
-                label: mirror_name.clone().unwrap_or_else(|| host_type.clone()),
-                host_type,
-                url: Some(url),
-                page_url: None,
-                size_bytes,
-                size_text: size_text.filter(|s| !s.is_empty()),
-                resolvable,
-            });
-        }
+                .or(data_size_bytes)
+        };
+        let size_text = if multi {
+            data_size_human.clone()
+        } else {
+            link_size.clone().or_else(|| data_size_human.clone())
+        };
+        options.push(DownloadOption {
+            label,
+            host_type,
+            url: Some(urls[0].clone()),
+            page_url: None,
+            size_bytes,
+            size_text: size_text.filter(|s| !s.is_empty()),
+            resolvable: urls.iter().any(|u| is_resolvable(u)),
+            parts: if multi { urls[1..].to_vec() } else { Vec::new() },
+        });
     }
     options.sort_by_key(|x| std::cmp::Reverse(x.resolvable));
     options
@@ -346,4 +372,114 @@ pub async fn get_detail(slug: &str) -> Option<SourceGame> {
             post_to_game(&data)
         })
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn container(mirrors: Value) -> Value {
+        json!({
+            "data": {
+                "name": "game",
+                "size_human": "65.0 GB",
+                "size_bytes": 69793218560_u64,
+                "mirrors": mirrors,
+            }
+        })
+    }
+
+    #[test]
+    fn single_link_mirror_stays_one_option_without_parts() {
+        let options = mirrors_to_options(Some(&container(json!([
+            { "name": "pixeldrain.com", "links": [
+                { "url": "https://pixeldrain.com/u/AbCdEf" },
+            ] },
+        ]))));
+        assert_eq!(options.len(), 1);
+        assert_eq!(options[0].label, "pixeldrain.com");
+        assert_eq!(options[0].url.as_deref(), Some("https://pixeldrain.com/u/AbCdEf"));
+        assert!(options[0].parts.is_empty());
+        assert_eq!(options[0].size_bytes, Some(69793218560));
+        assert_eq!(options[0].size_text.as_deref(), Some("65.0 GB"));
+    }
+
+    #[test]
+    fn multi_link_mirror_groups_into_one_option_with_parts_in_order() {
+        let options = mirrors_to_options(Some(&container(json!([
+            { "name": "gofile.io", "links": [
+                { "url": "https://gofile.io/d/AAAA" },
+                { "url": "https://gofile.io/d/BBBB" },
+                { "url": "https://gofile.io/d/CCCC" },
+            ] },
+        ]))));
+        assert_eq!(options.len(), 1);
+        assert_eq!(options[0].label, "gofile.io (3 parts)");
+        assert_eq!(options[0].url.as_deref(), Some("https://gofile.io/d/AAAA"));
+        assert_eq!(
+            options[0].parts,
+            vec![
+                "https://gofile.io/d/BBBB".to_string(),
+                "https://gofile.io/d/CCCC".to_string(),
+            ]
+        );
+        assert_eq!(options[0].host_type, "gofile");
+        assert_eq!(options[0].size_bytes, Some(69793218560));
+        assert_eq!(options[0].size_text.as_deref(), Some("65.0 GB"));
+        assert!(options[0].resolvable);
+    }
+
+    #[test]
+    fn duplicate_links_are_deduped_preserving_first_position() {
+        let options = mirrors_to_options(Some(&container(json!([
+            { "name": "pixeldrain.com", "links": [
+                { "url": "https://pixeldrain.com/u/AAAA" },
+                { "url": "https://pixeldrain.com/u/AAAA" },
+                { "url": "https://pixeldrain.com/u/BBBB" },
+            ] },
+        ]))));
+        assert_eq!(options.len(), 1, "duplicate links stay one mirror");
+        assert_eq!(options[0].label, "pixeldrain.com (2 parts)");
+        assert_eq!(options[0].url.as_deref(), Some("https://pixeldrain.com/u/AAAA"));
+        assert_eq!(
+            options[0].parts,
+            vec!["https://pixeldrain.com/u/BBBB".to_string()]
+        );
+    }
+
+    #[test]
+    fn mirrors_without_links_or_urls_are_skipped() {
+        let options = mirrors_to_options(Some(&container(json!([
+            { "name": "empty.io", "links": [] },
+            { "name": "dead.io", "links": [{ "id": "1", "status": "unknown" }] },
+        ]))));
+        assert!(options.is_empty());
+    }
+
+    #[test]
+    fn null_container_yields_no_options() {
+        assert!(mirrors_to_options(None).is_empty());
+    }
+
+    #[test]
+    fn mixed_mirrors_keep_separate_options_with_aggregate_sizes() {
+        let options = mirrors_to_options(Some(&container(json!([
+            { "name": "fileditchfiles.me", "links": [
+                { "url": "https://fileditchfiles.me/f/A.part1.rar" },
+                { "url": "https://fileditchfiles.me/f/A.part2.rar" },
+            ] },
+            { "name": "0853.st", "links": [
+                { "url": "https://0853.st/X.rar" },
+            ] },
+        ]))));
+        assert_eq!(options.len(), 2);
+        let multi = options.iter().find(|o| !o.parts.is_empty()).unwrap();
+        assert_eq!(multi.label, "fileditchfiles.me (2 parts)");
+        assert_eq!(multi.url.as_deref(), Some("https://fileditchfiles.me/f/A.part1.rar"));
+        assert_eq!(multi.parts, vec!["https://fileditchfiles.me/f/A.part2.rar".to_string()]);
+        let single = options.iter().find(|o| o.parts.is_empty()).unwrap();
+        assert_eq!(single.label, "0853.st");
+        assert_eq!(single.size_bytes, Some(69793218560));
+    }
 }
