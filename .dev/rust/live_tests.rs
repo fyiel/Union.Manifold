@@ -150,6 +150,70 @@ async fn live_gamebounty_datanodes_fileditch_and_gofile() {
 
 #[tokio::test]
 #[ignore]
+async fn live_gamebounty_multipart_resolves_every_part() {
+    // Known multi-part titles first, then scan the recent catalog. Mirrors
+    // rot independently, so try every multi-part option until one resolves
+    // fully; the assertion is '>= parts' because a part folder may span
+    // several files.
+    let mut candidates: Vec<DownloadOption> = Vec::new();
+    for slug in ["elden-ring", "red-dead-redemption-2", "hogwarts-legacy"] {
+        if let Some(detail) = adapters::gamebounty::get_detail(slug).await {
+            candidates.extend(
+                detail
+                    .download_options
+                    .into_iter()
+                    .filter(|option| !option.parts.is_empty()),
+            );
+        }
+    }
+    if candidates.is_empty() {
+        let games = adapters::gamebounty::query(&QueryParams {
+            limit: 60,
+            ..Default::default()
+        })
+        .await
+        .expect("GameBounty catalog");
+        'scan: for game in games {
+            let Some(detail) = adapters::gamebounty::get_detail(&game.source_slug).await else {
+                continue;
+            };
+            for option in detail.download_options {
+                if !option.parts.is_empty() {
+                    candidates.push(option);
+                    break 'scan;
+                }
+            }
+        }
+    }
+    assert!(
+        !candidates.is_empty(),
+        "no multi-part GameBounty mirror found in the catalog"
+    );
+    let mut failures = Vec::new();
+    for option in &candidates {
+        eprintln!("trying multi-part option: {} parts={}", option.label, option.parts.len() + 1);
+        let result = super::adapter_resolve("gamebounty", option).await;
+        if result.resolvable {
+            let files = result.files.expect("merged part files");
+            assert!(
+                files.len() > option.parts.len(),
+                "every part must yield at least one downloadable file: got {} for {} parts",
+                files.len(),
+                option.parts.len() + 1,
+            );
+            return;
+        }
+        failures.push(format!(
+            "{}: {}",
+            option.label,
+            result.reason.unwrap_or_else(|| "unresolvable".to_string())
+        ));
+    }
+    panic!("no multi-part mirror resolved: {}", failures.join(" | "));
+}
+
+#[tokio::test]
+#[ignore]
 async fn live_every_source_returns_current_games() {
     let params = QueryParams {
         limit: 10,
