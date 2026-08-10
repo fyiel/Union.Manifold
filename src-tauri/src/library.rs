@@ -28,6 +28,14 @@ static SCAN_CACHE: LazyLock<Mutex<HashMap<String, ScanSnapshot>>> =
 static SCAN_GATE: Mutex<()> = Mutex::new(());
 const SCAN_TTL: Duration = Duration::from_millis(10_000);
 
+/// Test-only serialization. `remove_dir_unless_installed` relies on
+/// SCAN_CACHE staying warm across its internal find_dir, but concurrent tests
+/// calling invalidate_scan() clear it — on CI timings the corrupt-manifest
+/// test could then miss the dir and skip the removal. Cache-touching tests
+/// hold this lock so they never interleave.
+#[cfg(test)]
+pub(crate) static SCAN_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
 pub(crate) fn scan_roots(state: &AppState) -> Vec<PathBuf> {
     let mut roots = vec![state.download_root()];
     for p in legacy_roots(state) {

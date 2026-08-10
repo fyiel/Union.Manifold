@@ -13,6 +13,7 @@ fn stub(root: &std::path::Path, folder: &str, manifest: &Value) -> PathBuf {
 
 #[test]
 fn installing_delete_never_touches_an_installed_game_dir() {
+    let _scan_guard = crate::library::SCAN_TEST_LOCK.lock();
     let tmp = tempfile::tempdir().unwrap();
     let dir = stub(
         tmp.path(),
@@ -31,6 +32,7 @@ fn installing_delete_never_touches_an_installed_game_dir() {
 
 #[test]
 fn installing_delete_removes_every_non_installed_status() {
+    let _scan_guard = crate::library::SCAN_TEST_LOCK.lock();
     for status in [
         "installing",
         "queued",
@@ -57,6 +59,7 @@ fn installing_delete_removes_every_non_installed_status() {
 
 #[test]
 fn installing_delete_removes_dir_with_unreadable_manifest() {
+    let _scan_guard = crate::library::SCAN_TEST_LOCK.lock();
     let tmp = tempfile::tempdir().unwrap();
     let dir = stub(
         tmp.path(),
@@ -76,6 +79,7 @@ fn installing_delete_removes_dir_with_unreadable_manifest() {
 
 #[test]
 fn manifest_without_status_counts_as_installed_and_is_protected() {
+    let _scan_guard = crate::library::SCAN_TEST_LOCK.lock();
     let tmp = tempfile::tempdir().unwrap();
     let dir = stub(tmp.path(), "legacy", &json!({ "appid": "old-1" }));
     let roots = vec![tmp.path().to_path_buf()];
@@ -184,6 +188,7 @@ fn dirs_without_manifest_are_invisible_to_the_library() {
 #[test]
 #[ignore = "measurement helper; run explicitly with --ignored --nocapture"]
 fn benchmark_large_library_scan_and_warm_lists() {
+    let _scan_guard = crate::library::SCAN_TEST_LOCK.lock();
     let tmp = tempfile::tempdir().unwrap();
     for i in 0..2_000 {
         stub(
