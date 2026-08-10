@@ -1,13 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, OnceLock};
 use std::time::Duration;
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, State};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 use crate::downloads::now_ms;
 use crate::state::AppState;
@@ -385,14 +385,90 @@ fn toast_fallback(app: &AppHandle, payload: &AchievementUnlock) {
     );
 }
 
+// The toast window is created lazily on the first unlock instead of at
+// startup: a hidden second WebKitWebProcess (~240 MB) was being kept alive
+// for an empty 10x10 page for the whole session. Once created it is reused;
+// `achievements_toast_hide` still works against it.
+static TOAST_PENDING: OnceLock<Mutex<Vec<AchievementUnlock>>> = OnceLock::new();
+static TOAST_SPAWNING: AtomicBool = AtomicBool::new(false);
+
+fn take_pending_toasts() -> Vec<AchievementUnlock> {
+    TOAST_PENDING
+        .get()
+        .and_then(|queue| {
+            let mut queue = queue.lock();
+            if queue.is_empty() {
+                None
+            } else {
+                Some(std::mem::take(&mut *queue))
+            }
+        })
+        .unwrap_or_default()
+}
+
 fn present_toast(app: &AppHandle, payload: &AchievementUnlock) {
-    let Some(window) = app.get_webview_window("achievement-toast") else {
-        toast_fallback(app, payload);
+    if let Some(window) = app.get_webview_window("achievement-toast") {
+        deliver_toast(&window, payload);
         return;
-    };
-    position_toast(&window);
+    }
+    // Window not built yet: stash the payload, then ensure exactly one
+    // builder is in flight (the page pulls the queue once it has mounted).
+    TOAST_PENDING.get_or_init(|| Mutex::new(Vec::new())).lock().push(payload.clone());
+    if TOAST_SPAWNING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let built = build_toast_window(&app);
+        TOAST_SPAWNING.store(false, Ordering::SeqCst);
+        if built.map(|_| ()).is_err() {
+            // A racing builder may have won; deliver to the live window if
+            // one exists now, else fall back to a system toast.
+            let pending = take_pending_toasts();
+            if pending.is_empty() {
+                return;
+            }
+            if let Some(window) = app.get_webview_window("achievement-toast") {
+                for p in &pending {
+                    deliver_toast(&window, p);
+                }
+            } else {
+                for p in &pending {
+                    toast_fallback(&app, p);
+                }
+            }
+        }
+    });
+}
+
+fn build_toast_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
+    let window = WebviewWindowBuilder::new(
+        app,
+        "achievement-toast",
+        WebviewUrl::App("index.html#/achievement-toast".into()),
+    )
+    .title("Achievement unlocked")
+    .inner_size(420.0, 112.0)
+    .decorations(false)
+    .transparent(true)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .resizable(false)
+    .maximizable(false)
+    .minimizable(false)
+    .closable(false)
+    .visible(false)
+    .focused(false)
+    .shadow(false)
+    .build()?;
+    crate::enable_smooth_scrolling(&window);
+    Ok(window)
+}
+
+fn deliver_toast(window: &WebviewWindow, payload: &AchievementUnlock) {
+    position_toast(window);
     if window.show().is_err() {
-        toast_fallback(app, payload);
+        toast_fallback(window.app_handle(), payload);
         return;
     }
     window.set_ignore_cursor_events(true).ok();
@@ -1628,6 +1704,24 @@ pub fn achievements_toast_hide(app: AppHandle) -> Value {
         window.hide().ok();
     }
     json!({ "ok": true })
+}
+
+/// First-unlock delivery: the toast page pulls pending payloads after its
+/// event listener is installed, so the emit-vs-listener race (empty toast,
+/// never auto-hiding) cannot happen. Position/show happen here too, once the
+/// window's outer size has settled (the on_page_load path measured 0x0 and
+/// parked the toast off-screen).
+#[tauri::command(async)]
+pub fn achievements_toast_pull(app: AppHandle) -> Value {
+    let pending = take_pending_toasts();
+    if !pending.is_empty() {
+        if let Some(window) = app.get_webview_window("achievement-toast") {
+            position_toast(&window);
+            window.set_ignore_cursor_events(true).ok();
+            window.show().ok();
+        }
+    }
+    json!({ "ok": true, "payload": pending })
 }
 
 #[tauri::command(async)]

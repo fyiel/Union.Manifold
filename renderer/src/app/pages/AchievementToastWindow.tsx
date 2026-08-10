@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Check, Trophy } from "lucide-react"
 import { MONO, SmartImage } from "@/app/manifold/ui"
 import { proxyImageUrl } from "@/lib/utils"
@@ -7,6 +7,32 @@ export default function AchievementToastWindow() {
   const [payload, setPayload] = useState<LocalAchievementUnlock | null>(null)
   const [shown, setShown] = useState(false)
   const timers = useRef<number[]>([])
+  const backlog = useRef<LocalAchievementUnlock[]>([])
+  const busy = useRef(false)
+
+  const pumpRef = useRef<() => void>(() => {})
+  const finish = useCallback(() => {
+    busy.current = false
+    if (backlog.current.length === 0) {
+      void window.ucAchievements?.hideToast?.()
+    } else {
+      pumpRef.current()
+    }
+  }, [])
+  const pump = useCallback(() => {
+    if (busy.current) return
+    const next = backlog.current.shift()
+    if (!next) return
+    busy.current = true
+    timers.current.forEach(window.clearTimeout)
+    timers.current = []
+    setPayload(next)
+    setShown(false)
+    requestAnimationFrame(() => requestAnimationFrame(() => setShown(true)))
+    timers.current.push(window.setTimeout(() => setShown(false), 4_450))
+    timers.current.push(window.setTimeout(finish, 5_000))
+  }, [finish])
+  pumpRef.current = pump
 
   useEffect(() => {
     const htmlBackground = document.documentElement.style.background
@@ -16,13 +42,18 @@ export default function AchievementToastWindow() {
     document.body.style.overflow = "hidden"
 
     const off = window.ucAchievements?.onToast?.((next) => {
-      timers.current.forEach(window.clearTimeout)
-      timers.current = []
-      setPayload(next)
-      setShown(false)
-      requestAnimationFrame(() => requestAnimationFrame(() => setShown(true)))
-      timers.current.push(window.setTimeout(() => setShown(false), 4_450))
-      timers.current.push(window.setTimeout(() => void window.ucAchievements?.hideToast?.(), 5_000))
+      backlog.current.push(next)
+      pump()
+    })
+    // First-unlock payloads arrive before this listener could exist; the
+    // backend queues them and we pull after mounting (see achievements.rs
+    // achievements_toast_pull).
+    void window.ucAchievements?.pullToast?.().then((res) => {
+      const queued = res?.payload
+      if (queued?.length) {
+        backlog.current.push(...queued)
+        pump()
+      }
     })
 
     return () => {
@@ -32,7 +63,7 @@ export default function AchievementToastWindow() {
       document.body.style.background = bodyBackground
       document.body.style.overflow = ""
     }
-  }, [])
+  }, [pump])
 
   if (!payload) return <div style={{ width: "100vw", height: "100vh", background: "transparent" }} />
 
@@ -43,7 +74,9 @@ export default function AchievementToastWindow() {
     <main
       onClick={() => {
         setShown(false)
-        window.setTimeout(() => void window.ucAchievements?.hideToast?.(), 220)
+        timers.current.forEach(window.clearTimeout)
+        timers.current = []
+        window.setTimeout(finish, 220)
       }}
       style={{ width: "100vw", height: "100vh", padding: 6, background: "transparent", cursor: "pointer", overflow: "hidden" }}
     >

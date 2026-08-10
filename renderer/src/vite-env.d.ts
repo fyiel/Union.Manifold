@@ -561,6 +561,7 @@ declare global {
       list: () => Promise<{ ok: boolean; games: LocalAchievementGame[]; error?: string }>
       testNotification: () => Promise<{ ok: boolean; error?: string }>
       hideToast: () => Promise<{ ok: boolean }>
+      pullToast: () => Promise<{ ok: boolean; payload: LocalAchievementUnlock[] }>
       onUnlocked: (callback: (data: LocalAchievementUnlock) => void) => () => void
       onUpdated: (callback: (data: { reason?: string }) => void) => () => void
       onToast: (callback: (data: LocalAchievementUnlock) => void) => () => void

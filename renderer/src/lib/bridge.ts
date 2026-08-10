@@ -191,6 +191,7 @@ export function installBridge(): void {
     list: () => call("achievements_list"),
     testNotification: () => call("achievements_test_notification"),
     hideToast: () => call("achievements_toast_hide"),
+    pullToast: () => call<{ ok: boolean; payload: LocalAchievementUnlock[] }>("achievements_toast_pull"),
     onUnlocked: (cb: Cb) => on("uc:achievement-unlocked", cb),
     onUpdated: (cb: Cb) => on("uc:achievements-updated", cb),
     onToast: (cb: Cb) => on("uc:achievement-toast", cb),

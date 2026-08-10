@@ -310,6 +310,7 @@ pub fn run() {
 
             achievements::achievements_list,
             achievements::achievements_toast_hide,
+            achievements::achievements_toast_pull,
             achievements::achievements_test_notification,
             sources::sources_list,
             sources::sources_set_enabled,
