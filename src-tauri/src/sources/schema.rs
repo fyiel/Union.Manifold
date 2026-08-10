@@ -259,6 +259,73 @@ pub fn merge_games(mut records: Vec<SourceGame>) -> Vec<UnifiedGame> {
     merge_games_cached(&mut records)
 }
 
+pub(crate) fn positive_appid(r: &SourceGame) -> Option<u64> {
+    r.steam_app_id.filter(|v| *v > 0)
+}
+
+pub(crate) fn titles_conflict(a: Option<u64>, b: Option<u64>) -> bool {
+    matches!((a, b), (Some(x), Some(y)) if x != y)
+}
+
+/// Fold one source record into a unified game, applying the field precedence
+/// contract of the batch merge: title first-wins by record index, first
+/// positive appid, longest description, first image/hero/developer/release
+/// date/version/size, max year/added/updated, genres append-deduplicated,
+/// per-record sources pushed in record order, and a dedup_key recomputed as
+/// the accumulated appid or normalized title. This is the single fold used by
+/// both merge_games_cached and filters::PartialPool so the two paths cannot
+/// drift.
+pub(crate) fn fold_record_into(game: &mut UnifiedGame, r: &SourceGame) {
+    if game.title.is_empty() {
+        game.title = r.title.clone();
+        if game.steam_app_id.is_none() {
+            game.dedup_key = dedup_key_for(None, &game.title);
+        }
+    }
+    if game.steam_app_id.is_none() {
+        if let Some(id) = positive_appid(r) {
+            game.steam_app_id = Some(id);
+            game.dedup_key = dedup_key_for(Some(id), &game.title);
+        }
+    }
+    if better(&game.description, &r.description) {
+        game.description = r.description.clone();
+    }
+    if game.image.is_none() {
+        game.image = r.image.clone();
+    }
+    if game.hero_image.is_none() {
+        game.hero_image = r.hero_image.clone();
+    }
+    if game.developer.is_none() {
+        game.developer = r.developer.clone();
+    }
+    if game.release_date.is_none() {
+        game.release_date = r.release_date.clone();
+    }
+    if game.version.is_none() {
+        game.version = r.version.clone();
+    }
+    if game.size_bytes.is_none() {
+        game.size_bytes = r.size_bytes;
+        game.size_text = r.size_text.clone();
+    }
+    game.release_year = max_opt(game.release_year, r.release_year);
+    game.added_at = max_opt(game.added_at, r.added_at);
+    game.updated_at = max_opt(game.updated_at, r.updated_at);
+    for g in &r.genres {
+        if !game.genres.contains(g) {
+            game.genres.push(g.clone());
+        }
+    }
+    let mut source = r.clone();
+    source.direct |= source
+        .download_options
+        .iter()
+        .any(|option| option.resolvable);
+    game.sources.push(source);
+}
+
 pub(crate) fn merge_games_cached(records: &mut [SourceGame]) -> Vec<UnifiedGame> {
     for record in records.iter_mut() {
         if record.normalized_title.is_empty() {
@@ -285,7 +352,7 @@ pub(crate) fn merge_games_cached(records: &mut [SourceGame]) -> Vec<UnifiedGame>
     let mut by_appid: HashMap<u64, usize> = HashMap::new();
     let mut by_title: HashMap<String, usize> = HashMap::new();
     for (i, r) in records.iter().enumerate() {
-        if let Some(id) = r.steam_app_id.filter(|v| *v > 0) {
+        if let Some(id) = positive_appid(r) {
             if let Some(&j) = by_appid.get(&id) {
                 union(&mut parent, i, j);
             } else {
@@ -295,10 +362,7 @@ pub(crate) fn merge_games_cached(records: &mut [SourceGame]) -> Vec<UnifiedGame>
         let key = &r.normalized_title;
         if !key.is_empty() {
             if let Some(&j) = by_title.get(key) {
-                let ai = r.steam_app_id.filter(|v| *v > 0);
-                let aj = records[j].steam_app_id.filter(|v| *v > 0);
-                let conflict = matches!((ai, aj), (Some(x), Some(y)) if x != y);
-                if !conflict {
+                if !titles_conflict(positive_appid(r), positive_appid(&records[j])) {
                     union(&mut parent, i, j);
                 }
             } else {
@@ -318,52 +382,9 @@ pub(crate) fn merge_games_cached(records: &mut [SourceGame]) -> Vec<UnifiedGame>
     let mut out = Vec::new();
     for idxs in groups {
         let mut game = UnifiedGame::default();
-        let mut appid: Option<u64> = None;
         for &i in &idxs {
-            let r = &records[i];
-            if game.title.is_empty() {
-                game.title = r.title.clone();
-            }
-            appid = appid.or(r.steam_app_id.filter(|v| *v > 0));
-            if better(&game.description, &r.description) {
-                game.description = r.description.clone();
-            }
-            if game.image.is_none() {
-                game.image = r.image.clone();
-            }
-            if game.hero_image.is_none() {
-                game.hero_image = r.hero_image.clone();
-            }
-            if game.developer.is_none() {
-                game.developer = r.developer.clone();
-            }
-            if game.release_date.is_none() {
-                game.release_date = r.release_date.clone();
-            }
-            if game.version.is_none() {
-                game.version = r.version.clone();
-            }
-            if game.size_bytes.is_none() {
-                game.size_bytes = r.size_bytes;
-                game.size_text = r.size_text.clone();
-            }
-            game.release_year = max_opt(game.release_year, r.release_year);
-            game.added_at = max_opt(game.added_at, r.added_at);
-            game.updated_at = max_opt(game.updated_at, r.updated_at);
-            for g in &r.genres {
-                if !game.genres.contains(g) {
-                    game.genres.push(g.clone());
-                }
-            }
-            let mut source = r.clone();
-            source.direct |= source
-                .download_options
-                .iter()
-                .any(|option| option.resolvable);
-            game.sources.push(source);
+            fold_record_into(&mut game, &records[i]);
         }
-        game.steam_app_id = appid;
-        game.dedup_key = dedup_key_for(appid, &game.title);
         out.push(game);
     }
     out

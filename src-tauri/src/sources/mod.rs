@@ -670,7 +670,7 @@ async fn run_query_stream(
                     (id, games)
                 });
             }
-            let mut pool: Vec<SourceGame> = Vec::new();
+            let mut acc = filters::PartialPool::new();
             let mut done: Vec<String> = Vec::new();
             let mut failed: Vec<String> = Vec::new();
             let mut status: Vec<filters::SourceStatus> = Vec::new();
@@ -702,10 +702,10 @@ async fn run_query_stream(
                             reason: None,
                         });
                     }
-                    Some(mut g) => {
+                    Some(g) => {
                         done.push(id.clone());
                         let n = g.len();
-                        pool.append(&mut g);
+                        acc.add_source(g);
                         status.push(filters::SourceStatus {
                             id,
                             ok: true,
@@ -726,7 +726,7 @@ async fn run_query_stream(
                         });
                     }
                 }
-                let (ordered, facets, total) = filters::finalize_pool_cached(&mut pool, &p);
+                let (ordered, facets, total) = acc.snapshot(&p);
                 let page: Vec<schema::UnifiedGame> = ordered
                     .iter()
                     .skip(page_params.offset)
@@ -754,7 +754,7 @@ async fn run_query_stream(
                 total: latest_total,
                 errored,
                 status,
-                raw: pool,
+                raw: acc.into_raw(),
                 fetched_at_ms: now_ms(),
             });
             record_health(&latest.status);
