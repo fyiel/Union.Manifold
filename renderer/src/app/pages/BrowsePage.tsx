@@ -25,6 +25,10 @@ export function BrowsePage() {
   const [sourcesErrored, setSourcesErrored] = useState(false)
   const [sourceError, setSourceError] = useState<string | null>(null)
   const [zoomedCover, setZoomedCover] = useState<ZoomedCover | null>(null)
+  // Windowed render: only the first `sliceEnd` games are mounted; the window
+  // grows on scroll so the DOM stays bounded (~2 screens) instead of every
+  // loaded page (3,464 nodes + 163 img elements measured before this fix).
+  const [sliceEnd, setSliceEnd] = useState(PAGE)
 
   const reqId = useRef(0)
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -34,18 +38,44 @@ export function BrowsePage() {
   const scrollerRef = useRef<HTMLDivElement | null>(null)
   const restoreScroll = useRef(cached?.scrollTop ?? 0)
   const fetchedAtRef = useRef(cached?.fetchedAt ?? 0)
+  const gamesRef = useRef(games)
+  useEffect(() => { gamesRef.current = games }, [games])
+
+  const ensureWindow = useCallback(
+    (el: HTMLElement) => {
+      const cols = Math.max(1, Math.floor((el.clientWidth + 18) / 186))
+      const rowH = 350
+      const viewportBottom = el.scrollTop + el.clientHeight
+      const mountedBottom = Math.ceil(sliceEnd / cols) * rowH
+      if (mountedBottom - viewportBottom < el.clientHeight * 1.5) {
+        // near the mounted bottom: extend one page ahead so the DOM never
+        // runs dry ahead of the viewport
+        setSliceEnd((s) => Math.min(gamesRef.current.length, s + PAGE))
+      } else if (mountedBottom - viewportBottom > el.clientHeight * 3.5) {
+        // scrolled back up: trim the bottom to ~2.5 screens of slack so the
+        // mounted window stays bounded (cards are re-rendered on the way back
+        // down; images are lazy)
+        const target = Math.max(PAGE, Math.ceil((viewportBottom + el.clientHeight * 2.5) / rowH) * cols)
+        setSliceEnd((s) => Math.min(s, target))
+      }
+    },
+    [sliceEnd],
+  )
 
   useEffect(() => {
     if (!restoreScroll.current) return
     const el = scrollerRef.current
     if (!el) return
     const top = restoreScroll.current
-    requestAnimationFrame(() => { if (scrollerRef.current) scrollerRef.current.scrollTop = top })
-  }, [])
+    restoreScroll.current = 0
+    requestAnimationFrame(() => {
+      if (!scrollerRef.current) return
+      scrollerRef.current.scrollTop = top
+      ensureWindow(scrollerRef.current)
+    })
+  }, [ensureWindow])
   const loadingMoreRef = useRef(false)
   const appendReqRef = useRef<number | null>(null)
-  const gamesRef = useRef(games)
-  useEffect(() => { gamesRef.current = games }, [games])
   const available = sourcesAvailable()
 
   useEffect(() => {
@@ -118,6 +148,7 @@ export function BrowsePage() {
       const nextGames = append ? mergeUnique(gamesRef.current, res.games) : res.games
       gamesRef.current = nextGames
       setGames(nextGames)
+      if (!append) setSliceEnd(PAGE)
       fetchedAtRef.current = Date.now()
       offsetRef.current = startOffset + PAGE
       setTotal(append && res.games.length === 0 ? nextGames.length : res.total)
@@ -197,6 +228,7 @@ export function BrowsePage() {
       rememberGames(payload.games)
       setGames(merged)
       gamesRef.current = merged
+      if (!isAppend) setSliceEnd(PAGE)
       setTotal(payload.total)
       setSourceCounts(countMirrors(merged).perSource)
       const done = new Set(payload.doneSources)
@@ -243,6 +275,7 @@ export function BrowsePage() {
   const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget
     setBrowseScroll(el.scrollTop)
+    ensureWindow(el)
     if (hasMore && !loadingMoreRef.current && !searching && el.scrollHeight - el.scrollTop - el.clientHeight < 700) {
       void loadMore()
     }
@@ -372,14 +405,14 @@ export function BrowsePage() {
         ) : sorted.length > 0 ? (
           <>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(168px, 1fr))", gap: 18, alignContent: "start" }}>
-              {sorted.map((g) => (
+              {sorted.slice(0, sliceEnd).map((g) => (
                 <GameCard key={g.dedupKey} game={g} onZoom={openCover} />
               ))}
             </div>
-            {(loadingMore || hasMore) && (
+            {(loadingMore || hasMore || sliceEnd < sorted.length) && (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "26px 0 4px", gap: 10 }}>
                 {loadingMore ? <Spinner size={16} stroke="var(--mf-t5)" /> : null}
-                <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t5)" }}>{loadingMore ? "loading more…" : `scroll for more · ${sorted.length} of ${total}`}</span>
+                <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t5)" }}>{loadingMore ? "loading more…" : sliceEnd < sorted.length ? `showing ${sliceEnd} of ${sorted.length} titles` : `scroll for more · ${sorted.length} of ${total}`}</span>
               </div>
             )}
           </>
