@@ -15,6 +15,7 @@ mod mods;
 mod net;
 mod notify;
 mod paths;
+mod perf;
 mod repair;
 mod settings;
 mod shortcuts;
@@ -402,6 +403,8 @@ pub fn run() {
             slipgate_managed::managed_slipgate_update,
             slipgate_managed::managed_slipgate_uninstall,
             mods::workshop::workshop_browse,
+            perf::perf_enabled,
+            perf::perf_dump,
 
             mods::workshop::workshop_install,
             mods::workshop::workshop_status,

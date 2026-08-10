@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react"
-import { HashRouter, Route, Routes, Navigate } from "react-router-dom"
+import { HashRouter, Route, Routes, Navigate, useLocation } from "react-router-dom"
 import { ForkLayout } from "@/app/ForkLayout"
 import { DownloadsProvider, useDownloadsSelector } from "@/context/downloads-context"
 import { DownloadFlowProvider } from "@/context/download-flow-context"
@@ -13,6 +13,7 @@ import { applySavedSourceSettings } from "@/lib/sources"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { AlertTriangle } from "@/components/icons"
+import { mark, noteDom } from "@/lib/perf"
 
 const SourceGameRoute = lazy(() => loadSourceGamePage().then((m) => ({ default: m.SourceGameRoute })))
 const GameModsPage = lazy(() => loadGameModsPage().then((m) => ({ default: m.GameModsPage })))
@@ -144,9 +145,23 @@ function DownloadBlockedGuard() {
 }
 
 function AppWithDownloads() {
+  const location = useLocation()
   useEffect(() => {
     void applySavedSourceSettings()
   }, [])
+
+  // Dev-only perf marks: route change -> post-commit -> DOM settled.
+  useEffect(() => {
+    const path = location.pathname
+    mark(`route:${path}`)
+    let raf = requestAnimationFrame(() => {
+      raf = requestAnimationFrame(() => {
+        noteDom(`route:${path}`)
+      })
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [location.pathname])
+
   return (
     <>
       <ExtractionCloseGuard />

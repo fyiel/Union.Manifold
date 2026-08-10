@@ -542,6 +542,10 @@ declare global {
       launchSteam?: () => Promise<{ ok: boolean; method?: string; error?: string }>
       runSteamGame?: (appid: string, steamAppid: number, installPath: string) => Promise<{ ok: boolean; error?: string }>
     }
+    ucPerf?: {
+      enabled: () => Promise<boolean>
+      dump: (payload: string) => Promise<unknown>
+    }
     ucWand?: {
       lookup: (title: string, steamAppid?: number) => Promise<WandLookupResult>
       connect: () => Promise<{ ok: boolean; error?: string }>

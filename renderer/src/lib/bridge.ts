@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
+import { logInvokeDuration } from "./perf"
 
 type Cb = (payload: any) => void
 
@@ -17,9 +18,16 @@ function on(event: string, cb: Cb): () => void {
 }
 
 function call<T = any>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  return invoke<T>(cmd, args).catch((err) => {
-    throw err instanceof Error ? err : new Error(String(err))
-  })
+  const t0 = performance.now()
+  return invoke<T>(cmd, args)
+    .then((value) => {
+      logInvokeDuration(performance.now() - t0)
+      return value
+    })
+    .catch((err) => {
+      logInvokeDuration(performance.now() - t0)
+      throw err instanceof Error ? err : new Error(String(err))
+    })
 }
 
 
@@ -160,6 +168,11 @@ export function installBridge(): void {
     launchSteam: () => call("system_launch_steam"),
     runSteamGame: (appid: string, steamAppid: number, installPath: string) =>
       call("steam_game_run", { appid, steamAppid, installPath }),
+  }
+
+  w.ucPerf = {
+    enabled: () => call<boolean>("perf_enabled"),
+    dump: (payload: string) => call("perf_dump", { payload }),
   }
 
   w.ucWand = {
