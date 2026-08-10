@@ -1023,7 +1023,10 @@ fn redeploy_over_existing_file_claims_backup_in_journal() {
     // Warm the verified-comparison cache before simulating a user edit.
     assert_eq!(deploy_to(&game_dir, &target, &one).unwrap(), 1);
 
-    write_file(&target.join("file.txt"), "user-file");
+    // A same-second rewrite can keep the mtime stamp (coarse filesystem
+    // granularity), so make the user edit differ in size: the length gate in
+    // same_file is hit deterministically regardless of timestamp resolution.
+    write_file(&target.join("file.txt"), "user-edited-file");
     assert_eq!(deploy_to(&game_dir, &target, &one).unwrap(), 1);
     assert_eq!(
         std::fs::read_to_string(target.join("file.txt")).unwrap(),
@@ -1035,13 +1038,13 @@ fn redeploy_over_existing_file_claims_backup_in_journal() {
     );
     assert_eq!(
         std::fs::read_to_string(game_dir.join("backup/file.txt")).unwrap(),
-        "user-file"
+        "user-edited-file"
     );
 
     undeploy_from(&game_dir, &target).unwrap();
     assert_eq!(
         std::fs::read_to_string(target.join("file.txt")).unwrap(),
-        "user-file"
+        "user-edited-file"
     );
 }
 
