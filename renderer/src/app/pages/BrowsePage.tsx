@@ -25,10 +25,6 @@ export function BrowsePage() {
   const [sourcesErrored, setSourcesErrored] = useState(false)
   const [sourceError, setSourceError] = useState<string | null>(null)
   const [zoomedCover, setZoomedCover] = useState<ZoomedCover | null>(null)
-  // Windowed render: only the first `sliceEnd` games are mounted; the window
-  // grows on scroll so the DOM stays bounded (~2 screens) instead of every
-  // loaded page (3,464 nodes + 163 img elements measured before this fix).
-  const [sliceEnd, setSliceEnd] = useState(PAGE)
 
   const reqId = useRef(0)
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -41,39 +37,47 @@ export function BrowsePage() {
   const gamesRef = useRef(games)
   useEffect(() => { gamesRef.current = games }, [games])
 
-  const ensureWindow = useCallback(
-    (el: HTMLElement) => {
-      const cols = Math.max(1, Math.floor((el.clientWidth + 18) / 186))
-      const rowH = 350
-      const viewportBottom = el.scrollTop + el.clientHeight
-      const mountedBottom = Math.ceil(sliceEnd / cols) * rowH
-      if (mountedBottom - viewportBottom < el.clientHeight * 1.5) {
-        // near the mounted bottom: extend one page ahead so the DOM never
-        // runs dry ahead of the viewport
-        setSliceEnd((s) => Math.min(gamesRef.current.length, s + PAGE))
-      } else if (mountedBottom - viewportBottom > el.clientHeight * 3.5) {
-        // scrolled back up: trim the bottom to ~2.5 screens of slack so the
-        // mounted window stays bounded (cards are re-rendered on the way back
-        // down; images are lazy)
-        const target = Math.max(PAGE, Math.ceil((viewportBottom + el.clientHeight * 2.5) / rowH) * cols)
-        setSliceEnd((s) => Math.min(s, target))
-      }
-    },
-    [sliceEnd],
-  )
-
-  useEffect(() => {
-    if (!restoreScroll.current) return
+  // Scroll-window virtualization: only the rows around the viewport are
+  // mounted (top/bottom spacers hold the scroll height), so the DOM stays
+  // bounded no matter how far the catalog is scrolled — reaching the bottom
+  // no longer mounts every loaded game (3,783 nodes / 167 imgs measured
+  // before this). Cards outside the window unmount, releasing their images.
+  const [viewTop, setViewTop] = useState(0)
+  const [clientH, setClientH] = useState(1)
+  const [clientW, setClientW] = useState(1)
+  const measure = useCallback(() => {
     const el = scrollerRef.current
     if (!el) return
-    const top = restoreScroll.current
-    restoreScroll.current = 0
-    requestAnimationFrame(() => {
-      if (!scrollerRef.current) return
-      scrollerRef.current.scrollTop = top
-      ensureWindow(scrollerRef.current)
-    })
-  }, [ensureWindow])
+    if (el.clientHeight !== clientH) setClientH(el.clientHeight || 1)
+    if (el.clientWidth !== clientW) setClientW(el.clientWidth || 1)
+  }, [clientH, clientW])
+
+  // A fresh (non-append) result set shrinks the list; the stale viewTop would
+  // otherwise point past the end and render an empty window while the browser
+  // clamp-walks down. Jump to the top so the first render is valid.
+  const resetViewToTop = useCallback(() => {
+    setViewTop(0)
+    if (scrollerRef.current) scrollerRef.current.scrollTop = 0
+  }, [])
+
+  useEffect(() => {
+    measure()
+    const el = scrollerRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => measure())
+    ro.observe(el)
+    if (restoreScroll.current) {
+      const top = restoreScroll.current
+      restoreScroll.current = 0
+      requestAnimationFrame(() => {
+        if (scrollerRef.current) scrollerRef.current.scrollTop = top
+      })
+    }
+    return () => ro.disconnect()
+  }, [measure])
+
+  // Window geometry: rows are ~350px tall (168px cover @3:4 + text + gap);
+  // col count follows the grid's auto-fill minmax(168px, 1fr).
   const loadingMoreRef = useRef(false)
   const appendReqRef = useRef<number | null>(null)
   const available = sourcesAvailable()
@@ -148,7 +152,7 @@ export function BrowsePage() {
       const nextGames = append ? mergeUnique(gamesRef.current, res.games) : res.games
       gamesRef.current = nextGames
       setGames(nextGames)
-      if (!append) setSliceEnd(PAGE)
+      if (!append) resetViewToTop()
       fetchedAtRef.current = Date.now()
       offsetRef.current = startOffset + PAGE
       setTotal(append && res.games.length === 0 ? nextGames.length : res.total)
@@ -228,7 +232,7 @@ export function BrowsePage() {
       rememberGames(payload.games)
       setGames(merged)
       gamesRef.current = merged
-      if (!isAppend) setSliceEnd(PAGE)
+      if (!isAppend) resetViewToTop()
       setTotal(payload.total)
       setSourceCounts(countMirrors(merged).perSource)
       const done = new Set(payload.doneSources)
@@ -268,6 +272,20 @@ export function BrowsePage() {
     [games, sortMode, hasQuery, committed]
   )
 
+  // Window geometry: rows are ~350px tall (168px cover @3:4 + text + gap);
+  // col count follows the grid's auto-fill minmax(168px, 1fr). Only the rows
+  // around the viewport are mounted; spacers hold the scroll height.
+  const cols = Math.max(1, Math.floor((clientW + 18) / 186))
+  const rowH = 350
+  const totalRows = Math.ceil(sorted.length / cols)
+  const visibleRows = Math.max(1, Math.ceil(clientH / rowH))
+  const startRow = Math.max(0, Math.floor(viewTop / rowH) - 2)
+  const endRow = Math.min(totalRows, startRow + visibleRows + 4)
+  const windowStart = startRow * cols
+  const windowEnd = Math.min(sorted.length, endRow * cols)
+  const topPad = startRow * rowH
+  const bottomPad = (totalRows - endRow) * rowH
+
   const mirrors = useMemo(() => countMirrors(sorted).total, [sorted])
   const resultSummary = searching ? `${sorted.length} so far…` : `${sorted.length}${hasMore ? "+" : ""} titles · ${mirrors} mirrors`
   const sortLabel = sortModeLabel(sortMode, hasQuery)
@@ -275,7 +293,8 @@ export function BrowsePage() {
   const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget
     setBrowseScroll(el.scrollTop)
-    ensureWindow(el)
+    setViewTop(el.scrollTop)
+    measure()
     if (hasMore && !loadingMoreRef.current && !searching && el.scrollHeight - el.scrollTop - el.clientHeight < 700) {
       void loadMore()
     }
@@ -405,14 +424,16 @@ export function BrowsePage() {
         ) : sorted.length > 0 ? (
           <>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(168px, 1fr))", gap: 18, alignContent: "start" }}>
-              {sorted.slice(0, sliceEnd).map((g) => (
+              {topPad > 0 && <div aria-hidden style={{ gridColumn: "1 / -1", height: topPad }} />}
+              {sorted.slice(windowStart, windowEnd).map((g) => (
                 <GameCard key={g.dedupKey} game={g} onZoom={openCover} />
               ))}
+              {bottomPad > 0 && <div aria-hidden style={{ gridColumn: "1 / -1", height: bottomPad }} />}
             </div>
-            {(loadingMore || hasMore || sliceEnd < sorted.length) && (
+            {(loadingMore || hasMore) && (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "26px 0 4px", gap: 10 }}>
                 {loadingMore ? <Spinner size={16} stroke="var(--mf-t5)" /> : null}
-                <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t5)" }}>{loadingMore ? "loading more…" : sliceEnd < sorted.length ? `showing ${sliceEnd} of ${sorted.length} titles` : `scroll for more · ${sorted.length} of ${total}`}</span>
+                <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t5)" }}>{loadingMore ? "loading more…" : `scroll for more · ${sorted.length} of ${total}`}</span>
               </div>
             )}
           </>

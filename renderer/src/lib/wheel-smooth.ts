@@ -10,7 +10,8 @@
 //   carries the scroll forward — the classic momentum feel.
 // - The loop self-stops at the scroll bounds or when velocity dies.
 // - Nothing else changes: scroll events still fire every frame, so the
-//   Browse windowing (ensureWindow) and loadMore thresholds behave as before.
+//   Browse scroll-window virtualization and loadMore thresholds behave as
+//   before.
 // - Passive:false is required so we can preventDefault the native jump.
 
 let vel = 0 // px/ms
