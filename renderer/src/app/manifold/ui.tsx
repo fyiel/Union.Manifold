@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { Search, Loader2 } from "lucide-react"
-import { proxyImageUrl } from "@/lib/utils"
+import { cardImageUrl, proxyImageUrl } from "@/lib/utils"
 import { fetchSteamArt } from "@/lib/sources"
 
 export const MONO = "var(--mf-mono)"
@@ -31,7 +31,7 @@ export function steamArtLadder(appid?: number | null): string[] {
 
 export function gameImageCandidates(
   game: { image?: string; heroImage?: string; steamAppId?: number | null; sources?: Array<{ image?: string }> },
-  opts?: { steamFirst?: boolean },
+  opts?: { steamFirst?: boolean; card?: boolean },
 ): string[] {
   const steam = steamArtLadder(game.steamAppId)
   const sourceImgs = [game.image, ...(game.sources || []).map((s) => s.image), game.heroImage]
@@ -41,9 +41,10 @@ export function gameImageCandidates(
     : opts?.steamFirst && game.steamAppId
       ? [steam[0], ...sourceImgs, ...steam.slice(1)]
       : [...sourceImgs, ...steam]
+  const map = opts?.card ? cardImageUrl : proxyImageUrl
   const seen = new Set<string>()
   const out: string[] = []
-  for (const u of raw.filter(Boolean) as string[]) { if (!seen.has(u)) { seen.add(u); out.push(proxyImageUrl(u)) } }
+  for (const u of raw.filter(Boolean) as string[]) { if (!seen.has(u)) { seen.add(u); out.push(map(u)) } }
   return out
 }
 
@@ -129,7 +130,9 @@ export function SmartImage({ candidates, steamAppId, name, alt, onAllFailed, sty
 }
 
 export function useGameImages(game: { image?: string; heroImage?: string; steamAppId?: number | null; sources?: Array<{ image?: string }> }): string[] {
-  return useMemo(() => gameImageCandidates(game), [game])
+  // Sole caller is GameCard: downscaled card covers keep decode memory and
+  // the proxy disk cache proportional to the ~180px display size.
+  return useMemo(() => gameImageCandidates(game, { card: true }), [game])
 }
 
 export function gbLabel(bytes?: number): string {

@@ -35,6 +35,7 @@ shlex = "2"
 unicode-normalization = "0.1"
 sha2 = "0.10"
 sha1 = "0.10"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 hex = "0.4"
 base64 = "0.22"
 rand = "0.8"

@@ -112,6 +112,31 @@ fn query_param(uri: &str, key: &str) -> Option<String> {
         .find_map(|(k, v)| (k == key).then(|| v.into_owned()))
 }
 
+/// Downscale a raster image to a maximum width, re-encoding as WebP.
+/// Returns None when the input is not a decodable raster (SVG, animated
+/// GIF, oversized source, already at or under the target width) so the
+/// caller serves the original bytes untouched.
+fn resize_to_width(bytes: &[u8], width: u32) -> Option<Vec<u8>> {
+    let reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?;
+    if reader.format() == Some(image::ImageFormat::Gif) {
+        return None; // animated: keep as-is
+    }
+    let img = reader.decode().ok()?;
+    let (w, h) = (img.width(), img.height());
+    if w == 0 || h == 0 || w <= width || w as u64 * h as u64 > 40_000_000 {
+        return None;
+    }
+    let nh = ((h as u64 * width as u64) / w as u64).max(1) as u32;
+    let resized = img.resize(width, nh, image::imageops::FilterType::Triangle);
+    let mut out = std::io::Cursor::new(Vec::new());
+    resized
+        .write_to(&mut out, image::ImageFormat::WebP)
+        .ok()?;
+    Some(out.into_inner())
+}
+
 pub async fn respond(app: AppHandle, uri: String) -> (u16, Vec<u8>, String) {
     if let Some(name) = query_param(&uri, "c") {
         if name.is_empty() || name.contains("..") || name.contains(['/', '\\', ':']) {
@@ -191,7 +216,14 @@ pub async fn respond(app: AppHandle, uri: String) -> (u16, Vec<u8>, String) {
         return (400, b"bad url".to_vec(), "text/plain".to_string());
     }
     let dir = cache_dir(&app);
-    let key = hex::encode(Sha256::digest(remote.as_bytes()));
+    // Optional width constraint: card covers request w=320 so the proxy
+    // downscales before caching — decoded-image memory and the disk cache
+    // stay proportional to the ~180px card, not the 600x900 cover. The
+    // variant is part of the cache key so full-res contexts are unaffected.
+    let want_w: Option<u32> = query_param(&uri, "w")
+        .and_then(|w| w.parse::<u32>().ok())
+        .filter(|w| (8..=2048).contains(w));
+    let key = hex::encode(Sha256::digest(format!("{remote}#w={}", want_w.unwrap_or(0))));
     let path = dir.join(&key);
     if let Some((bytes, ct)) = mem_get(&key) {
         return (200, bytes, ct.to_string());
@@ -234,7 +266,20 @@ pub async fn respond(app: AppHandle, uri: String) -> (u16, Vec<u8>, String) {
     match crate::http::fetch(&remote, &opts).await {
         Ok(resp) if resp.status().is_success() => match resp.bytes().await {
             Ok(body) => {
-                let bytes = body.to_vec();
+                let bytes = match want_w {
+                    // Decode/resize/encode is CPU-bound; run it off the async
+                    // workers so burst card loads don't stall other fetches.
+                    Some(w) => {
+                        let input = body.to_vec();
+                        let original = input.clone();
+                        tokio::task::spawn_blocking(move || resize_to_width(&input, w))
+                            .await
+                            .ok()
+                            .flatten()
+                            .unwrap_or(original)
+                    }
+                    None => body.to_vec(),
+                };
                 tokio::fs::create_dir_all(&dir).await.ok();
                 tokio::fs::write(&path, &bytes).await.ok();
                 let ct = content_type_of(&bytes);
@@ -386,5 +431,31 @@ mod tests {
             query_param(uri, "u").as_deref(),
             Some("http://uc-asset.localhost/img?c=x.png")
         );
+    }
+
+    #[test]
+    fn resize_to_width_downscales_raster_and_keeps_aspect() {
+        // 600x900 portrait (a typical full cover).
+        let img = image::RgbImage::from_fn(600, 900, |x, y| {
+            image::Rgb([(x % 256) as u8, (y % 256) as u8, 128])
+        });
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut bytes, image::ImageFormat::Jpeg)
+            .expect("encode test jpeg");
+
+        let resized = resize_to_width(bytes.get_ref(), 320).expect("resize succeeds");
+        let out = image::ImageReader::new(std::io::Cursor::new(&resized))
+            .with_guessed_format()
+            .expect("format guessed")
+            .decode()
+            .expect("decode resized");
+        assert_eq!((out.width(), out.height()), (320, 480));
+        // Re-encoded as WebP (magic bytes RIFF....WEBP).
+        assert!(resized.starts_with(b"RIFF") && resized.windows(4).any(|w| w == b"WEBP"));
+
+        // Already small: untouched.
+        assert_eq!(resize_to_width(bytes.get_ref(), 2048), None);
+        // Garbage: untouched.
+        assert_eq!(resize_to_width(b"not an image", 320), None);
     }
 }

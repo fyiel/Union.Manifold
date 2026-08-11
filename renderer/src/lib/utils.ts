@@ -175,6 +175,29 @@ export function proxyImageUrl(imageUrl: string): string {
   return u
 }
 
+// Card-sized variant: routes the image through the local uc-asset proxy with
+// a width constraint so the backend downscales it (renderer/src/lib/assets
+// resize). Keeps decoded-image memory and the disk cache proportional to the
+// ~180px card, not the full 600x900 cover. Full-res contexts (detail page,
+// cover lightbox) keep using proxyImageUrl.
+export function cardImageUrl(imageUrl: string, maxWidth = 320): string {
+  if (!imageUrl) return imageUrl
+  if (imageUrl.startsWith("data:") || imageUrl.startsWith("blob:") || imageUrl.startsWith("uc-local://")) {
+    return imageUrl
+  }
+  const u = proxyMediaUrl(imageUrl)
+  if (u.startsWith(`${UC_ASSET_BASE}/`)) {
+    if (u.includes("?u=")) {
+      return u.includes("?") ? `${u}&w=${maxWidth}` : `${u}?w=${maxWidth}`
+    }
+    return u
+  }
+  if (u.startsWith("http://") || u.startsWith("https://")) {
+    return `${UC_ASSET_BASE}/img?u=${encodeURIComponent(u)}&w=${maxWidth}`
+  }
+  return u
+}
+
 export type GameExecutable = { name: string; path: string; size?: number; depth?: number }
 
 export function isHelperExecutableName(name: string) {
