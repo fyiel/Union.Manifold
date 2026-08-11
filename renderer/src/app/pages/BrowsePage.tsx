@@ -4,7 +4,7 @@ import { X } from "lucide-react"
 import { cancelSourceQuery, querySources, nextSourceRequestId, rememberGames, sourcesAvailable, listSources, onSourcesChanged, mergeUnique, countMirrors, nextSortMode, sortModeLabel, type SourceSortMode, sortUnifiedGames } from "@/lib/sources"
 import { getBrowseCache, setBrowseCache, setBrowseScroll, consumeDiskRestore } from "@/lib/browse-cache"
 import { GameCard } from "@/app/manifold/GameCard"
-import { MONO, SearchIcon, SmartImage, Spinner, CenterState } from "@/app/manifold/ui"
+import { MONO, SearchIcon, SmartImage, Spinner, CenterState, gameImageCandidates } from "@/app/manifold/ui"
 
 type SrcStatus = "idle" | "searching" | "done" | "failed"
 const PAGE = 48
@@ -108,8 +108,10 @@ export function BrowsePage() {
     return () => window.removeEventListener("keydown", closeOnEscape)
   }, [zoomedCover])
 
-  const openCover = useCallback((game: UnifiedSourceGame, candidates: string[]) => {
-    setZoomedCover({ game, candidates })
+  const openCover = useCallback((game: UnifiedSourceGame) => {
+    // The card's candidates are width-limited (w=320) for memory; the
+    // lightbox rebuilds full-resolution candidates so zoom stays sharp.
+    setZoomedCover({ game, candidates: gameImageCandidates(game) })
   }, [])
 
   const runQuery = useCallback(async (text: string, append = false) => {
