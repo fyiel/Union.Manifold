@@ -3,6 +3,32 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.6.1
+
+### Fixed
+
+- Arch/Manjaro in-app updates no longer fail with "required key missing from
+  keyring": the updater now imports and locally trusts the project signing key
+  (bundled with the app) before running `pacman -U` — one authorization prompt
+  covers both. Existing installs that already hit the key error can unlock
+  with: `sudo pacman-key --add /usr/lib/Union.Manifold/union-manifold-signing-key.asc &&
+  sudo pacman-key --lsign-key 468871A04436AAAC` (one time).
+
+### Performance
+
+- Browse memory stays flat no matter how far the catalog is scrolled: the
+  grid now mounts only the rows around the viewport (scroll-window
+  virtualization), so reaching the bottom no longer mounts every loaded game
+  (DOM 3,783 -> ~1,600 nodes, img elements 167 -> 68) and scrolling back up
+  does not regrow it. Measured web-process RSS across a full catalog scroll
+  cycle: 311 -> 358 MB and settling (previously 339 -> 441 MB and never
+  flushed).
+
+- Card covers are downscaled to a width-limited WebP variant through the
+  asset proxy (w=320, cached per variant), keeping decoded-image memory and
+  the disk cache proportional to the ~180px card instead of the full
+  600x900 cover. Detail pages and the cover lightbox keep full resolution.
+
 ## 3.6.0
 
 ### Added

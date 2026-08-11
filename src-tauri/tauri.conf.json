@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Union.Manifold",
-  "version": "3.6.0",
+  "version": "3.6.1",
   "identifier": "fyi.pumg.unionmanifold",
   "build": {
     "beforeDevCommand": "bun run dev:renderer",
@@ -48,7 +48,12 @@
       "icons/icon.ico"
     ],
     "externalBin": ["binaries/union-manifold-aria2c", "binaries/union-manifold-7z"],
-    "resources": ["resources/cacert.pem", "resources/trainer-host-x64.exe", "resources/trainer-host-x86.exe", "../union-manifold-signing-key.asc"],
+    "resources": {
+      "resources/cacert.pem": "resources/cacert.pem",
+      "resources/trainer-host-x64.exe": "resources/trainer-host-x64.exe",
+      "resources/trainer-host-x86.exe": "resources/trainer-host-x86.exe",
+      "../union-manifold-signing-key.asc": "union-manifold-signing-key.asc"
+    },
     "linux": {
       "appimage": {
         "bundleMediaFramework": false
