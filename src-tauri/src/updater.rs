@@ -1,5 +1,5 @@
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::UpdaterExt;
 
 fn version(app: &AppHandle) -> String {
@@ -135,11 +135,34 @@ async fn install_via_pacman(app: &AppHandle, new_version: &str) -> Result<(), St
     drop(file);
     emit_progress(app, "installing", received, total);
 
+    // The package is signed by the project key (468871A04436AAAC). pacman
+    // only installs packages signed by locally trusted keys, so import and
+    // locally sign the bundled key first — one pkexec prompt covers key setup
+    // and the install. Idempotent: re-adding and re-signing an already
+    // trusted key is a no-op. If the bundled key is missing, fall back to the
+    // bare install so the pacman error (with its manual-trust hint below)
+    // surfaces instead of a confusing key-setup failure.
+    fn shell_quote(s: &str) -> String {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    }
+    let key_path = app
+        .path()
+        .resource_dir()
+        .ok()
+        .and_then(|d| crate::bins::resolve_resource_file(&d, "union-manifold-signing-key.asc"));
+    let setup = match &key_path {
+        Some(key) => format!(
+            "set -e; pacman-key --add {} && pacman-key --lsign-key 468871A04436AAAC && pacman -U --noconfirm {}",
+            shell_quote(&key.to_string_lossy()),
+            shell_quote(&pkg_path.to_string_lossy()),
+        ),
+        None => format!("pacman -U --noconfirm {}", shell_quote(&pkg_path.to_string_lossy())),
+    };
+
     let child = tokio::process::Command::new("pkexec")
-        .arg("pacman")
-        .arg("-U")
-        .arg("--noconfirm")
-        .arg(&pkg_path)
+        .arg("sh")
+        .arg("-c")
+        .arg(&setup)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
@@ -187,11 +210,18 @@ async fn install_via_pacman(app: &AppHandle, new_version: &str) -> Result<(), St
             "authorization unavailable — is a polkit agent running? install manually: sudo pacman -U {}",
             pkg_path.display()
         )),
-        code => Err(format!(
-            "pacman failed (exit {code:?}){}. install manually: sudo pacman -U {}",
-            if detail.is_empty() { String::new() } else { format!(": {detail}") },
-            pkg_path.display()
-        )),
+        code => {
+            let trust_hint = if detail.contains("key") || detail.contains("keyring") {
+                " (pacman does not trust the signing key — the app normally imports it automatically; to fix manually: sudo pacman-key --add /usr/lib/union-manifold/union-manifold-signing-key.asc && sudo pacman-key --lsign-key 468871A04436AAAC)"
+            } else {
+                ""
+            };
+            Err(format!(
+                "pacman failed (exit {code:?}){trust_hint}{}. install manually: sudo pacman -U {}",
+                if detail.is_empty() { String::new() } else { format!(": {detail}") },
+                pkg_path.display()
+            ))
+        }
     }
 }
 
