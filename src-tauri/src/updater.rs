@@ -38,6 +38,11 @@ fn emit_progress(app: &AppHandle, phase: &str, received: u64, total: Option<u64>
     .ok();
 }
 
+/// POSIX single-quote escaping for paths interpolated into `sh -c` commands.
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
 #[tauri::command]
 pub async fn check_for_updates(app: AppHandle) -> Value {
     let updater = match app.updater() {
@@ -142,9 +147,6 @@ async fn install_via_pacman(app: &AppHandle, new_version: &str) -> Result<(), St
     // trusted key is a no-op. If the bundled key is missing, fall back to the
     // bare install so the pacman error (with its manual-trust hint below)
     // surfaces instead of a confusing key-setup failure.
-    fn shell_quote(s: &str) -> String {
-        format!("'{}'", s.replace('\'', "'\\''"))
-    }
     let key_path = app
         .path()
         .resource_dir()
@@ -211,10 +213,19 @@ async fn install_via_pacman(app: &AppHandle, new_version: &str) -> Result<(), St
             pkg_path.display()
         )),
         code => {
+            let hint_key = key_path.as_ref().map(|p| p.to_string_lossy().to_string()).or_else(|| {
+                app.path().resource_dir().ok().map(|d| d.join("union-manifold-signing-key.asc").to_string_lossy().to_string())
+            });
             let trust_hint = if detail.contains("key") || detail.contains("keyring") {
-                " (pacman does not trust the signing key — the app normally imports it automatically; to fix manually: sudo pacman-key --add /usr/lib/union-manifold/union-manifold-signing-key.asc && sudo pacman-key --lsign-key 468871A04436AAAC)"
+                match hint_key {
+                    Some(key) => format!(
+                        " (pacman does not trust the signing key — the app normally imports it automatically; to fix manually: sudo pacman-key --add {} && sudo pacman-key --lsign-key 468871A04436AAAC)",
+                        shell_quote(&key)
+                    ),
+                    None => String::new(),
+                }
             } else {
-                ""
+                String::new()
             };
             Err(format!(
                 "pacman failed (exit {code:?}){trust_hint}{}. install manually: sudo pacman -U {}",
@@ -294,5 +305,35 @@ pub async fn notify_if_update_available(app: &AppHandle) {
                 update.version
             ),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shell_quote;
+
+    // POSIX single-quote semantics only apply where sh exists.
+    #[cfg(unix)]
+    #[test]
+    fn shell_quote_round_trips_adversarial_paths() {
+        for path in [
+            "/tmp/union-manifold-3.6.1-1-x86_64.pkg.tar.zst",
+            "/tmp/it's a dir/$(whoami);`id` & pkg.tar.zst",
+            "a'b'c",
+            "plain",
+            "trailing\\",
+        ] {
+            let quoted = shell_quote(path);
+            let echo = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(format!("printf %s {}", quoted))
+                .output()
+                .expect("sh available");
+            assert_eq!(
+                String::from_utf8_lossy(&echo.stdout),
+                path,
+                "round-trip failed for {path:?}"
+            );
+        }
     }
 }
