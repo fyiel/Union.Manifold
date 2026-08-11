@@ -1,5 +1,7 @@
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter, Manager};
+#[cfg(target_os = "linux")]
+use tauri::Manager;
+use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::UpdaterExt;
 
 fn version(app: &AppHandle) -> String {
@@ -38,7 +40,9 @@ fn emit_progress(app: &AppHandle, phase: &str, received: u64, total: Option<u64>
     .ok();
 }
 
-/// POSIX single-quote escaping for paths interpolated into `sh -c` commands.
+/// POSIX single-quote escaping for paths interpolated into `sh -c` commands
+/// (the pacman updater is Linux-only).
+#[cfg(target_os = "linux")]
 fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
@@ -310,10 +314,11 @@ pub async fn notify_if_update_available(app: &AppHandle) {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "linux")]
     use super::shell_quote;
 
     // POSIX single-quote semantics only apply where sh exists.
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     #[test]
     fn shell_quote_round_trips_adversarial_paths() {
         for path in [
