@@ -64,8 +64,9 @@ export function BrowsePage() {
     measure()
     const el = scrollerRef.current
     if (!el) return
-    const ro = new ResizeObserver(() => measure())
-    ro.observe(el)
+    // jsdom (renderer tests) has no ResizeObserver; WebKitGTK does.
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => measure()) : null
+    ro?.observe(el)
     if (restoreScroll.current) {
       const top = restoreScroll.current
       restoreScroll.current = 0
@@ -73,7 +74,7 @@ export function BrowsePage() {
         if (scrollerRef.current) scrollerRef.current.scrollTop = top
       })
     }
-    return () => ro.disconnect()
+    return () => ro?.disconnect()
   }, [measure])
 
   // Window geometry: rows are ~350px tall (168px cover @3:4 + text + gap);
