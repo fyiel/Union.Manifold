@@ -1,6 +1,7 @@
 use std::sync::LazyLock;
 use std::time::Duration;
 
+use base64::Engine;
 use serde_json::Value;
 
 use crate::http::{self, FetchOpts};
@@ -118,6 +119,40 @@ async fn catalog_snapshot() -> Option<Vec<Value>> {
         .await
 }
 
+/// GameBounty wraps mirror links in a redirect proxy:
+/// `https://api.gamebounty.world/api/dl/{slug}/{base64(real url)}`. Host
+/// detection and resolution need the real URL, so unwrap the proxy locally.
+/// Anything that does not decode stays as-is — the proxy 307s to the page,
+/// so the browser fallback still works.
+fn unwrap_link_url(url: String) -> String {
+    let Ok(parsed) = url::Url::parse(&url) else {
+        return url;
+    };
+    let host = parsed.host_str().unwrap_or("");
+    if !host.eq_ignore_ascii_case("api.gamebounty.world") {
+        return url;
+    }
+    let Some(rest) = parsed.path().strip_prefix("/api/dl/") else {
+        return url;
+    };
+    let Some((_slug, payload)) = rest.split_once('/') else {
+        return url;
+    };
+    let payload = percent_encoding::percent_decode_str(payload.trim_end_matches('/'))
+        .decode_utf8_lossy()
+        .trim_end_matches('=')
+        .to_string();
+    let decoded = base64::engine::general_purpose::STANDARD_NO_PAD
+        .decode(&payload)
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(&payload))
+        .ok()
+        .and_then(|bytes| String::from_utf8(bytes).ok());
+    match decoded {
+        Some(real) if real.starts_with("http") => real,
+        _ => url,
+    }
+}
+
 fn mirrors_to_options(container: Option<&Value>) -> Vec<DownloadOption> {
     let container = match container {
         Some(c) => c,
@@ -151,6 +186,7 @@ fn mirrors_to_options(container: Option<&Value>) -> Vec<DownloadOption> {
         let mut urls: Vec<String> = Vec::new();
         for link in &links {
             if let Some(url) = get_str(link, "url") {
+                let url = unwrap_link_url(url);
                 if !urls.contains(&url) {
                     urls.push(url);
                 }
@@ -481,5 +517,51 @@ mod tests {
         let single = options.iter().find(|o| o.parts.is_empty()).unwrap();
         assert_eq!(single.label, "0853.st");
         assert_eq!(single.size_bytes, Some(69793218560));
+    }
+
+    fn proxied(slug: &str, url: &str) -> String {
+        let payload = base64::engine::general_purpose::STANDARD_NO_PAD.encode(url);
+        format!("https://api.gamebounty.world/api/dl/{slug}/{payload}")
+    }
+
+    #[test]
+    fn proxied_links_unwrap_to_the_real_host_urls() {
+        let options = mirrors_to_options(Some(&container(json!([
+            { "name": "gofile.io", "links": [
+                { "url": proxied("some-game", "https://gofile.io/d/AAAA") },
+                { "url": proxied("some-game", "https://gofile.io/d/BBBB") },
+            ] },
+        ]))));
+        assert_eq!(options.len(), 1);
+        assert_eq!(options[0].label, "gofile.io (2 parts)");
+        assert_eq!(options[0].host_type, "gofile");
+        assert_eq!(options[0].url.as_deref(), Some("https://gofile.io/d/AAAA"));
+        assert_eq!(options[0].parts, vec!["https://gofile.io/d/BBBB".to_string()]);
+        assert!(options[0].resolvable);
+    }
+
+    #[test]
+    fn proxied_single_link_unwraps_and_stays_one_option() {
+        let options = mirrors_to_options(Some(&container(json!([
+            { "name": "pixeldrain.com", "links": [
+                { "url": proxied("some-game", "https://pixeldrain.com/u/AbCdEf") },
+            ] },
+        ]))));
+        assert_eq!(options.len(), 1);
+        assert_eq!(options[0].url.as_deref(), Some("https://pixeldrain.com/u/AbCdEf"));
+        assert_eq!(options[0].host_type, "pixeldrain");
+        assert!(options[0].parts.is_empty());
+        assert!(options[0].resolvable);
+    }
+
+    #[test]
+    fn undecodable_proxy_payloads_fall_through_untouched() {
+        let broken = "https://api.gamebounty.world/api/dl/some-game/!!!not-base64!!!";
+        let options = mirrors_to_options(Some(&container(json!([
+            { "name": "gofile.io", "links": [{ "url": broken }] },
+        ]))));
+        assert_eq!(options.len(), 1);
+        assert_eq!(options[0].url.as_deref(), Some(broken));
+        assert!(!options[0].resolvable);
     }
 }
