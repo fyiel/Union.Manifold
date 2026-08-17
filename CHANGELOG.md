@@ -3,6 +3,18 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.6.9
+
+### Fixed
+
+- Release pipeline, follow-up to 3.6.8: pre-creating the draft release was
+  not enough. tauri-action looks drafts up by tag, but a draft's git tag
+  does not exist until publish, so each platform job still created its own
+  draft and 3.6.8 published with only the Linux packages. Every platform
+  job now receives the draft's numeric release id and uploads directly to
+  it, so Windows, AppImage, deb, RPM, pacman, and both macOS builds land in
+  the one published release.
+
 ## 3.6.8
 
 ### Fixed
@@ -12,7 +24,7 @@ All notable changes to Union.Manifold. This project is a fork of
   raced to create the GitHub draft release, each created its own, and
   three of them (Windows included) stayed stranded as invisible drafts
   while only one got published. The draft release is now created once, up
-  front, so every platform job uploads into the same release.
+  front. (Necessary but not sufficient; completed in 3.6.9.)
 
 ## 3.6.7
 

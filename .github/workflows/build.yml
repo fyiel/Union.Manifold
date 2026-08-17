@@ -26,6 +26,7 @@ jobs:
       release: ${{ steps.decide.outputs.release }}
       tag: ${{ steps.decide.outputs.tag }}
       version: ${{ steps.decide.outputs.version }}
+      releaseId: ${{ steps.draft.outputs.releaseId }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -82,24 +83,28 @@ jobs:
             echo "tag=$tag"
           } >> "$GITHUB_OUTPUT"
 
-      # Create the draft release exactly once, before the matrix starts: when
-      # each tauri-action job created it on its own, concurrent jobs spawned
-      # separate drafts and every loser's assets stayed stranded forever.
+      # Create the draft release exactly once, before the matrix starts, and
+      # hand its numeric id to every build job. Looking drafts up by tag is
+      # unreliable (the tag ref does not exist until publish), which left the
+      # racing tauri-action jobs creating one draft each and stranding every
+      # loser's assets.
       - name: Create draft release
+        id: draft
         if: steps.decide.outputs.release == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.decide.outputs.tag }}
         run: |
           set -euo pipefail
-          if ! gh api "repos/${{ github.repository }}/releases/tags/$TAG" --silent 2>/dev/null; then
-            gh api "repos/${{ github.repository }}/releases" \
+          if ! id=$(gh release view "$TAG" --json databaseId --jq .databaseId 2>/dev/null); then
+            id=$(gh api "repos/${{ github.repository }}/releases" \
               -f tag_name="$TAG" \
               -f name="Union.Manifold $TAG" \
               -F draft=true \
               -f target_commitish="$GITHUB_SHA" \
-              --silent
+              --jq .id)
           fi
+          echo "releaseId=$id" >> "$GITHUB_OUTPUT"
 
   build:
     needs: check
@@ -170,10 +175,7 @@ jobs:
           # linuxdeploy's bundled strip can reject newer distro ELF sections.
           NO_STRIP: '1'
         with:
-          tagName: ${{ needs.check.outputs.tag }}
-          releaseName: 'Union.Manifold ${{ needs.check.outputs.tag }}'
-          releaseDraft: true
-          prerelease: false
+          releaseId: ${{ needs.check.outputs.releaseId }}
           args: --target ${{ matrix.target }}
 
       - name: Upload stable RPM package
@@ -206,11 +208,11 @@ jobs:
           fi
           gh release upload "${{ needs.check.outputs.tag }}" union-manifold-*x86_64.pkg.tar.zst* --clobber
 
-  # Everything above builds into a DRAFT release (tauri-action releaseDraft:true)
-  # so no platform asset or signature is ever public half-uploaded. This job runs
-  # only after every matrix build AND the pacman upload succeeded, fills the
-  # release notes from the matching CHANGELOG.md section, and publishes it, so a
-  # release ships automatically with no manual "publish" click.
+  # Everything above builds into a DRAFT release (created once in the check
+  # job) so no platform asset or signature is ever public half-uploaded. This
+  # job runs only after every matrix build AND the pacman upload succeeded,
+  # fills the release notes from the matching CHANGELOG.md section, and
+  # publishes it, so a release ships automatically with no manual click.
   publish:
     needs: [check, build]
     if: needs.check.outputs.release == 'true'
