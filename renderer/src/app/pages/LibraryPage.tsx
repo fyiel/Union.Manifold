@@ -73,6 +73,24 @@ function playTimeLabel(ms?: number): string {
   return remainder ? `${hours}h ${remainder}m played` : `${hours}h played`
 }
 
+function withResolved(x: LibGame, full: UnifiedSourceGame, preferFreshImage = false): LibGame {
+  const image = preferFreshImage
+    ? full.image || x.image
+    : x.image || full.image || undefined
+  const steamAppId = x.steamAppId ?? full.steamAppId ?? undefined
+  return {
+    ...x,
+    name: (!x.name || x.name === x.appid) ? (full.title || x.name) : x.name,
+    image,
+    steamAppId,
+    covers: image && image !== x.image
+      ? gameImageCandidates({ image, steamAppId }, { steamFirst: true })
+      : x.covers,
+    sizeText: x.sizeText || full.sizeText || undefined,
+    sizeBytes: x.sizeBytes ?? full.sizeBytes,
+  }
+}
+
 function entryToLib(entry: any, meta: Record<string, LibraryGameMeta>): LibGame | null {
   const m = entry?.metadata || {}
   const appid = String(entry?.appid || m.appid || "")
@@ -337,7 +355,7 @@ export function LibraryPage() {
       if (cancelled) return
       const now = Date.now()
       const targets = installed.filter((g) => {
-        if (g.appid.startsWith("local-") && g.steamAppId == null) return false
+        if (g.appid.startsWith("local-") && g.steamAppId == null && (!g.name || g.name === g.appid)) return false
         const hasIdentity = Boolean(g.image && g.name && g.name !== g.appid)
         const hasSize = g.sizeBytes != null || Boolean(g.sizeText)
         if (hasIdentity && hasSize) return false
@@ -369,14 +387,7 @@ export function LibraryPage() {
           if (resolved.size) {
             setInstalled((prev) => prev.map((x) => {
               const full = resolved.get(x.appid)
-              if (!full) return x
-              return {
-                ...x,
-                name: (!x.name || x.name === x.appid) ? (full.title || x.name) : x.name,
-                image: x.image || full.image || undefined,
-                sizeText: x.sizeText || full.sizeText || undefined,
-                sizeBytes: x.sizeBytes ?? full.sizeBytes,
-              }
+              return full ? withResolved(x, full) : x
             }))
           }
         }
@@ -495,7 +506,7 @@ export function LibraryPage() {
   }
 
   const refreshMetadata = async (g: LibGame) => {
-    if (g.appid.startsWith("local-") && g.steamAppId == null) return
+    if (g.appid.startsWith("local-") && g.steamAppId == null && (!g.name || g.name === g.appid)) return
     enrichTried.current.add(g.appid)
     try {
       const full = await resolveInstalledGame(g.appid, g.name, g.steamAppId)
@@ -505,7 +516,7 @@ export function LibraryPage() {
       rememberGameAs(g.appid, full)
       gameCacheRef.current[g.appid] = { cachedAt: Date.now(), game: full }
       void window.ucSettings?.set?.(GAME_CACHE_KEY, { ...gameCacheRef.current })
-      setInstalled((prev) => prev.map((x) => x.appid !== g.appid ? x : { ...x, name: (!x.name || x.name === x.appid) ? (full.title || x.name) : x.name, image: full.image || x.image, sizeText: full.sizeText || x.sizeText, sizeBytes: full.sizeBytes ?? x.sizeBytes }))
+      setInstalled((prev) => prev.map((x) => (x.appid !== g.appid ? x : withResolved(x, full, true))))
     } catch {  }
     finally { enrichTried.current.delete(g.appid) }
   }

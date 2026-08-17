@@ -582,6 +582,8 @@ export function AddGamesDialog({ onClose }: { onClose: () => void }) {
     if (!picked?.ok || !picked.files?.length) return
     const gameName = picked.files[0].name
       .replace(/(\.part\d+)?\.(zip|rar|7z|tar|gz|bz2|xz|\d{3})$/i, "")
+      .replace(/[_.]+/g, " ")
+      .replace(/\s+/g, " ")
       .trim() || "Imported game"
     setArchiveBusy(true)
     try {

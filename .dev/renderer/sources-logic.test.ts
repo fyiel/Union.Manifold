@@ -263,6 +263,35 @@ describe("installed-game resolution sharing", () => {
     expect(search).toHaveBeenCalledTimes(2)
     ;(window as any).ucSources = undefined
   })
+
+  it("searches with spaces when the title carries filename separators", async () => {
+    const search = vi.fn().mockResolvedValue({ ok: true, games: [] })
+    ;(window as any).ucSources = { search }
+
+    await resolveInstalledGame("local-archive-underscored", "Tiny_Terraces")
+    expect(search.mock.calls[0][0]).toBe("Tiny Terraces")
+    ;(window as any).ucSources = undefined
+  })
+
+  it("matches an exact normalized title for local archive games", async () => {
+    const hit = unified({ dedupKey: "title:tiny terraces", title: "Tiny Terraces" })
+    const search = vi.fn().mockResolvedValue({ ok: true, games: [hit] })
+    ;(window as any).ucSources = { search }
+
+    const res = await resolveInstalledGame("local-archive-exact", "Tiny_Terraces")
+    expect(res?.title).toBe("Tiny Terraces")
+    ;(window as any).ucSources = undefined
+  })
+
+  it("never falls back to the first hit for local archive games", async () => {
+    const wrong = unified({ dedupKey: "title:totally different", title: "Totally Different" })
+    const search = vi.fn().mockResolvedValue({ ok: true, games: [wrong] })
+    ;(window as any).ucSources = { search }
+
+    const res = await resolveInstalledGame("local-archive-nofallback", "Tiny Terraces")
+    expect(res).toBeNull()
+    ;(window as any).ucSources = undefined
+  })
 })
 
 describe("startBestDownload fallback chain", () => {
