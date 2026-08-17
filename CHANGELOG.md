@@ -3,6 +3,21 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.6.6
+
+### Fixed
+
+- Archive-installed games get proper library art now. Three things stacked:
+  the name kept filename separators (`Tiny_Terraces.rar` → "Tiny_Terraces"),
+  which source search can't match; the library's metadata refresh skipped
+  local entries entirely; and even when a match was found, only the `image`
+  field was patched while the card renders `covers` — so the dead thumbnail
+  stayed. Archive installs now name the game "Tiny Terraces", installed-game
+  resolution normalizes filename separators before searching, named local
+  entries are enriched again (with exact-title matching only, so junk names
+  never pull the wrong game's art), and a resolved cover rebuilds the card's
+  candidate list.
+
 ## 3.6.5
 
 ### Fixed
