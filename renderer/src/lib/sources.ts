@@ -164,12 +164,17 @@ async function resolveInstalledGameOnce(appid: string, title: string, knownSteam
     const m = /^steam-(\d+)$/.exec(appid)
     return m ? Number(m[1]) : null
   })()
-  const q = (title || "").trim()
+  // Archive/exe imports keep filename separators ("Tiny_Terraces.rar");
+  // source search matches on words, so normalize them away before querying.
+  const q = title.replace(/[_.]+/g, " ").replace(/\s+/g, " ").trim()
   const hits = q ? await searchSources(q, 12) : []
   const want = normTitle(q)
+  // Local imports have no catalog identity: only accept an exact normalized
+  // title — falling back to the first hit would pin the wrong game's art.
+  const isLocal = appid.startsWith("local-") || appid === "manual-install"
   const pick = steamAppId
     ? hits.find((h) => h.steamAppId === steamAppId)
-    : (hits.find((h) => normTitle(h.title) === want) || hits[0])
+    : (hits.find((h) => normTitle(h.title) === want) || (isLocal ? undefined : hits[0]))
   if (pick) {
     const stubs = (pick.sources || []).map((s) => ({ sourceId: s.sourceId, sourceSlug: s.sourceSlug }))
     const full = stubs.length ? await getSourceDetail(stubs) : null
