@@ -12,13 +12,16 @@ on:
         required: false
         type: string
 
-# jobs that release (build) redeclare contents: write themselves
+# jobs that create or publish the release (check, build, publish) redeclare
+# contents: write themselves
 permissions:
   contents: read
 
 jobs:
   check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       release: ${{ steps.decide.outputs.release }}
       tag: ${{ steps.decide.outputs.tag }}
@@ -78,6 +81,25 @@ jobs:
             echo "version=$version"
             echo "tag=$tag"
           } >> "$GITHUB_OUTPUT"
+
+      # Create the draft release exactly once, before the matrix starts: when
+      # each tauri-action job created it on its own, concurrent jobs spawned
+      # separate drafts and every loser's assets stayed stranded forever.
+      - name: Create draft release
+        if: steps.decide.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.decide.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if ! gh api "repos/${{ github.repository }}/releases/tags/$TAG" --silent 2>/dev/null; then
+            gh api "repos/${{ github.repository }}/releases" \
+              -f tag_name="$TAG" \
+              -f name="Union.Manifold $TAG" \
+              -F draft=true \
+              -f target_commitish="$GITHUB_SHA" \
+              --silent
+          fi
 
   build:
     needs: check

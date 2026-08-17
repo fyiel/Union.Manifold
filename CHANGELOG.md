@@ -3,6 +3,17 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.6.8
+
+### Fixed
+
+- Release pipeline: the 3.6.7 release shipped without its Windows
+  installer, AppImage, deb, and macOS ARM builds. All four platform jobs
+  raced to create the GitHub draft release, each created its own, and
+  three of them (Windows included) stayed stranded as invisible drafts
+  while only one got published. The draft release is now created once, up
+  front, so every platform job uploads into the same release.
+
 ## 3.6.7
 
 ### Fixed
