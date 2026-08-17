@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::http::{self, FetchOpts};
 use crate::sources::cache::{Cached, KeyedCache};
-use crate::sources::hosts::{detect_host_type, is_resolvable};
+use crate::sources::hosts::{detect_host_type, is_resolvable, link_is_dead};
 use crate::sources::parse::find_steam_app_id;
 use crate::sources::schema::{self, DownloadOption, SourceGame};
 use crate::sources::{Capabilities, QueryParams};
@@ -391,6 +391,39 @@ pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
         .collect()
 }
 
+/// GameBounty containers accumulate every host ever used, including delisted
+/// ones whose stale links rot (auto-deleted); the site hides those mirrors
+/// server-side, but the public API exposes no liveness signal. Probe every
+/// part URL and drop a mirror when any part is definitively dead — a partial
+/// archive set cannot extract, and one dead part makes the whole mirror
+/// useless. Inconclusive probes keep the mirror: listing a dead link is bad,
+/// hiding a working one is worse.
+async fn prune_dead_mirrors(options: Vec<DownloadOption>) -> Vec<DownloadOption> {
+    let mut probes: Vec<(usize, String)> = Vec::new();
+    for (i, option) in options.iter().enumerate() {
+        for url in option.url.iter().chain(option.parts.iter()) {
+            probes.push((i, url.clone()));
+        }
+    }
+    let dead: std::collections::HashSet<usize> = http::map_limit(probes, 4, |(i, url)| async move {
+        Some((i, link_is_dead(&url).await))
+    })
+    .await
+    .into_iter()
+    .filter(|(_, dead)| *dead)
+    .map(|(i, _)| i)
+    .collect();
+    if dead.is_empty() {
+        return options;
+    }
+    options
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| !dead.contains(i))
+        .map(|(_, option)| option)
+        .collect()
+}
+
 pub async fn get_detail(slug: &str) -> Option<SourceGame> {
     let slug = slug.trim();
     let slug = slug.strip_suffix(SLUG_SUFFIX).unwrap_or(slug).to_string();
@@ -405,7 +438,9 @@ pub async fn get_detail(slug: &str) -> Option<SourceGame> {
             if !data.is_object() {
                 return None;
             }
-            post_to_game(&data)
+            let mut game = post_to_game(&data)?;
+            game.download_options = prune_dead_mirrors(game.download_options).await;
+            Some(game)
         })
         .await
 }
