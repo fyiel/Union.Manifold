@@ -3,6 +3,17 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.6.5
+
+### Fixed
+
+- Browse and Advanced Search grids no longer shuffle cards while scrolling
+  or streaming: partial results arrive re-sorted as each source finishes,
+  and every append re-sorted the whole grid, so titles visibly jumped
+  around. Display order now freezes per query; updates merge into existing
+  rows in place, new arrivals append; and re-sorting happens only on a
+  fresh query or an explicit sort click.
+
 ## 3.6.4
 
 ### Fixed
