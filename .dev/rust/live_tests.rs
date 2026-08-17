@@ -214,6 +214,28 @@ async fn live_gamebounty_multipart_resolves_every_part() {
 
 #[tokio::test]
 #[ignore]
+async fn live_gamebounty_detail_prunes_dead_mirrors() {
+    let detail = adapters::gamebounty::get_detail("tiny-terraces")
+        .await
+        .expect("tiny-terraces detail");
+    let hosts: Vec<&str> = detail
+        .download_options
+        .iter()
+        .map(|o| o.host_type.as_str())
+        .collect();
+    eprintln!("surviving mirrors: {hosts:?}");
+    for dead in ["datanodes", "vikingfile", "filemirage", "rootz"] {
+        assert!(!hosts.contains(&dead), "{dead} mirror is dead and must be pruned");
+    }
+    assert!(
+        hosts.iter().any(|h| ["fileditch", "fileq", "gofile"].contains(h)),
+        "at least one known-alive mirror must survive: {hosts:?}"
+    );
+    assert!(!detail.download_options.is_empty());
+}
+
+#[tokio::test]
+#[ignore]
 async fn live_every_source_returns_current_games() {
     let params = QueryParams {
         limit: 10,

@@ -138,6 +138,21 @@ pub fn is_resolvable(url: &str) -> bool {
         || (gate::matches(url) && crate::slipgate::cfg().is_some())
 }
 
+pub async fn link_is_dead(url: &str) -> bool {
+    if rootz::matches(url) {
+        return rootz::is_dead(url).await;
+    }
+    let opts = crate::http::FetchOpts {
+        retries: Some(1),
+        timeout: Some(std::time::Duration::from_secs(10)),
+        ..Default::default()
+    };
+    match crate::http::fetch(url, &opts).await {
+        Ok(resp) => matches!(resp.status().as_u16(), 404 | 410),
+        Err(_) => false,
+    }
+}
+
 pub async fn resolve_url(option: &DownloadOption) -> ResolveResult {
     let url = option
         .url
