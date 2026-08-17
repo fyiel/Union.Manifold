@@ -515,7 +515,7 @@ export async function startSourceDownload(
   }
   if (!resolved.resolvable) {
     if (resolved.cancelled) return { ok: false, cancelled: true, reason: resolved.reason }
-    return { ok: false, openUrl: resolved.openUrl || option.pageUrl || option.url, reason: resolved.reason }
+    return { ok: false, openUrl: option.pageUrl || resolved.openUrl || option.url, reason: resolved.reason }
   }
 
   const appid = safeId(game.dedupKey)
@@ -534,7 +534,7 @@ export async function startSourceDownload(
       : []
 
   if (!files.length) {
-    return { ok: false, openUrl: resolved.openUrl || option.pageUrl, reason: "no file url" }
+    return { ok: false, openUrl: option.pageUrl || resolved.openUrl, reason: "no file url" }
   }
 
   const source = game.sources.find((entry) => entry.sourceId === sourceId)
