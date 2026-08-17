@@ -50,6 +50,24 @@ export function mergeUnique<T extends { dedupKey: string }>(prev: T[], next: T[]
   return [...prev, ...next.filter((g) => !seen.has(g.dedupKey))]
 }
 
+/**
+ * Merge a re-sorted snapshot into the displayed list without moving anything
+ * the user can already see: known keys update in place (fresh mirror counts,
+ * metadata), unknown keys append in the snapshot's order. Re-sorting live
+ * results under the viewport makes cards shuffle while scrolling.
+ */
+export function mergeStable<T extends { dedupKey: string }>(prev: T[], next: T[]): T[] {
+  const index = new Map(prev.map((g, i) => [g.dedupKey, i]))
+  const out = prev.slice()
+  const fresh: T[] = []
+  for (const g of next) {
+    const i = index.get(g.dedupKey)
+    if (i === undefined) fresh.push(g)
+    else out[i] = g
+  }
+  return fresh.length ? [...out, ...fresh] : out
+}
+
 export function countMirrors(games: UnifiedSourceGame[]): { perSource: Record<string, number>; total: number } {
   const perSource: Record<string, number> = {}
   let total = 0
