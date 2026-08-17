@@ -3,6 +3,25 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.6.2
+
+### Fixed
+
+- SteamRIP's BuzzHeavier mirrors resolve in-app again: the host bounces
+  referer-less page fetches to the SteamRIP homepage, which made every
+  BuzzHeavier link fail with "no download token" and fall back to the
+  browser. The resolver now sends the SteamRIP referer these
+  steamrip-affiliated hosts expect, so the download token flow completes
+  (verified end-to-end against live links).
+
+- GameBounty mirrors resolve in-app again: the API now wraps every download
+  link in a redirect (`https://api.gamebounty.world/api/dl/{slug}/{base64}`),
+  which made each mirror look like an unknown, browser-only host; multi-part
+  games always fell back to the browser. The adapter unwraps the proxy back
+  to the real host URL locally, so host detection, the resolvable badge, and
+  in-app resolution see the actual mirror again. Links that fail to decode
+  pass through untouched and still open correctly in the browser.
+
 ## 3.6.1
 
 ### Fixed
