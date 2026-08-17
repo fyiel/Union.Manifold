@@ -9,7 +9,7 @@ use super::not_resolvable;
 static HOST_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)(^|\.)rootz\.so$").unwrap());
 static ID_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"/d/([A-Za-z0-9_-]+)").unwrap());
 static TOKEN_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#""pageToken"\s*:\s*"([^"\\]+)""#).unwrap());
+    LazyLock::new(|| Regex::new(r#"\\?"pageToken\\?"\s*:\s*\\?"([^"\\]+)"#).unwrap());
 
 pub fn matches(url: &str) -> bool {
     super::host_matches(url, &HOST_RE)
@@ -21,26 +21,32 @@ fn id_from(url: &str) -> Option<String> {
     Some(caps.get(1)?.as_str().to_string())
 }
 
+/// The page embeds the token JSON-escaped inside the Next.js RSC payload
+/// (`\"pageToken\":\"...\"`); tolerate both escaped and plain forms.
+fn page_token(page: &str) -> Option<String> {
+    TOKEN_RE
+        .captures(page)
+        .and_then(|c| c.get(1))
+        .map(|m| m.as_str().to_string())
+}
+
 fn num(v: Option<&Value>) -> Option<u64> {
     super::num(v)
 }
 
-pub async fn resolve(url: &str) -> ResolveResult {
-    let id = match id_from(url) {
-        Some(id) => id,
-        None => return not_resolvable(url, Some("rootz link has no file id")),
-    };
+/// Page token -> `download-by-short` API data. The page stays up for deleted
+/// files, so this API response is the only honest liveness signal. Returns
+/// the canonical page URL alongside the data (download Referer).
+async fn file_data(url: &str) -> Result<(String, Value), String> {
+    let id = id_from(url).ok_or_else(|| "rootz link has no file id".to_string())?;
     let page_url = format!("https://www.rootz.so/d/{id}");
 
     let page = match http::fetch(&page_url, &FetchOpts::default()).await {
         Ok(r) if r.status().is_success() => r.text().await.unwrap_or_default(),
-        _ => return not_resolvable(url, Some("rootz page failed")),
+        _ => return Err("rootz page failed".to_string()),
     };
 
-    let token = match TOKEN_RE.captures(&page).and_then(|c| c.get(1)) {
-        Some(m) => m.as_str().to_string(),
-        None => return not_resolvable(url, Some("no rootz page token")),
-    };
+    let token = page_token(&page).ok_or_else(|| "no rootz page token".to_string())?;
 
     let api = format!("https://www.rootz.so/api/files/download-by-short?shortId={id}");
     let mut headers = HashMap::new();
@@ -52,25 +58,45 @@ pub async fn resolve(url: &str) -> ResolveResult {
         ..Default::default()
     };
 
-    let resp = match http::fetch(&api, &opts).await {
-        Ok(r) => r,
-        Err(_) => return not_resolvable(url, Some("rootz api request failed")),
-    };
+    let resp = http::fetch(&api, &opts)
+        .await
+        .map_err(|_| "rootz api request failed".to_string())?;
     if !resp.status().is_success() {
-        return not_resolvable(url, Some(&format!("rootz api {}", resp.status().as_u16())));
+        return Err(format!("rootz api {}", resp.status().as_u16()));
     }
-    let json = match resp.json::<Value>().await {
-        Ok(j) => j,
-        Err(_) => return not_resolvable(url, Some("rootz api returned no json")),
+    let json = resp
+        .json::<Value>()
+        .await
+        .map_err(|_| "rootz api returned no json".to_string())?;
+    if json.get("success").and_then(|v| v.as_bool()) != Some(true) {
+        return Err("rootz api said no".to_string());
+    }
+    let data = json
+        .get("data")
+        .filter(|v| v.is_object())
+        .cloned()
+        .ok_or_else(|| "rootz api returned no data".to_string())?;
+    Ok((page_url, data))
+}
+
+/// Definitive dead check: the API answered and the file is not active.
+/// Any failure along the way is inconclusive — never report dead on it.
+pub async fn is_dead(url: &str) -> bool {
+    match file_data(url).await {
+        Ok((_, data)) => matches!(
+            data.get("status").and_then(|v| v.as_str()),
+            Some(status) if status != "active"
+        ),
+        Err(_) => false,
+    }
+}
+
+pub async fn resolve(url: &str) -> ResolveResult {
+    let (page_url, data) = match file_data(url).await {
+        Ok(v) => v,
+        Err(e) => return not_resolvable(url, Some(&e)),
     };
 
-    if json.get("success").and_then(|v| v.as_bool()) != Some(true) {
-        return not_resolvable(url, Some("rootz api said no"));
-    }
-    let data = match json.get("data").filter(|v| v.is_object()) {
-        Some(d) => d,
-        None => return not_resolvable(url, Some("rootz api returned no data")),
-    };
     if data.get("status").and_then(|v| v.as_str()) != Some("active") {
         return not_resolvable(url, Some("rootz file is not active"));
     }
@@ -108,5 +134,31 @@ pub async fn resolve(url: &str) -> ResolveResult {
         size_bytes,
         headers: Some(dl_headers),
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn page_token_from_escaped_rsc_payload() {
+        // Next.js embeds the token JSON-escaped inside the RSC payload.
+        let page = r#"{\"shortId\":\"LRRs8\",\"pageToken\":\"TFJSczg6NTk1NjUxMQ.abc123_-XYZ\"}]"#;
+        assert_eq!(
+            page_token(page).as_deref(),
+            Some("TFJSczg6NTk1NjUxMQ.abc123_-XYZ")
+        );
+    }
+
+    #[test]
+    fn page_token_from_plain_json() {
+        let page = r#"{"shortId":"LRRs8","pageToken":"plain.token_1-2"}"#;
+        assert_eq!(page_token(page).as_deref(), Some("plain.token_1-2"));
+    }
+
+    #[test]
+    fn page_token_missing_is_none() {
+        assert!(page_token("<html>no token here</html>").is_none());
     }
 }
