@@ -43,6 +43,7 @@ fn browser_headers() -> HashMap<String, String> {
     [
         ("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"),
         ("Accept-Language", "en-US,en;q=0.9"),
+        ("Referer", "https://steamrip.com/"),
         ("sec-ch-ua", "\"Chromium\";v=\"124\", \"Not:A-Brand\";v=\"24\", \"Google Chrome\";v=\"124\""),
         ("sec-ch-ua-mobile", "?0"),
         ("sec-ch-ua-platform", "\"Windows\""),
@@ -246,6 +247,15 @@ pub async fn resolve(url: &str) -> ResolveResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn page_requests_carry_steamrip_referer() {
+        let headers = browser_headers();
+        assert_eq!(
+            headers.get("Referer").map(String::as_str),
+            Some("https://steamrip.com/")
+        );
+    }
 
     #[test]
     fn matches_both_short_domains() {
