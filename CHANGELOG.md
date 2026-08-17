@@ -3,6 +3,22 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.6.3
+
+### Fixed
+
+- GameBounty game pages no longer list dead mirrors: containers keep every
+  host ever used, including delisted ones whose stale links get auto-deleted,
+  so some games showed a long list of options that all fail. Each mirror's
+  part URLs are now probed when the page loads and a mirror is dropped only
+  on a definitive dead signal (HTTP 404/410, or the host's API reporting the
+  file deleted); inconclusive answers keep the mirror, so working hosts are
+  never hidden by a hiccup. Matches what gamebounty.world itself shows.
+
+- Rootz resolution works again: the file page now embeds its page token
+  JSON-escaped inside the Next.js payload, which the token extractor didn't
+  match, so every Rootz link failed with "no rootz page token".
+
 ## 3.6.2
 
 ### Fixed
