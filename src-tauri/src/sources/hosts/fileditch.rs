@@ -179,6 +179,9 @@ pub async fn resolve(url: &str) -> ResolveResult {
         _ => return not_resolvable(url, Some("fileditch proof-of-work challenge failed")),
     };
 
+    // The challenge form submits to its own page URL. file.php links 302 to
+    // the real file path first; POSTing the answer to the original URL just
+    // 302s again (bodyless GET) and the challenge can never be satisfied.
     let mut post_headers = headers.clone();
     post_headers.insert(
         "Content-Type".to_string(),
@@ -188,9 +191,9 @@ pub async fn resolve(url: &str) -> ResolveResult {
         "Origin".to_string(),
         referer.trim_end_matches('/').to_string(),
     );
-    post_headers.insert("Referer".to_string(), url.to_string());
+    post_headers.insert("Referer".to_string(), response_url.clone());
     let resp = match http::fetch(
-        url,
+        &response_url,
         &FetchOpts {
             method: Some("POST".to_string()),
             headers: post_headers,
