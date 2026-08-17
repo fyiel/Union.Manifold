@@ -159,12 +159,21 @@ async function resolveInstalledGameOnce(appid: string, title: string, knownSteam
     return m ? Number(m[1]) : null
   })()
   const q = title.replace(/[_.]+/g, " ").replace(/\s+/g, " ").trim()
-  const hits = q ? await searchSources(q, 12) : []
-  const want = normTitle(q)
   const isLocal = appid.startsWith("local-") || appid === "manual-install"
-  const pick = steamAppId
-    ? hits.find((h) => h.steamAppId === steamAppId)
-    : (hits.find((h) => normTitle(h.title) === want) || (isLocal ? undefined : hits[0]))
+  const tokens = q.split(" ").filter(Boolean)
+  const queries = [q]
+  if (isLocal) {
+    for (let n = tokens.length - 1; n >= 2; n--) queries.push(tokens.slice(0, n).join(" "))
+  }
+  let pick: UnifiedSourceGame | undefined
+  for (const query of queries) {
+    const hits = query ? await searchSources(query, 12) : []
+    const want = normTitle(query)
+    pick = steamAppId
+      ? hits.find((h) => h.steamAppId === steamAppId)
+      : hits.find((h) => normTitle(h.title) === want) || (isLocal ? undefined : hits[0])
+    if (pick) break
+  }
   if (pick) {
     const stubs = (pick.sources || []).map((s) => ({ sourceId: s.sourceId, sourceSlug: s.sourceSlug }))
     const full = stubs.length ? await getSourceDetail(stubs) : null

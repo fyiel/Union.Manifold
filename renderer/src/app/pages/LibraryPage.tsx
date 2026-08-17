@@ -31,6 +31,7 @@ type LibGame = {
   steamAppId?: number
   covers?: string[]
   installType?: string
+  nameLocked?: boolean
 }
 
 type LibraryGameMeta = { collections?: string[]; lastPlayedAt?: number; playTimeMs?: number }
@@ -78,9 +79,11 @@ function withResolved(x: LibGame, full: UnifiedSourceGame, preferFreshImage = fa
     ? full.image || x.image
     : x.image || full.image || undefined
   const steamAppId = x.steamAppId ?? full.steamAppId ?? undefined
+  const isLocal = x.appid.startsWith("local-") || x.appid === "manual-install"
+  const adoptTitle = (isLocal && !x.nameLocked) || !x.name || x.name === x.appid
   return {
     ...x,
-    name: (!x.name || x.name === x.appid) ? (full.title || x.name) : x.name,
+    name: adoptTitle ? (full.title || x.name) : x.name,
     image,
     steamAppId,
     covers: image && image !== x.image
@@ -108,6 +111,7 @@ function entryToLib(entry: any, meta: Record<string, LibraryGameMeta>): LibGame 
   return {
     appid,
     name: m.name || entry?.name || appid,
+    nameLocked: Boolean(m.name),
     image,
     covers,
     sizeBytes: typeof m.sizeBytes === "number" ? m.sizeBytes : undefined,
@@ -286,12 +290,8 @@ export function LibraryPage() {
           if (fresh) {
             rememberGames([fresh])
             rememberGameAs(g.appid, fresh)
-            if (!g.image && fresh.image) g.image = fresh.image
-            if ((!g.name || g.name === g.appid) && fresh.title) g.name = fresh.title
-            if (!g.sizeText && fresh.sizeText) g.sizeText = fresh.sizeText
-            if (g.sizeBytes == null && fresh.sizeBytes != null) g.sizeBytes = fresh.sizeBytes
           }
-          games.push(g)
+          games.push(fresh ? withResolved(g, fresh) : g)
         }
         setInstalled(games)
       }
@@ -694,7 +694,7 @@ export function LibraryPage() {
         <EditDetailsDialog
           game={editFor}
           onClose={() => setEditFor(null)}
-          onSaved={(u) => setInstalled((prev) => prev.map((x) => x.appid !== editFor.appid ? x : { ...x, name: typeof u.name === "string" && u.name ? u.name : x.name, image: typeof u.image === "string" && u.image ? u.image : x.image, sizeText: typeof u.size === "string" && u.size ? u.size : x.sizeText, version: typeof u.version === "string" ? u.version : x.version }))}
+          onSaved={(u) => setInstalled((prev) => prev.map((x) => x.appid !== editFor.appid ? x : { ...x, name: typeof u.name === "string" && u.name ? u.name : x.name, nameLocked: typeof u.name === "string" && Boolean(u.name) ? true : x.nameLocked, image: typeof u.image === "string" && u.image ? u.image : x.image, sizeText: typeof u.size === "string" && u.size ? u.size : x.sizeText, version: typeof u.version === "string" ? u.version : x.version }))}
         />
       )}
       {linuxFor && <LinuxConfigDialog appid={linuxFor.appid} gameName={linuxFor.name} onClose={() => setLinuxFor(null)} />}

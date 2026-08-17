@@ -3,6 +3,26 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.6.7
+
+### Fixed
+
+- Archive-installed games still showed filename titles and dead thumbnails
+  in the library. Exact-title matching could never hit names carrying
+  release tags ("Tiny_Terraces_TENOKE"), so resolution quietly gave up;
+  and on the next launch the persisted cache patched only the `image`
+  field, leaving the card's `covers` list empty, so the thumbnail stayed
+  blank even for previously resolved games. Local installs now retry
+  resolution with trailing tokens trimmed until an exact title matches,
+  adopt the canonical title unless the user renamed the game themselves,
+  and cache restore rebuilds the full cover candidate list.
+- Browse grid still juggled cards while scrolling: the scroll window
+  guessed column count from the scroller's padding-inclusive width (one
+  column off at many window sizes) and assumed a fixed 350px row height,
+  so the mounted window drifted further out of alignment with every row.
+  Column count and row height are now measured from the live grid, keeping
+  the window aligned at any width.
+
 ## 3.6.6
 
 ### Fixed

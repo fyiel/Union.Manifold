@@ -11,6 +11,20 @@ const PAGE = 48
 const MEMORY_REFRESH_MS = 90_000
 type ZoomedCover = { game: UnifiedSourceGame; candidates: string[] }
 
+export function browseColsForWidth(gridWidth: number): number {
+  if (!Number.isFinite(gridWidth) || gridWidth <= 0) return 1
+  return Math.max(1, Math.floor((gridWidth + 18) / 186))
+}
+
+export function browseColumnCount(grid: HTMLElement): number {
+  const tracks = getComputedStyle(grid).gridTemplateColumns
+  if (tracks && !tracks.includes("repeat")) {
+    const n = tracks.split(" ").filter(Boolean).length
+    if (n > 0) return n
+  }
+  return browseColsForWidth(grid.clientWidth)
+}
+
 const sortForDisplay = (list: UnifiedSourceGame[], mode: SourceSortMode, query: string) =>
   sortUnifiedGames(list, mode, { query })
 
@@ -48,35 +62,37 @@ export function BrowsePage() {
   })
   const partialSeenRef = useRef(0)
 
-  // Scroll-window virtualization: only the rows around the viewport are
-  // mounted (top/bottom spacers hold the scroll height), so the DOM stays
-  // bounded no matter how far the catalog is scrolled — reaching the bottom
-  // no longer mounts every loaded game (3,783 nodes / 167 imgs measured
-  // before this). Cards outside the window unmount, releasing their images.
   const [viewTop, setViewTop] = useState(0)
   const [clientH, setClientH] = useState(1)
-  const [clientW, setClientW] = useState(1)
-  const measure = useCallback(() => {
+  const [cols, setCols] = useState(1)
+  const [rowH, setRowH] = useState(350)
+  const gridRef = useRef<HTMLDivElement | null>(null)
+  const measureScroller = useCallback(() => {
     const el = scrollerRef.current
     if (!el) return
-    if (el.clientHeight !== clientH) setClientH(el.clientHeight || 1)
-    if (el.clientWidth !== clientW) setClientW(el.clientWidth || 1)
-  }, [clientH, clientW])
+    const h = el.clientHeight || 1
+    setClientH((prev) => (prev === h ? prev : h))
+  }, [])
+  const measureGrid = useCallback(() => {
+    const grid = gridRef.current
+    if (!grid) return
+    const nextCols = browseColumnCount(grid)
+    setCols((prev) => (prev === nextCols ? prev : nextCols))
+    const card = grid.querySelector(".mf-card")
+    const h = card instanceof HTMLElement ? card.offsetHeight : 0
+    if (h > 0) setRowH((prev) => (Math.abs(h + 18 - prev) > 1 ? h + 18 : prev))
+  }, [])
 
-  // A fresh (non-append) result set shrinks the list; the stale viewTop would
-  // otherwise point past the end and render an empty window while the browser
-  // clamp-walks down. Jump to the top so the first render is valid.
   const resetViewToTop = useCallback(() => {
     setViewTop(0)
     if (scrollerRef.current) scrollerRef.current.scrollTop = 0
   }, [])
 
   useEffect(() => {
-    measure()
+    measureScroller()
     const el = scrollerRef.current
     if (!el) return
-    // jsdom (renderer tests) has no ResizeObserver; WebKitGTK does.
-    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => measure()) : null
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => measureScroller()) : null
     ro?.observe(el)
     if (restoreScroll.current) {
       const top = restoreScroll.current
@@ -86,10 +102,18 @@ export function BrowsePage() {
       })
     }
     return () => ro?.disconnect()
-  }, [measure])
+  }, [measureScroller])
 
-  // Window geometry: rows are ~350px tall (168px cover @3:4 + text + gap);
-  // col count follows the grid's auto-fill minmax(168px, 1fr).
+  const hasGames = games.length > 0
+  useEffect(() => {
+    if (!hasGames) return
+    measureGrid()
+    const grid = gridRef.current
+    if (!grid || typeof ResizeObserver === "undefined") return
+    const ro = new ResizeObserver(measureGrid)
+    ro.observe(grid)
+    return () => ro.disconnect()
+  }, [hasGames, measureGrid])
   const loadingMoreRef = useRef(false)
   const appendReqRef = useRef<number | null>(null)
   const available = sourcesAvailable()
@@ -305,11 +329,6 @@ export function BrowsePage() {
     setGames(resorted)
   }
 
-  // Window geometry: rows are ~350px tall (168px cover @3:4 + text + gap);
-  // col count follows the grid's auto-fill minmax(168px, 1fr). Only the rows
-  // around the viewport are mounted; spacers hold the scroll height.
-  const cols = Math.max(1, Math.floor((clientW + 18) / 186))
-  const rowH = 350
   const totalRows = Math.ceil(games.length / cols)
   const visibleRows = Math.max(1, Math.ceil(clientH / rowH))
   const startRow = Math.max(0, Math.floor(viewTop / rowH) - 2)
@@ -327,7 +346,6 @@ export function BrowsePage() {
     const el = e.currentTarget
     setBrowseScroll(el.scrollTop)
     setViewTop(el.scrollTop)
-    measure()
     if (hasMore && !loadingMoreRef.current && !searching && el.scrollHeight - el.scrollTop - el.clientHeight < 700) {
       void loadMore()
     }
@@ -456,7 +474,7 @@ export function BrowsePage() {
           <EmptyState text="source backend unavailable" />
         ) : games.length > 0 ? (
           <>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(168px, 1fr))", gap: 18, alignContent: "start" }}>
+            <div ref={gridRef} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(168px, 1fr))", gap: 18, alignContent: "start" }}>
               {topPad > 0 && <div aria-hidden style={{ gridColumn: "1 / -1", height: topPad }} />}
               {games.slice(windowStart, windowEnd).map((g) => (
                 <GameCard key={g.dedupKey} game={g} onZoom={openCover} />
