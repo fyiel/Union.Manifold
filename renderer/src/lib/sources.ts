@@ -50,6 +50,18 @@ export function mergeUnique<T extends { dedupKey: string }>(prev: T[], next: T[]
   return [...prev, ...next.filter((g) => !seen.has(g.dedupKey))]
 }
 
+export function mergeStable<T extends { dedupKey: string }>(prev: T[], next: T[]): T[] {
+  const index = new Map(prev.map((g, i) => [g.dedupKey, i]))
+  const out = prev.slice()
+  const fresh: T[] = []
+  for (const g of next) {
+    const i = index.get(g.dedupKey)
+    if (i === undefined) fresh.push(g)
+    else out[i] = g
+  }
+  return fresh.length ? [...out, ...fresh] : out
+}
+
 export function countMirrors(games: UnifiedSourceGame[]): { perSource: Record<string, number>; total: number } {
   const perSource: Record<string, number> = {}
   let total = 0

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
 import { X } from "lucide-react"
-import { cancelSourceQuery, querySources, nextSourceRequestId, rememberGames, sourcesAvailable, listSources, onSourcesChanged, mergeUnique, countMirrors, nextSortMode, sortModeLabel, type SourceSortMode, sortUnifiedGames } from "@/lib/sources"
+import { cancelSourceQuery, querySources, nextSourceRequestId, rememberGames, sourcesAvailable, listSources, onSourcesChanged, mergeUnique, mergeStable, countMirrors, nextSortMode, sortModeLabel, type SourceSortMode, sortUnifiedGames } from "@/lib/sources"
 import { getBrowseCache, setBrowseCache, setBrowseScroll, consumeDiskRestore } from "@/lib/browse-cache"
 import { GameCard } from "@/app/manifold/GameCard"
 import { MONO, SearchIcon, SmartImage, Spinner, CenterState, gameImageCandidates } from "@/app/manifold/ui"
@@ -10,6 +10,9 @@ type SrcStatus = "idle" | "searching" | "done" | "failed"
 const PAGE = 48
 const MEMORY_REFRESH_MS = 90_000
 type ZoomedCover = { game: UnifiedSourceGame; candidates: string[] }
+
+const sortForDisplay = (list: UnifiedSourceGame[], mode: SourceSortMode, query: string) =>
+  sortUnifiedGames(list, mode, { query })
 
 export function BrowsePage() {
   const cached = getBrowseCache()
@@ -36,6 +39,14 @@ export function BrowsePage() {
   const fetchedAtRef = useRef(cached?.fetchedAt ?? 0)
   const gamesRef = useRef(games)
   useEffect(() => { gamesRef.current = games }, [games])
+
+  const sortModeRef = useRef(sortMode)
+  const committedRef = useRef(committed)
+  useEffect(() => {
+    sortModeRef.current = sortMode
+    committedRef.current = committed
+  })
+  const partialSeenRef = useRef(0)
 
   // Scroll-window virtualization: only the rows around the viewport are
   // mounted (top/bottom spacers hold the scroll height), so the DOM stays
@@ -152,10 +163,14 @@ export function BrowsePage() {
         return
       }
       rememberGames(res.games)
-      const nextGames = append ? mergeUnique(gamesRef.current, res.games) : res.games
+      const nextGames = append
+        ? mergeUnique(gamesRef.current, res.games)
+        : partialSeenRef.current === id
+          ? mergeStable(gamesRef.current, res.games)
+          : sortForDisplay(res.games, sortModeRef.current, committedRef.current)
       gamesRef.current = nextGames
       setGames(nextGames)
-      if (!append) resetViewToTop()
+      if (!append && partialSeenRef.current !== id) resetViewToTop()
       fetchedAtRef.current = Date.now()
       offsetRef.current = startOffset + PAGE
       setTotal(append && res.games.length === 0 ? nextGames.length : res.total)
@@ -231,13 +246,24 @@ export function BrowsePage() {
     const off = window.ucSources?.onBrowsePartial?.((payload) => {
       if (!payload || payload.reqId !== reqId.current) return
       const isAppend = appendReqRef.current === payload.reqId
-      const merged = isAppend ? mergeUnique(gamesRef.current, payload.games) : payload.games
       rememberGames(payload.games)
-      setGames(merged)
-      gamesRef.current = merged
-      if (!isAppend) resetViewToTop()
+      if (isAppend) {
+        const merged = mergeUnique(gamesRef.current, payload.games)
+        gamesRef.current = merged
+        setGames(merged)
+      } else if (partialSeenRef.current === payload.reqId) {
+        const merged = mergeStable(gamesRef.current, payload.games)
+        gamesRef.current = merged
+        setGames(merged)
+      } else {
+        partialSeenRef.current = payload.reqId
+        const fresh = sortForDisplay(payload.games, sortModeRef.current, committedRef.current)
+        gamesRef.current = fresh
+        setGames(fresh)
+        resetViewToTop()
+      }
       setTotal(payload.total)
-      setSourceCounts(countMirrors(merged).perSource)
+      setSourceCounts(countMirrors(gamesRef.current).perSource)
       const done = new Set(payload.doneSources)
       const failed = new Set(payload.failedSources)
       if (failed.size) setSourcesErrored(true)
@@ -270,27 +296,31 @@ export function BrowsePage() {
   const searching = sources.some((s) => s.enabled && status[s.id] === "searching")
   const hasMore = games.length < total
 
-  const sorted = useMemo(
-    () => sortUnifiedGames(games, sortMode, { query: hasQuery ? committed : "" }),
-    [games, sortMode, hasQuery, committed]
-  )
+  const cycleSort = () => {
+    const next = nextSortMode(sortModeRef.current)
+    sortModeRef.current = next
+    setSourceSortMode(next)
+    const resorted = sortForDisplay(gamesRef.current, next, committedRef.current)
+    gamesRef.current = resorted
+    setGames(resorted)
+  }
 
   // Window geometry: rows are ~350px tall (168px cover @3:4 + text + gap);
   // col count follows the grid's auto-fill minmax(168px, 1fr). Only the rows
   // around the viewport are mounted; spacers hold the scroll height.
   const cols = Math.max(1, Math.floor((clientW + 18) / 186))
   const rowH = 350
-  const totalRows = Math.ceil(sorted.length / cols)
+  const totalRows = Math.ceil(games.length / cols)
   const visibleRows = Math.max(1, Math.ceil(clientH / rowH))
   const startRow = Math.max(0, Math.floor(viewTop / rowH) - 2)
   const endRow = Math.min(totalRows, startRow + visibleRows + 4)
   const windowStart = startRow * cols
-  const windowEnd = Math.min(sorted.length, endRow * cols)
+  const windowEnd = Math.min(games.length, endRow * cols)
   const topPad = startRow * rowH
   const bottomPad = (totalRows - endRow) * rowH
 
-  const mirrors = useMemo(() => countMirrors(sorted).total, [sorted])
-  const resultSummary = searching ? `${sorted.length} so far…` : `${sorted.length}${hasMore ? "+" : ""} titles · ${mirrors} mirrors`
+  const mirrors = useMemo(() => countMirrors(games).total, [games])
+  const resultSummary = searching ? `${games.length} so far…` : `${games.length}${hasMore ? "+" : ""} titles · ${mirrors} mirrors`
   const sortLabel = sortModeLabel(sortMode, hasQuery)
 
   const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -402,7 +432,7 @@ export function BrowsePage() {
             <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)" }}>{resultSummary}</span>
             <button
               type="button"
-              onClick={() => setSourceSortMode((m) => nextSortMode(m))}
+              onClick={cycleSort}
               className="mf-textbtn"
               style={{ display: "flex", alignItems: "center", gap: 7, padding: "7px 13px", borderRadius: 8, border: "1px solid color-mix(in srgb, var(--mf-t0) 9%, transparent)", background: "transparent", color: "var(--mf-t3)", fontFamily: MONO, fontSize: 11, cursor: "pointer" }}
             >
@@ -424,11 +454,11 @@ export function BrowsePage() {
         )}
         {!available ? (
           <EmptyState text="source backend unavailable" />
-        ) : sorted.length > 0 ? (
+        ) : games.length > 0 ? (
           <>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(168px, 1fr))", gap: 18, alignContent: "start" }}>
               {topPad > 0 && <div aria-hidden style={{ gridColumn: "1 / -1", height: topPad }} />}
-              {sorted.slice(windowStart, windowEnd).map((g) => (
+              {games.slice(windowStart, windowEnd).map((g) => (
                 <GameCard key={g.dedupKey} game={g} onZoom={openCover} />
               ))}
               {bottomPad > 0 && <div aria-hidden style={{ gridColumn: "1 / -1", height: bottomPad }} />}
@@ -436,7 +466,7 @@ export function BrowsePage() {
             {(loadingMore || hasMore) && (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "26px 0 4px", gap: 10 }}>
                 {loadingMore ? <Spinner size={16} stroke="var(--mf-t5)" /> : null}
-                <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t5)" }}>{loadingMore ? "loading more…" : `scroll for more · ${sorted.length} of ${total}`}</span>
+                <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t5)" }}>{loadingMore ? "loading more…" : `scroll for more · ${games.length} of ${total}`}</span>
               </div>
             )}
           </>

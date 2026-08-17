@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router-dom"
-import { cancelSourceQuery, querySources, nextSourceRequestId, sourceCapabilities, rememberGames, sourcesAvailable, listSources, sourceDirect, sourceIsDirect, mergeUnique, countMirrors, nextSortMode, sortModeLabel, SORT_NOUNS, type SourceSortMode, sortUnifiedGames } from "@/lib/sources"
+import { cancelSourceQuery, querySources, nextSourceRequestId, sourceCapabilities, rememberGames, sourcesAvailable, listSources, sourceDirect, sourceIsDirect, mergeUnique, mergeStable, countMirrors, nextSortMode, sortModeLabel, SORT_NOUNS, type SourceSortMode, sortUnifiedGames } from "@/lib/sources"
 import { getAdvancedCache, setAdvancedCache } from "@/lib/advanced-cache"
 import { GameCard } from "@/app/manifold/GameCard"
 import { MONO, SearchIcon, Spinner, CenterState } from "@/app/manifold/ui"
@@ -70,6 +70,13 @@ export function AdvancedSearchPage() {
   const [retryToken, setRetryToken] = useState(0)
   const gamesRef = useRef(games)
   useEffect(() => { gamesRef.current = games }, [games])
+  const sortRef = useRef(sort)
+  const queryRef = useRef(query)
+  useEffect(() => {
+    sortRef.current = sort
+    queryRef.current = query
+  })
+  const partialSeenRef = useRef(0)
   const reqId = useRef(0)
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
   const genresLocked = useRef(Boolean(cached?.genreOptions?.length))
@@ -152,8 +159,9 @@ export function AdvancedSearchPage() {
             return
           }
           rememberGames(res.games)
-          gamesRef.current = res.games
-          setGames(res.games)
+          const fresh = sortUnifiedGames(res.games, sortRef.current, { query: queryRef.current, fallbackLatest: true })
+          gamesRef.current = fresh
+          setGames(fresh)
           fetchedAtRef.current = Date.now()
           setTotal(res.total)
           setSourceNotice(res.sourcesErrored ? "partial" : null)
@@ -181,7 +189,15 @@ export function AdvancedSearchPage() {
     return window.ucSources?.onBrowsePartial?.((payload) => {
       if (!payload || payload.reqId !== reqId.current) return
       rememberGames(payload.games)
-      const nextGames = appendReqRef.current === payload.reqId ? mergeUnique(gamesRef.current, payload.games) : payload.games
+      let nextGames: UnifiedSourceGame[]
+      if (appendReqRef.current === payload.reqId) {
+        nextGames = mergeUnique(gamesRef.current, payload.games)
+      } else if (partialSeenRef.current === payload.reqId) {
+        nextGames = mergeStable(gamesRef.current, payload.games)
+      } else {
+        partialSeenRef.current = payload.reqId
+        nextGames = sortUnifiedGames(payload.games, sortRef.current, { query: queryRef.current, fallbackLatest: true })
+      }
       gamesRef.current = nextGames
       setGames(nextGames)
       setTotal(payload.total)
@@ -228,10 +244,10 @@ export function AdvancedSearchPage() {
     })
   }, [query, enabled, cats, sizeMin, sizeMax, yearFrom, yearTo, directOnly, sort, games, total, genreOptions, paramsKey])
 
-  const sorted = useMemo(() => {
-    const arr = directOnly ? games.filter((g) => g.sources.some(sourceIsDirect)) : games
-    return sortUnifiedGames(arr, sort, { query, fallbackLatest: true })
-  }, [games, directOnly, sort, query])
+  const sorted = useMemo(
+    () => (directOnly ? games.filter((g) => g.sources.some(sourceIsDirect)) : games),
+    [games, directOnly]
+  )
 
   const { perSource: sourceCounts } = useMemo(() => countMirrors(sorted), [sorted])
 

@@ -10,7 +10,7 @@ vi.mock("@/lib/browse-cache", () => ({
   setBrowseScroll: vi.fn(),
   consumeDiskRestore: () => false,
 }))
-vi.mock("@/app/manifold/GameCard", () => ({ GameCard: ({ game }: any) => <div>{game.title}</div> }))
+vi.mock("@/app/manifold/GameCard", () => ({ GameCard: ({ game }: any) => <div data-testid="card">{game.title}</div> }))
 vi.mock("@/lib/sources", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/sources")>(),
   sourcesAvailable: () => true,
@@ -104,6 +104,54 @@ describe("Browse source query failures", () => {
 
     await act(async () => { final.resolve(result("final result")); await final.promise })
     expect(screen.getByText("final result")).toBeTruthy()
+  })
+
+  it("keeps card order stable while streaming partials re-sort server-side", async () => {
+    vi.useFakeTimers()
+    const final = deferred<ReturnType<typeof result>>()
+    let onPartial: ((payload: any) => void) | undefined
+    Object.defineProperty(window, "ucSources", {
+      configurable: true,
+      writable: true,
+      value: { onBrowsePartial: (callback: (payload: any) => void) => { onPartial = callback; return () => {} } },
+    })
+    querySources.mockReset().mockReturnValueOnce(final.promise)
+
+    render(<MemoryRouter><BrowsePage /></MemoryRouter>)
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { vi.advanceTimersByTime(0); await Promise.resolve() })
+    const requestId = querySources.mock.calls[0][1]
+
+    const g = (title: string, mirrors = 1) => ({
+      dedupKey: title,
+      title,
+      sources: Array.from({ length: mirrors }, (_, i) => ({ sourceId: `s${i}` })),
+    })
+    const order = () => screen.getAllByTestId("card").map((n) => n.textContent)
+
+    act(() => onPartial?.({
+      reqId: requestId,
+      games: [g("B"), g("A")],
+      total: 4,
+      doneSources: ["steamrip"],
+      failedSources: [],
+    }))
+    expect(order()).toEqual(["B", "A"])
+
+    act(() => onPartial?.({
+      reqId: requestId,
+      games: [g("A", 3), g("B"), g("C")],
+      total: 4,
+      doneSources: ["steamrip"],
+      failedSources: [],
+    }))
+    expect(order()).toEqual(["B", "A", "C"])
+
+    await act(async () => {
+      final.resolve({ ...result("x"), games: [g("A", 3), g("B"), g("C"), g("D")], total: 4 })
+      await final.promise
+    })
+    expect(order()).toEqual(["B", "A", "C", "D"])
   })
 
   it("cancels and invalidates the active native query as soon as input changes", async () => {
