@@ -661,6 +661,18 @@ pub async fn nexus_install(
         let key = api_key(&state)?;
         let premium = premium_user(&key).await?;
         if !premium {
+            // Fast path first: a pasted session cookie downloads directly, in
+            // seconds. The Slipgate browser solve (tens of seconds) is the
+            // fallback, not the default.
+            let mut session_failure: Option<Option<String>> = None;
+            if session_cookie(&state).is_some() {
+                match native_free_download(&app, &state, &key, &appid, &domain, mid, file_id)
+                    .await?
+                {
+                    FreeDownload::Started => return Ok(json!({ "ok": true, "started": true })),
+                    FreeDownload::NeedsSession(reason) => session_failure = Some(reason),
+                }
+            }
             if let Some(sg) = crate::slipgate::cfg() {
                 match slipgate_resolve(&state, &sg, &key, &domain, mid, file_id).await {
                     Ok(link) => {
@@ -684,24 +696,32 @@ pub async fn nexus_install(
                     }
                 }
             }
-            return match native_free_download(&app, &state, &key, &appid, &domain, mid, file_id)
-                .await?
-            {
-                FreeDownload::Started => Ok(json!({ "ok": true, "started": true })),
-                FreeDownload::NeedsSession(reason) => {
-                    let mut out = json!({
-                        "ok": true,
-                        "started": false,
-                        "needsSession": true,
-                        "needsNxm": true,
-                        "modPageUrl": format!("{}?tab=files", mod_page_url(&domain, mid)),
-                    });
-                    if let Some(r) = reason {
-                        out["sessionError"] = json!(r);
+            let reason = match session_failure {
+                Some(r) => r,
+                // No cookie pasted: the native flow short-circuits to
+                // NeedsSession without touching the network, so this is cheap.
+                None => {
+                    match native_free_download(&app, &state, &key, &appid, &domain, mid, file_id)
+                        .await?
+                    {
+                        FreeDownload::Started => {
+                            return Ok(json!({ "ok": true, "started": true }))
+                        }
+                        FreeDownload::NeedsSession(r) => r,
                     }
-                    Ok(out)
                 }
             };
+            let mut out = json!({
+                "ok": true,
+                "started": false,
+                "needsSession": true,
+                "needsNxm": true,
+                "modPageUrl": format!("{}?tab=files", mod_page_url(&domain, mid)),
+            });
+            if let Some(r) = reason {
+                out["sessionError"] = json!(r);
+            }
+            return Ok(out);
         }
         let spec = fetch_spec(&key, &appid, &domain, mid, Some(file_id)).await?;
         let links = api_json(
