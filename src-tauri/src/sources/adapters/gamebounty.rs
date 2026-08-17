@@ -306,10 +306,16 @@ fn post_to_game(post: &Value) -> Option<SourceGame> {
         });
 
 
+    let source_url = format!("{ORIGIN}/{slug}{SLUG_SUFFIX}");
+    let mut download_options = mirrors_to_options(post.get("container"));
+    for option in &mut download_options {
+        option.page_url = Some(source_url.clone());
+    }
+
     Some(SourceGame {
         source_id: ID.to_string(),
         source_slug: slug.clone(),
-        source_url: format!("{ORIGIN}/{slug}{SLUG_SUFFIX}"),
+        source_url,
         steam_app_id: appid,
         dedup_key: schema::dedup_key_for(appid, &title),
         title,
@@ -325,7 +331,7 @@ fn post_to_game(post: &Value) -> Option<SourceGame> {
         version,
         size_bytes,
         size_text: size_human,
-        download_options: mirrors_to_options(post.get("container")),
+        download_options,
         direct: false,
         normalized_title: String::new(),
     })
@@ -393,7 +399,7 @@ async fn prune_dead_mirrors(options: Vec<DownloadOption>) -> Vec<DownloadOption>
             probes.push((i, url.clone()));
         }
     }
-    let dead: std::collections::HashSet<usize> = http::map_limit(probes, 4, |(i, url)| async move {
+    let dead: std::collections::HashSet<usize> = http::map_limit(probes, 8, |(i, url)| async move {
         Some((i, link_is_dead(&url).await))
     })
     .await

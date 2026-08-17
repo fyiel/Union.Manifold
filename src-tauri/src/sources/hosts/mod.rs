@@ -144,7 +144,7 @@ pub async fn link_is_dead(url: &str) -> bool {
     }
     let opts = crate::http::FetchOpts {
         retries: Some(1),
-        timeout: Some(std::time::Duration::from_secs(10)),
+        timeout: Some(std::time::Duration::from_secs(6)),
         ..Default::default()
     };
     match crate::http::fetch(url, &opts).await {
