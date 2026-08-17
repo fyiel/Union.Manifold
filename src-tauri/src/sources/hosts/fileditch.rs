@@ -188,9 +188,9 @@ pub async fn resolve(url: &str) -> ResolveResult {
         "Origin".to_string(),
         referer.trim_end_matches('/').to_string(),
     );
-    post_headers.insert("Referer".to_string(), url.to_string());
+    post_headers.insert("Referer".to_string(), response_url.clone());
     let resp = match http::fetch(
-        url,
+        &response_url,
         &FetchOpts {
             method: Some("POST".to_string()),
             headers: post_headers,

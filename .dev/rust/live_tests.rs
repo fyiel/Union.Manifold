@@ -150,6 +150,25 @@ async fn live_gamebounty_datanodes_fileditch_and_gofile() {
 
 #[tokio::test]
 #[ignore]
+async fn live_fileditch_pow_challenge_resolves_after_redirect() {
+    let option = DownloadOption {
+        url: Some(
+            "https://fileditchfiles.me/file.php?f=/beta3/d42f59e3678ab7df558b/Tiny_Terraces.rar"
+                .to_string(),
+        ),
+        ..Default::default()
+    };
+    let result = hosts::resolve_url(&option).await;
+    assert!(
+        result.resolvable,
+        "fileditch: {}",
+        result.reason.as_deref().unwrap_or("not resolvable")
+    );
+    verify_direct_file("fileditch", &result).await;
+}
+
+#[tokio::test]
+#[ignore]
 async fn live_gamebounty_multipart_resolves_every_part() {
     // Known multi-part titles first, then scan the recent catalog. Mirrors
     // rot independently, so try every multi-part option until one resolves
