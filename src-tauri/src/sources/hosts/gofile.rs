@@ -18,6 +18,12 @@ const WT_WINDOW_SECS: u64 = 14400;
 static GUEST_TOKEN: LazyLock<Cached<String>> =
     LazyLock::new(|| Cached::new(Duration::from_secs(12 * 60 * 60)));
 
+/// Last failed guest-token request, epoch millis. When gofile is unreachable
+/// every call would otherwise burn the full request timeout again — per part,
+/// per mirror — stalling the whole fallback chain for minutes.
+static GUEST_TOKEN_FAILED_AT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+const GUEST_TOKEN_RETRY_AFTER_MS: u64 = 60_000;
+
 pub fn matches(url: &str) -> bool {
     super::host_matches(url, &HOST_RE)
 }
@@ -53,6 +59,8 @@ async fn request_guest_token() -> Option<String> {
     let opts = FetchOpts {
         method: Some("POST".to_string()),
         headers: HashMap::from([("User-Agent".to_string(), crate::http::UA.to_string())]),
+        retries: Some(0),
+        timeout: Some(Duration::from_secs(10)),
         ..Default::default()
     };
     let resp = http::fetch("https://api.gofile.io/accounts", &opts)
@@ -66,7 +74,19 @@ async fn request_guest_token() -> Option<String> {
 }
 
 async fn guest_token() -> Option<String> {
-    GUEST_TOKEN.get_or(request_guest_token).await
+    let failed_at = GUEST_TOKEN_FAILED_AT.load(std::sync::atomic::Ordering::Acquire);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    if failed_at > 0 && now.saturating_sub(failed_at) < GUEST_TOKEN_RETRY_AFTER_MS {
+        return None;
+    }
+    let token = GUEST_TOKEN.get_or(request_guest_token).await;
+    if token.is_none() {
+        GUEST_TOKEN_FAILED_AT.store(now, std::sync::atomic::Ordering::Release);
+    }
+    token
 }
 
 fn resolved_file(node: &serde_json::Value) -> Option<ResolvedFile> {
