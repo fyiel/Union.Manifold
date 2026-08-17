@@ -3,6 +3,36 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.6.4
+
+### Fixed
+
+- FileDitch mirrors resolve in-app again: the proof-of-work challenge form
+  submits to its own page URL, but `file.php` links redirect (302) to the
+  real file path first — the answer was posted to the original URL, which
+  dropped the form body, so the challenge could never be satisfied and every
+  FileDitch link fell back to the browser. The answer now goes to the
+  post-redirect page URL (live-verified through to a 206 on the signed CDN
+  file).
+
+- A dead Gofile no longer stalls downloads for minutes: guest-token requests
+  use a short timeout with no retries, and a failure is remembered for a
+  minute so multi-part mirrors and fallback chains fail fast instead of
+  waiting on a full timeout per part.
+
+- GameBounty game pages load their mirror list faster: dead-mirror probes
+  (introduced in 3.6.3) now run 8 at a time with a 6-second cap each.
+
+- When every in-app mirror fails, the browser now opens the game's source
+  page (which lists all mirrors) instead of the bare download link that just
+  failed. The fallback chain still tries every resolvable source first.
+
+- Free Nexus mod downloads with a session cookie no longer wait on the slow
+  Slipgate browser solve: the native session flow (seconds) is tried first
+  and Slipgate is the fallback, not the default. Previously, having Slipgate
+  configured forced every free download through the solve — and when it
+  failed, the quick native path was never attempted.
+
 ## 3.6.3
 
 ### Fixed
