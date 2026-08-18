@@ -3,6 +3,17 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.6.10
+
+### Fixed
+
+- Auto-update manifest could drop platforms: every platform job uploaded
+  its own `latest.json` and the uploads raced read-modify-write on the
+  same release asset, so whichever job finished last decided which
+  platforms the updater knew about. The manifest is now built once, after
+  all builds finish, from the release's own signature files, and always
+  covers Windows, Linux (AppImage, deb, RPM), and both macOS arches.
+
 ## 3.6.9
 
 ### Fixed

@@ -176,6 +176,7 @@ jobs:
           NO_STRIP: '1'
         with:
           releaseId: ${{ needs.check.outputs.releaseId }}
+          uploadUpdaterJson: 'false'
           args: --target ${{ matrix.target }}
 
       - name: Upload stable RPM package
@@ -242,4 +243,46 @@ jobs:
           fi
           printf '%s\n' "$notes" > notes.md
           echo "----- release notes -----"; cat notes.md; echo "-------------------------"
+          # Build the updater manifest once, here, from the release's own
+          # signature files: the matrix jobs' own latest.json uploads race
+          # read-modify-write on the same asset, so a losing job's platform
+          # silently drops out of the manifest.
+          sigs=$(mktemp -d)
+          gh release download "$TAG" --pattern "*.sig" --dir "$sigs" --clobber || true
+          appimage_sig="$sigs/Union.Manifold_${VERSION}_amd64.AppImage.sig"
+          deb_sig="$sigs/Union.Manifold_${VERSION}_amd64.deb.sig"
+          rpm_sig="$sigs/Union.Manifold-${VERSION}-1.x86_64.rpm.sig"
+          mac64_sig="$sigs/Union.Manifold_x64.app.tar.gz.sig"
+          macarm_sig="$sigs/Union.Manifold_aarch64.app.tar.gz.sig"
+          win_sig="$sigs/Union.Manifold_${VERSION}_x64-setup.exe.sig"
+          if [ -f "$appimage_sig" ] && [ -f "$deb_sig" ] && [ -f "$rpm_sig" ] && [ -f "$mac64_sig" ] && [ -f "$macarm_sig" ] && [ -f "$win_sig" ]; then
+            dl="https://github.com/${{ github.repository }}/releases/latest/download"
+            jq -n \
+              --arg v "$VERSION" \
+              --arg dl "$dl" \
+              --arg pub "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              --rawfile notes notes.md \
+              --rawfile appimage "$appimage_sig" \
+              --rawfile deb "$deb_sig" \
+              --rawfile rpm "$rpm_sig" \
+              --rawfile mac64 "$mac64_sig" \
+              --rawfile macarm "$macarm_sig" \
+              --rawfile win "$win_sig" \
+              'def entry($sig; $asset): { signature: $sig, url: "\($dl)/\($asset)" };
+               { version: $v, notes: $notes, pub_date: $pub, platforms: {
+                 "linux-x86_64": entry($appimage; "Union.Manifold_\($v)_amd64.AppImage"),
+                 "linux-x86_64-appimage": entry($appimage; "Union.Manifold_\($v)_amd64.AppImage"),
+                 "linux-x86_64-deb": entry($deb; "Union.Manifold_\($v)_amd64.deb"),
+                 "linux-x86_64-rpm": entry($rpm; "Union.Manifold-\($v)-1.x86_64.rpm"),
+                 "darwin-x86_64": entry($mac64; "Union.Manifold_x64.app.tar.gz"),
+                 "darwin-x86_64-app": entry($mac64; "Union.Manifold_x64.app.tar.gz"),
+                 "darwin-aarch64": entry($macarm; "Union.Manifold_aarch64.app.tar.gz"),
+                 "darwin-aarch64-app": entry($macarm; "Union.Manifold_aarch64.app.tar.gz"),
+                 "windows-x86_64": entry($win; "Union.Manifold_\($v)_x64-setup.exe"),
+                 "windows-x86_64-nsis": entry($win; "Union.Manifold_\($v)_x64-setup.exe") } }' \
+              > latest.json
+            gh release upload "$TAG" latest.json --clobber
+          else
+            echo "::warning::signature assets missing, skipping updater manifest"
+          fi
           gh release edit "$TAG" --notes-file notes.md --draft=false --latest
