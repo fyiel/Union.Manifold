@@ -8,6 +8,9 @@ fn probe_payload_roundtrips_through_title() {
         c: "cf_clearance=abc123; lang=english".to_string(),
         u: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36".to_string(),
         t: true,
+        n: false,
+        k: 0,
+        g: None,
         e: 1_700_000_000_000,
     };
     let title = encode_probe_payload(&probe);

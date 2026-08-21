@@ -45,6 +45,13 @@ const CLEARANCE_TTL_MS: i64 = 20 * 60_000;
 /// Probe payloads older than this are considered stale (page navigated away
 /// between eval and title read).
 const PROBE_FRESHNESS_MS: i64 = 5_000;
+/// After a clearance cookie appears, the page's own flow (countdown,
+/// invisible Turnstile, download button JS) may still need to fire the
+/// actual download; keep the session alive this long to capture it.
+const POST_CLEARANCE_GRACE_MS: u128 = 30_000;
+/// During the grace, nudge the page's own primary download button at this
+/// interval (same-origin click; harmless when the button is absent).
+const AUTO_CLICK_INTERVAL_MS: u128 = 4_000;
 
 /// Marker prefix written into `document.title` by the injected probe. A zero
 /// width space plus a private-use character: real page titles never start
@@ -190,9 +197,30 @@ pub fn note_window_closed() {
 // ---------------------------------------------------------------------------
 
 fn probe_js() -> String {
+    probe_js_with(true)
+}
+
+/// `with_t=false` drops the widget detection from the payload: the
+/// initialization script variant fires on every navigation and must not
+/// reset the interactive-timer state each time.
+fn probe_js_with(with_t: bool) -> String {
+    let t_field = if with_t {
+        // k: length of the solved Turnstile token, if the widget has produced
+        // one; x/y/w/h: bounding box of the widget for synthetic clicks.
+        ",t:!!document.querySelector('iframe[src*=\"challenges.cloudflare.com\"],iframe[src*=\"turnstile\"],.cf-turnstile,#challenge-form,#challenge-error-text,.g-recaptcha'),k:(function(){var e=document.querySelector('textarea[name=cf-turnstile-response]');return e?e.value.length:0})(),g:(function(){var e=document.querySelector('.cf-turnstile');if(!e)return null;var r=e.getBoundingClientRect();return [Math.round(r.x+r.width/2),Math.round(r.y+r.height/2),Math.round(r.width),Math.round(r.height)]})(),n:(function(){var t=document.body?document.body.innerText.slice(0,6000):'';return /file not found|has been removed|no longer available|link (has )?expired|invalid file|was deleted/i.test(t)})()"
+    } else {
+        ""
+    };
     format!(
-        r#"(function(){{try{{var d={{h:location.href,r:document.readyState,c:document.cookie,u:navigator.userAgent,t:!!document.querySelector('iframe[src*="challenges.cloudflare.com"],iframe[src*="turnstile"],.cf-turnstile,#challenge-form,#challenge-error-text,.g-recaptcha'),e:Date.now()}};document.title="{PROBE_MARK}"+btoa(unescape(encodeURIComponent(JSON.stringify(d))));}}catch(e){{}}}})()"#
+        r#"(function(){{try{{var d={{h:location.href,r:document.readyState,c:document.cookie,u:navigator.userAgent{t_field},e:Date.now()}};document.title="{PROBE_MARK}"+btoa(unescape(encodeURIComponent(JSON.stringify(d))));}}catch(e){{}}}})()"#
     )
+}
+
+/// Click the page's own primary download action, if one is visible. Only
+/// ever fired after a clearance pass, so challenge pages are never touched.
+fn auto_click_js() -> String {
+    r#"(function(){try{var c=document.querySelectorAll('button,a,[role=button]');for(var i=0;i<c.length;i++){var t=(c[i].textContent||'').trim().toLowerCase();if(/^(start download|download|free download|generate direct link|generate link|get link|create download link)$/.test(t)){c[i].click();return;}}}catch(e){}})()"#
+        .to_string()
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize, PartialEq, serde::Serialize)]
@@ -207,6 +235,12 @@ struct Probe {
     u: String,
     #[serde(default)]
     t: bool,
+    #[serde(default)]
+    n: bool,
+    #[serde(default)]
+    k: u64,
+    #[serde(default)]
+    g: Option<Vec<i64>>,
     #[serde(default)]
     e: i64,
 }
@@ -371,6 +405,9 @@ async fn acquire_slot() -> Result<tokio::sync::MutexGuard<'static, ()>, String> 
 }
 
 async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, String> {
+    // Diagnostics overrides (used by the dev-probe harness).
+    let trace = std::env::var("UNION_SOLVER_TRACE").is_ok();
+    let start_visible = std::env::var("UNION_SOLVER_VISIBLE").is_ok();
     // A crashed previous session can leave the window behind; start clean.
     if let Some(window) = app.get_webview_window(WINDOW_LABEL) {
         window.destroy().ok();
@@ -378,11 +415,15 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
 
     let shared = Arc::new(Shared::default());
     *ACTIVE.lock() = Some(shared.clone());
+    if trace {
+        println!("SOLVER_TRACE session start url={page_url}");
+    }
     emit_status(app, "solving", host, None);
 
     let capture_shared = shared.clone();
     let nav_shared = shared.clone();
     let title_shared = shared.clone();
+    let nav_page_url = page_url.to_string();
     let builder =
         WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::External(page_url.clone()))
             .title("Union.Manifold — security check")
@@ -390,7 +431,7 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
             .min_inner_size(420.0, 320.0)
             .resizable(true)
             .center()
-            .visible(false)
+            .visible(start_visible)
             .focused(false)
             .decorations(true)
             // The probe channel's receive side: document title changes arrive
@@ -412,13 +453,23 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
                 false
             })
             .on_navigation(move |url| {
+                // The target page itself may end in a file-looking extension
+                // (datanodes.to/<code>/name.zip is a viewer page); only
+                // navigations away from it count as captures.
+                if url.as_str().trim_end_matches('/') == nav_page_url.trim_end_matches('/') {
+                    return true;
+                }
                 if looks_like_direct_file(url.as_str()) {
                     let name = file_name_from_url(url.as_str());
                     *nav_shared.captured.lock() = Some((url.to_string(), name));
                     return false;
                 }
                 true
-            });
+            })
+            // Runs at document start of every navigation (any origin), so the
+            // user agent is reported even when a challenge passes before the
+            // first eval probe lands.
+            .initialization_script(probe_js_with(false));
 
     // WebView2 throttles timers of occluded windows and Cloudflare treats
     // visibility as a bot signal, so keep the hidden window treated as
@@ -446,6 +497,74 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
     let mut escalated = false;
     let mut interactive_since: Option<Instant> = None;
     let mut user_agent: Option<String> = None;
+    // Set when cf_clearance appears; the session then stays alive for the
+    // post-clearance grace so the page's own download flow can be captured.
+    let mut clearance_at: Option<Instant> = None;
+    let mut last_not_found = false;
+
+    // Ingest any title payload delivered since the last tick (the
+    // initialization script reports on every navigation, the eval probe on
+    // every tick). Standalone fns: closures would tangle the mutable borrows.
+    fn ingest_title(
+        trace: bool,
+        started: Instant,
+        shared: &Shared,
+        user_agent: &mut Option<String>,
+        interactive_since: &mut Option<Instant>,
+        not_found: &mut bool,
+    ) {
+        if let Some(title) = shared.take_title() {
+            if let Some(probe) = decode_probe(&title).filter(probe_fresh) {
+                if trace {
+                    println!(
+                        "SOLVER_TRACE +{}ms href={} ready={} interactive={} token={} box={:?}",
+                        started.elapsed().as_millis(),
+                        probe.h,
+                        probe.r,
+                        probe.t,
+                        probe.k,
+                        probe.g
+                    );
+                }
+                if !probe.u.is_empty() && user_agent.is_none() {
+                    *user_agent = Some(probe.u);
+                }
+                *interactive_since = if probe.t {
+                    Some(interactive_since.unwrap_or_else(Instant::now))
+                } else {
+                    None
+                };
+                *not_found = probe.n;
+            }
+        }
+    }
+
+    // Last-chance UA fetch for sessions that finish before any probe
+    // payload arrived: aria2 replay needs the exact webview UA.
+    fn grab_user_agent(
+        window: &tauri::WebviewWindow,
+        shared: &Shared,
+        user_agent: &mut Option<String>,
+    ) {
+        if user_agent.is_some() {
+            return;
+        }
+        for _ in 0..4 {
+            let _ = window.eval(probe_js().as_str());
+            std::thread::sleep(Duration::from_millis(300));
+            ingest_title(
+                false,
+                Instant::now(),
+                shared,
+                user_agent,
+                &mut None,
+                &mut false,
+            );
+            if user_agent.is_some() {
+                return;
+            }
+        }
+    }
 
     let outcome = loop {
         tokio::time::sleep(Duration::from_millis(TICK_MS)).await;
@@ -458,8 +577,30 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
             break Err("cancelled".to_string());
         }
 
+        ingest_title(
+            trace,
+            started,
+            &shared,
+            &mut user_agent,
+            &mut interactive_since,
+            &mut last_not_found,
+        );
+
+        // Genuinely dead pages announce themselves; fail fast before any
+        // escalation so dead links never pop a window.
+        if last_not_found && clearance_at.is_none() && started.elapsed().as_millis() > 5_000 {
+            break Err("link appears dead or expired".to_string());
+        }
+
         // 1. A captured download wins immediately.
         if let Some((url, name)) = shared.take_captured() {
+            if trace {
+                println!(
+                    "SOLVER_TRACE +{}ms captured {url}",
+                    started.elapsed().as_millis()
+                );
+            }
+            grab_user_agent(&window, &shared, &mut user_agent);
             let cookies = window
                 .cookies_for_url(page_url.clone())
                 .ok()
@@ -472,25 +613,44 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
                 url: Some(url),
                 file_name: name,
                 cookie_header,
-                user_agent: user_agent.clone(),
+                user_agent,
             });
         }
 
-        // 2. Clearance cookie appeared: the managed challenge passed.
+        // 2. Clearance cookie appeared: the managed challenge passed. Do not
+        // finish yet — the page may still need to run its own countdown and
+        // fire the download; wait for a capture or the grace to expire.
         let cookies = window
             .cookies_for_url(page_url.clone())
             .ok()
             .unwrap_or_default();
         if clearance_cookie(&cookies) {
-            let cookie_header = cookie_header_from(&cookies);
-            if let Some(header) = &cookie_header {
-                cache_clearance(host, header.clone(), user_agent.clone());
+            match clearance_at {
+                None => {
+                    if trace {
+                        println!(
+                            "SOLVER_TRACE +{}ms clearance present; grace {}ms",
+                            started.elapsed().as_millis(),
+                            POST_CLEARANCE_GRACE_MS
+                        );
+                    }
+                    clearance_at = Some(Instant::now())
+                }
+                Some(at) => {
+                    if at.elapsed().as_millis() >= POST_CLEARANCE_GRACE_MS {
+                        grab_user_agent(&window, &shared, &mut user_agent);
+                        let cookie_header = cookie_header_from(&cookies);
+                        if let Some(header) = &cookie_header {
+                            cache_clearance(host, header.clone(), user_agent.clone());
+                        }
+                        break Ok(Solved {
+                            cookie_header,
+                            user_agent,
+                            ..Default::default()
+                        });
+                    }
+                }
             }
-            break Ok(Solved {
-                cookie_header,
-                user_agent: user_agent.clone(),
-                ..Default::default()
-            });
         }
 
         // Success is checked before the budget so a solve completing on the
@@ -502,26 +662,39 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
         // 3. Probe the page state (best effort; stale payloads are skipped).
         if window.eval(probe_js().as_str()).is_ok() {
             tokio::time::sleep(Duration::from_millis(TICK_MS / 2)).await;
-            if let Some(title) = shared.take_title() {
-                if let Some(probe) = decode_probe(&title).filter(probe_fresh) {
-                    if !probe.u.is_empty() && user_agent.is_none() {
-                        user_agent = Some(probe.u);
-                    }
-                    interactive_since = if probe.t {
-                        Some(*interactive_since.get_or_insert(Instant::now()))
-                    } else {
-                        None
-                    };
-                }
-            }
+            ingest_title(
+                trace,
+                started,
+                &shared,
+                &mut user_agent,
+                &mut interactive_since,
+                &mut last_not_found,
+            );
         }
 
-        // 4. Hidden -> visible escalation.
-        if escalation_action(
-            escalated,
-            started.elapsed().as_millis(),
-            interactive_since.map(|t| t.elapsed().as_millis()),
-        ) == Escalation::Show
+        // 3b. Nudge the page's own download button once the session is past
+        // its gate (clearance seen or window escalated): flows that finished
+        // their countdown/captcha then produce the capture.
+        let nudging = clearance_at.is_some() || escalated;
+        if nudging
+            && started.elapsed().as_millis() / AUTO_CLICK_INTERVAL_MS
+                != started
+                    .elapsed()
+                    .as_millis()
+                    .saturating_sub(TICK_MS as u128)
+                    / AUTO_CLICK_INTERVAL_MS
+        {
+            let _ = window.eval(auto_click_js().as_str());
+        }
+
+        // 4. Hidden -> visible escalation. Once cleared, the page is already
+        // doing its own thing; popping the window would only disturb it.
+        if clearance_at.is_none()
+            && escalation_action(
+                escalated,
+                started.elapsed().as_millis(),
+                interactive_since.map(|t| t.elapsed().as_millis()),
+            ) == Escalation::Show
         {
             window.show().ok();
             window.set_focus().ok();

@@ -238,16 +238,19 @@ async fn dispatch(app: Option<&AppHandle>, option: &DownloadOption) -> ResolveRe
         }
 
         if let Some(app) = app {
-            if !link_is_dead(url).await {
-                if let Ok(solved) = crate::resolver::solve(app, url).await {
-                    let merged = match slipgate_host(url) {
-                        Some("datanodes") => datanodes::with_solved(url, solved).await,
-                        Some("datavaults") => datavaults::with_solved(url, solved).await,
-                        _ => None,
-                    };
-                    if let Some(merged) = merged {
-                        return merged;
-                    }
+            // No link_is_dead pre-check here: gated hosts like datanodes
+            // redirect every visitor to /download, which 404s without a
+            // session, so status-based death checks misread live links as
+            // dead. The solver detects dead pages itself (probe payload's
+            // not-found signal) and fails fast without escalating.
+            if let Ok(solved) = crate::resolver::solve(app, url).await {
+                let merged = match slipgate_host(url) {
+                    Some("datanodes") => datanodes::with_solved(url, solved).await,
+                    Some("datavaults") => datavaults::with_solved(url, solved).await,
+                    _ => None,
+                };
+                if let Some(merged) = merged {
+                    return merged;
                 }
             }
         }
