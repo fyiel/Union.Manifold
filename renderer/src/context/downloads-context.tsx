@@ -21,7 +21,6 @@ import { apiFetch } from "@/lib/api"
 import { fmtBytes } from "@/lib/utils"
 import { addDownloadedGameToHistory } from "@/lib/user-history"
 import { downloadLogger } from "@/lib/logger"
-import { reportPlayEvent } from "@/lib/cloud-collections"
 
 export type DownloadStatus =
   | "queued"
@@ -915,9 +914,6 @@ const resolveWithTimeout = useCallback(async (host: string, targetUrl: string) =
         if (installFinished) {
           if (typeof window !== "undefined") {
             window.dispatchEvent(new CustomEvent("uc_game_installed", { detail: { appid: update.appid } }))
-          }
-          if (update.appid) {
-            void reportPlayEvent(update.appid, "install")
           }
         }
       }

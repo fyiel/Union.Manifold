@@ -1,7 +1,6 @@
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import type { LaunchPreflightResult } from "@/components/GameLaunchPreflightModal"
 import { getUnambiguousExecutable, hasOnlineMode, matchAdminExecutable, type GameExecutable } from "@/lib/utils"
-import { reportPlayEvent } from "@/lib/cloud-collections"
 import { setRunningOptimistic, isRunningGameSync } from "@/hooks/use-running-games"
 import { gameLogger } from "@/lib/logger"
 
@@ -187,7 +186,6 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
         options?.runAsAdmin,
       )
       if (res && res.ok) {
-        void reportPlayEvent(g.appid, "play")
         await setSavedExe(g.appid, path)
         setPickerOpen(false)
         setShortcutOpen(false)
@@ -354,9 +352,7 @@ export function GameLaunchProvider({ children }: { children: React.ReactNode }) 
             manifest.steamAppId,
             typeof manifest.installPath === "string" ? manifest.installPath : "",
           )
-          if (res?.ok) {
-            void reportPlayEvent(g.appid, "play")
-          }
+          void res
           return
         }
       }

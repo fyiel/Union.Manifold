@@ -3,7 +3,6 @@ import { Palette } from "lucide-react"
 import { ThemeEditorBody } from "./ThemeEditor"
 import { useActiveTheme } from "@/hooks/use-active-theme"
 import { useCustomThemes } from "@/hooks/use-custom-themes"
-import { useUcPlus } from "@/hooks/use-uc-plus"
 import { PRESET_THEMES } from "@/lib/themes/presets"
 import type { ThemeDef } from "@/lib/themes/types"
 import { validateTheme } from "@/lib/themes/validate"
@@ -13,8 +12,7 @@ type Seed = { theme: ThemeDef; mode: "new" | "edit" | "duplicate" }
 
 export default function ThemeEditorWindow() {
   const { setActiveThemeId } = useActiveTheme()
-  const { active: isUcPlus } = useUcPlus()
-  const { customThemes, maxCustomThemes, addCustomTheme, updateCustomTheme } = useCustomThemes({ isUcPlus })
+  const { customThemes, maxCustomThemes, addCustomTheme, updateCustomTheme } = useCustomThemes()
   const { toast } = useToast()
 
   const [seed, setSeed] = useState<Seed | null>(null)
@@ -64,7 +62,7 @@ export default function ThemeEditorWindow() {
       }
     } else if (!addCustomTheme(theme)) {
       toast(
-        `Limit reached (${maxCustomThemes} custom themes).${isUcPlus ? "" : " UC+ supporters get 100 slots."}`,
+        `Limit reached (${maxCustomThemes} custom themes).`,
         "error"
       )
       return
@@ -74,7 +72,7 @@ export default function ThemeEditorWindow() {
     setSaved(true)
     try { window.ucThemeEditor?.endPreview?.() } catch {}
     setTimeout(closeWindow, 120)
-  }, [customThemes, updateCustomTheme, addCustomTheme, maxCustomThemes, isUcPlus, setActiveThemeId, toast, closeWindow])
+  }, [customThemes, updateCustomTheme, addCustomTheme, maxCustomThemes, setActiveThemeId, toast, closeWindow])
 
   const handleCancel = useCallback(() => {
     try { window.ucThemeEditor?.endPreview?.() } catch {}
