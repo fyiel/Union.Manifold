@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createDefaultControllerSettings, type ControllerSettings } from '../lib/controller-mappings'
+import { logger } from '../lib/logger'
 
 export function useController() {
   const [settings, setSettings] = useState<ControllerSettings>(createDefaultControllerSettings())
@@ -15,7 +16,7 @@ export function useController() {
           }
         }
       } catch (err) {
-        console.error('Failed to load controller settings:', err)
+        logger.error('Failed to load controller settings', { data: err })
       } finally {
         setLoading(false)
       }
@@ -32,7 +33,7 @@ export function useController() {
         await window.ucController?.setSettings(updated)
       }
     } catch (err) {
-      console.error('Failed to save controller settings:', err)
+      logger.error('Failed to save controller settings', { data: err })
     }
   }, [settings])
 
