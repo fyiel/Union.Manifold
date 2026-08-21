@@ -5,7 +5,28 @@ All notable changes to Union.Manifold. This project is a fork of
 
 ## 3.7.0
 
+### Added
+
+- Gated download links now resolve in-app without Slipgate: when a host page
+  sits behind a Cloudflare gate or a JS-only download flow, Union.Manifold
+  opens its own hidden browser view (the same engine that renders the app),
+  lets the challenge pass the way it does for a normal browser, and hands the
+  captured download link or session cookies to the downloader. If a check
+  needs a human click, the same window appears for a second and hides again
+  once the download continues; without any interaction needed, nothing is
+  ever shown. Datanodes downloads use their new per-page token flow, and
+  gate-table hosts (1fichier, qiwi, megadb, filecrypt, vikingfile, akirabox,
+  fileq, mocha, zerofs) resolve in-app instead of only opening the browser.
+
 ### Fixed
+
+- "Pre-Installed" editions deduplicate against the plain title again: the
+  hyphenless spelling produced by punctuation normalization slipped past the
+  edition-noise filter, so pre-installed releases showed up as separate
+  games.
+
+- Space-separated dates keep their time of day ("2024-03-01 10:00:00" no
+  longer collapses to midnight), so release timestamps sort correctly.
 
 - Deleting a game from the library now also drops its stored achievement
   progress, so a reinstalled or re-imported game starts with a clean
