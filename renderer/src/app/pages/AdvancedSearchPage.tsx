@@ -6,7 +6,7 @@ import { GameCard } from "@/app/manifold/GameCard"
 import { MONO, SearchIcon, Spinner, CenterState } from "@/app/manifold/ui"
 
 type AdvSort = SourceSortMode
-const SIZE_MIN = 0, SIZE_MAX = 130, YEAR_MIN = 2010, YEAR_MAX = 2026
+const SIZE_MIN = 0, SIZE_MAX = 130, YEAR_MIN = 2010, YEAR_MAX = new Date().getFullYear() + 1
 const ADV_PAGE = 60
 const MEMORY_REFRESH_MS = 90_000
 
