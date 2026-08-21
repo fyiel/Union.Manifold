@@ -11,6 +11,8 @@ import { hasInstalledVersionUpdate, proxyImageUrl } from "@/lib/utils"
 import { rememberGames, rememberGameAs, getRememberedGame, resolveInstalledGame, getDownloadArt, hydrateDownloadArt, steamCoverUrl, forgetRememberedGame } from "@/lib/sources"
 import { MONO, COVER_LINES, gbLabel, SearchIcon, CenterState, SmartImage, gameImageCandidates } from "@/app/manifold/ui"
 import { GameMenu, LaunchOptionsDialog, EditDetailsDialog, LinuxConfigDialog, AddGamesDialog, SteamIdDialog, type MenuGame } from "@/app/manifold/library-overlays"
+import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { WandTrainerModal } from "@/components/WandTrainerModal"
 import { preloadGameModsPage, preloadSourceGamePage } from "@/app/route-loaders"
 
@@ -222,6 +224,8 @@ export function LibraryPage() {
   const [editFor, setEditFor] = useState<MenuGame | null>(null)
   const [linuxFor, setLinuxFor] = useState<{ appid: string; name: string } | null>(null)
   const [wandFor, setWandFor] = useState<LibGame | null>(null)
+  const [deleteFor, setDeleteFor] = useState<LibGame | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [repair, setRepair] = useState<{ appid: string; name: string; phase: RepairProgress["phase"]; percent: number } | null>(null)
   const [onlineFixReady, setOnlineFixReady] = useState(false)
@@ -472,14 +476,21 @@ export function LibraryPage() {
 
   const isFavorite = (appid: string) => (meta[appid]?.collections || []).some((c) => c.toLowerCase() === "favorites")
 
+  const favoriteInFlightRef = useRef<Set<string>>(new Set())
   const toggleFavorite = async (appid: string) => {
-    const fav = isFavorite(appid)
-    const cols = (meta[appid]?.collections || []).filter((c) => c.toLowerCase() !== "favorites")
-    if (!fav) cols.push("Favorites")
-    const result = await window.ucSettings?.mergeLibraryGameMeta?.(appid, { collections: cols })
-    if (!result?.ok) return
-    setMeta((current) => ({ ...current, [appid]: result.entry as LibraryGameMeta }))
-    setInstalled((prev) => prev.map((g) => g.appid !== appid ? g : { ...g, collections: fav ? g.collections.filter((c) => c.toLowerCase() !== "favorites") : [...g.collections, "Favorites"] }))
+    if (favoriteInFlightRef.current.has(appid)) return
+    favoriteInFlightRef.current.add(appid)
+    try {
+      const fav = isFavorite(appid)
+      const cols = (meta[appid]?.collections || []).filter((c) => c.toLowerCase() !== "favorites")
+      if (!fav) cols.push("Favorites")
+      const result = await window.ucSettings?.mergeLibraryGameMeta?.(appid, { collections: cols })
+      if (!result?.ok) return
+      setMeta((current) => ({ ...current, [appid]: result.entry as LibraryGameMeta }))
+      setInstalled((prev) => prev.map((g) => g.appid !== appid ? g : { ...g, collections: (result.entry as LibraryGameMeta | undefined)?.collections || [] }))
+    } finally {
+      favoriteInFlightRef.current.delete(appid)
+    }
   }
 
   const getSavedExe = async (appid: string): Promise<string | null> => {
@@ -522,11 +533,21 @@ export function LibraryPage() {
   }
 
   const deleteGame = async (g: LibGame) => {
+    setDeleting(true)
     setInstalled((prev) => prev.filter((x) => x.appid !== g.appid))
     try {
       await window.ucDownloads?.deleteInstalled?.(g.appid)
       await window.ucDownloads?.deleteDesktopShortcut?.(g.name)
     } catch {  }
+    finally {
+      setDeleting(false)
+      setDeleteFor(null)
+    }
+  }
+
+  const runDelete = async () => {
+    if (!deleteFor || deleting) return
+    await deleteGame(deleteFor)
   }
 
   useEffect(() => {
@@ -679,7 +700,7 @@ export function LibraryPage() {
             onEditDetails: () => setEditFor(menu.game),
             onRefreshMetadata: () => { const g = installed.find((x) => x.appid === menu.game.appid); if (g) void refreshMetadata(g) },
             onToggleFavorite: () => toggleFavorite(menu.game.appid),
-            onDelete: () => { const g = installed.find((x) => x.appid === menu.game.appid); if (g) void deleteGame(g) },
+            onDelete: () => { const g = installed.find((x) => x.appid === menu.game.appid); if (g) { setMenu(null); setDeleteFor(g) } },
             onSetSteamId: () => { const g = installed.find((x) => x.appid === menu.game.appid); setSteamIdFor({ appid: menu.game.appid, name: menu.game.name, current: g?.steamAppId }) },
             onMods: () => navigate(`/g/${encodeURIComponent(menu.game.appid)}/mods`, { state: { game: menu.game } }),
             onWand: IS_WINDOWS || IS_LINUX ? () => { const game = installed.find((item) => item.appid === menu.game.appid); if (game) setWandFor(game) } : undefined,
@@ -689,6 +710,22 @@ export function LibraryPage() {
         />
       )}
       {launchFor && <LaunchOptionsDialog appid={launchFor.appid} gameName={launchFor.name} onClose={() => setLaunchFor(null)} />}
+      {deleteFor && (
+        <Dialog open onOpenChange={(open) => { if (!open && !deleting) setDeleteFor(null) }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Delete {deleteFor.name}?</DialogTitle>
+              <DialogDescription>
+                This permanently deletes the game's installed folder from disk and removes its desktop shortcut. This cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" disabled={deleting} onClick={() => setDeleteFor(null)}>Cancel</Button>
+              <Button variant="destructive" disabled={deleting} onClick={() => void runDelete()}>{deleting ? "Deleting…" : "Delete"}</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
       {addOpen && <AddGamesDialog onClose={() => setAddOpen(false)} />}
       {editFor && (
         <EditDetailsDialog
