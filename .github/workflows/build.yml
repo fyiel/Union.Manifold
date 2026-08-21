@@ -230,59 +230,135 @@ jobs:
         run: |
           set -euo pipefail
           # Pull the section under "## <version>" up to the next "## " heading.
-          notes=$(awk -v ver="$VERSION" '
+          changes=$(awk -v ver="$VERSION" '
             $1 == "##" && $2 == ver { f = 1; next }
             f && /^## / { exit }
             f { print }
           ' CHANGELOG.md)
           # Strip leading and trailing blank lines.
-          notes=$(printf '%s\n' "$notes" | awk 'NF {f=1} f' | tac | awk 'NF {f=1} f' | tac)
-          if [ -z "$notes" ]; then
+          changes=$(printf '%s\n' "$changes" | awk 'NF {f=1} f' | tac | awk 'NF {f=1} f' | tac)
+          if [ -z "$changes" ]; then
             echo "::warning::no CHANGELOG.md section for $VERSION, using a placeholder"
-            notes="Release $VERSION"
+            changes="_Maintenance release: bug fixes and improvements._"
           fi
-          printf '%s\n' "$notes" > notes.md
+
+          # Release page presentation. GitHub sorts release assets
+          # alphabetically and offers no way to reorder or pin them, and every
+          # asset name is frozen anyway: latest.json (referenced by
+          # src-tauri/tauri.conf.json) plus the per-platform manifest entries
+          # below point at exact filenames, so renaming anything to improve
+          # ordering would break auto-updates. Instead we keep the page clean
+          # by putting the user-facing downloads front and center in the notes
+          # body and folding everything else into a collapsed <details> block,
+          # which GitHub renders folded on release pages.
+          asset_base="https://github.com/${{ github.repository }}/releases/download/$TAG"
+          {
+            printf 'Union.Manifold %s is ready! If the app is already installed, just restart it and accept the update prompt — otherwise grab the download for your operating system below.\n\n' "$VERSION"
+            printf '## 📦 Downloads\n\n'
+            printf -- '- 🪟 **Windows 10/11** — [Download the installer](%s/Union.Manifold_%s_x64-setup.exe)\n' "$asset_base" "$VERSION"
+            printf -- '- 🍎 **Mac (Apple Silicon / M-series)** — [Download the disk image](%s/Union.Manifold_%s_aarch64.dmg)\n' "$asset_base" "$VERSION"
+            printf -- '- 🍎 **Mac (Intel)** — [Download the disk image](%s/Union.Manifold_%s_x64.dmg)\n' "$asset_base" "$VERSION"
+            printf -- '- 🐧 **Linux** — [Download the AppImage](%s/Union.Manifold_%s_amd64.AppImage)\n\n' "$asset_base" "$VERSION"
+            printf 'That is all most people need. Prefer a native Linux package? A .deb, .rpm, and Arch package are attached too — expand the section below.\n'
+          } > notes.md
+          {
+            printf '%s\n' \
+              '' \
+              '<details>' \
+              '<summary><b>Other downloads & technical files (for advanced users)</b></summary>' \
+              '' \
+              'Everything else attached to this release lives here. Safe to ignore unless you know you need it.' \
+              '' \
+              '**Other ways to install on Linux**' \
+              '' \
+              '- Debian / Ubuntu: the .deb package attached to this release' \
+              '- Fedora / openSUSE: the .rpm package attached to this release (stable-named copy: union-manifold-x86_64.rpm)' \
+              '- Arch Linux: union-manifold-x86_64.pkg.tar.zst plus its detached PGP signature - import its signing key (union-manifold-signing-key.asc in the repository) once, then pacman -U accepts the download URL' \
+              '' \
+              '**Files that power automatic updates**' \
+              '' \
+              '- latest.json - a small index file installed apps check to discover that a new version exists.' \
+              '- *.sig files - short digital signatures that let the app verify each download really came from this project.' \
+              '' \
+              '**macOS app archives**' \
+              '' \
+              '- Union.Manifold_aarch64.app.tar.gz and Union.Manifold_x64.app.tar.gz (used internally by the updater)' \
+              '' \
+              '</details>'
+          } >> notes.md
+          {
+            printf '\n---\n\n## What changed in %s\n\n' "$VERSION"
+            printf '%s\n' "$changes"
+          } >> notes.md
+          # Plain-markdown copy for the updater manifest: the updater dialog
+          # renders notes as plain text, where the <details> HTML above would
+          # show up as literal markup.
+          {
+            printf 'Union.Manifold %s — see the release page for downloads.\n\n%s\n' \
+              "$VERSION" "$changes"
+          } > updater-notes.md
           echo "----- release notes -----"; cat notes.md; echo "-------------------------"
           # Build the updater manifest once, here, from the release's own
           # signature files: the matrix jobs' own latest.json uploads race
           # read-modify-write on the same asset, so a losing job's platform
           # silently drops out of the manifest.
+          #
+          # tauri-plugin-updater reads a single latest.json whose "platforms"
+          # map may contain any subset of platform keys, so we generate the
+          # manifest PER-PLATFORM: each platform that actually has a .sig file
+          # on the release gets an entry; platforms with a missing/flaky sig
+          # are skipped individually (with an ::error:: annotation so the
+          # failure is loud in CI) instead of dropping auto-update for every
+          # OS. The manifest only fails entirely when no signature at all
+          # could be collected.
           sigs=$(mktemp -d)
           gh release download "$TAG" --pattern "*.sig" --dir "$sigs" --clobber || true
-          appimage_sig="$sigs/Union.Manifold_${VERSION}_amd64.AppImage.sig"
-          deb_sig="$sigs/Union.Manifold_${VERSION}_amd64.deb.sig"
-          rpm_sig="$sigs/Union.Manifold-${VERSION}-1.x86_64.rpm.sig"
-          mac64_sig="$sigs/Union.Manifold_x64.app.tar.gz.sig"
-          macarm_sig="$sigs/Union.Manifold_aarch64.app.tar.gz.sig"
-          win_sig="$sigs/Union.Manifold_${VERSION}_x64-setup.exe.sig"
-          if [ -f "$appimage_sig" ] && [ -f "$deb_sig" ] && [ -f "$rpm_sig" ] && [ -f "$mac64_sig" ] && [ -f "$macarm_sig" ] && [ -f "$win_sig" ]; then
-            dl="https://github.com/${{ github.repository }}/releases/latest/download"
+          dl="https://github.com/${{ github.repository }}/releases/latest/download"
+          missing=0
+          # One JSON object per present platform is appended to this file;
+          # they get merged into the final "platforms" map below.
+          entries=$(mktemp)
+          add_entry() {
+            local key="$1" sig_name="$2" asset="$3"
+            if [ -f "$sigs/$sig_name" ]; then
+              jq -n --arg key "$key" --rawfile signature "$sigs/$sig_name" \
+                --arg url "$dl/$asset" \
+                '{ ($key): { signature: $signature, url: $url } }' >> "$entries"
+            else
+              echo "::error::updater signature missing for $key ($sig_name) — this platform will not receive auto-updates for v$VERSION"
+              missing=$((missing + 1))
+            fi
+          }
+          # Each logical updater platform plus its tauri target alias share one
+          # signature file, so emit both keys per signature.
+          for spec in \
+            "linux-x86_64|Union.Manifold_${VERSION}_amd64.AppImage.sig|Union.Manifold_${VERSION}_amd64.AppImage" \
+            "linux-x86_64-appimage|Union.Manifold_${VERSION}_amd64.AppImage.sig|Union.Manifold_${VERSION}_amd64.AppImage" \
+            "linux-x86_64-deb|Union.Manifold_${VERSION}_amd64.deb.sig|Union.Manifold_${VERSION}_amd64.deb" \
+            "linux-x86_64-rpm|Union.Manifold-${VERSION}-1.x86_64.rpm.sig|Union.Manifold-${VERSION}-1.x86_64.rpm" \
+            "darwin-x86_64|Union.Manifold_x64.app.tar.gz.sig|Union.Manifold_x64.app.tar.gz" \
+            "darwin-x86_64-app|Union.Manifold_x64.app.tar.gz.sig|Union.Manifold_x64.app.tar.gz" \
+            "darwin-aarch64|Union.Manifold_aarch64.app.tar.gz.sig|Union.Manifold_aarch64.app.tar.gz" \
+            "darwin-aarch64-app|Union.Manifold_aarch64.app.tar.gz.sig|Union.Manifold_aarch64.app.tar.gz" \
+            "windows-x86_64|Union.Manifold_${VERSION}_x64-setup.exe.sig|Union.Manifold_${VERSION}_x64-setup.exe" \
+            "windows-x86_64-nsis|Union.Manifold_${VERSION}_x64-setup.exe.sig|Union.Manifold_${VERSION}_x64-setup.exe"; do
+            IFS='|' read -r key sig_name asset <<< "$spec"
+            add_entry "$key" "$sig_name" "$asset"
+          done
+          if [ -s "$entries" ]; then
             jq -n \
               --arg v "$VERSION" \
-              --arg dl "$dl" \
               --arg pub "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-              --rawfile notes notes.md \
-              --rawfile appimage "$appimage_sig" \
-              --rawfile deb "$deb_sig" \
-              --rawfile rpm "$rpm_sig" \
-              --rawfile mac64 "$mac64_sig" \
-              --rawfile macarm "$macarm_sig" \
-              --rawfile win "$win_sig" \
-              'def entry($sig; $asset): { signature: $sig, url: "\($dl)/\($asset)" };
-               { version: $v, notes: $notes, pub_date: $pub, platforms: {
-                 "linux-x86_64": entry($appimage; "Union.Manifold_\($v)_amd64.AppImage"),
-                 "linux-x86_64-appimage": entry($appimage; "Union.Manifold_\($v)_amd64.AppImage"),
-                 "linux-x86_64-deb": entry($deb; "Union.Manifold_\($v)_amd64.deb"),
-                 "linux-x86_64-rpm": entry($rpm; "Union.Manifold-\($v)-1.x86_64.rpm"),
-                 "darwin-x86_64": entry($mac64; "Union.Manifold_x64.app.tar.gz"),
-                 "darwin-x86_64-app": entry($mac64; "Union.Manifold_x64.app.tar.gz"),
-                 "darwin-aarch64": entry($macarm; "Union.Manifold_aarch64.app.tar.gz"),
-                 "darwin-aarch64-app": entry($macarm; "Union.Manifold_aarch64.app.tar.gz"),
-                 "windows-x86_64": entry($win; "Union.Manifold_\($v)_x64-setup.exe"),
-                 "windows-x86_64-nsis": entry($win; "Union.Manifold_\($v)_x64-setup.exe") } }' \
-              > latest.json
+              --rawfile notes updater-notes.md \
+              --slurpfile plats "$entries" \
+              '{ version: $v, notes: $notes, pub_date: $pub,
+                 platforms: ($plats | add) }' > latest.json
             gh release upload "$TAG" latest.json --clobber
           else
-            echo "::warning::signature assets missing, skipping updater manifest"
+            echo "::error::no updater signatures found on release $TAG at all — not uploading any updater manifest"
+          fi
+          rm -f "$entries"
+          if [ "$missing" -gt 0 ]; then
+            echo "::error::$missing updater platform(s) skipped due to missing signatures — fix the flaky upload before relying on auto-update"
           fi
           gh release edit "$TAG" --notes-file notes.md --draft=false --latest
