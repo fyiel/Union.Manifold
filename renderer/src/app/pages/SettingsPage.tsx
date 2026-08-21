@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Terminal, FolderOpen, Palette, Library as LibraryIcon, Plus, X, Pencil, Puzzle, Eye, EyeOff } from "lucide-react"
 import { PRESET_THEMES } from "@/lib/themes/presets"
 import type { ThemeDef } from "@/lib/themes/types"
@@ -418,6 +418,8 @@ function ProxyRow() {
 }
 
 function SourcesTab() {
+  const refreshRowsTimerRef = useRef<number | null>(null)
+  useEffect(() => () => { if (refreshRowsTimerRef.current !== null) window.clearTimeout(refreshRowsTimerRef.current) }, [])
   const [sources, setSources] = useState<SourceInfo[]>([])
   const [enabled, setEnabled] = useState<Record<string, boolean>>({})
   const [caps, setCaps] = useState<Record<string, SourceCapabilityFlags>>({})
@@ -531,7 +533,8 @@ function SourcesTab() {
     setRefreshEta(0)
     await loadSources()
     setRefreshing(false)
-    window.setTimeout(() => setRefreshRows(null), 5000)
+    if (refreshRowsTimerRef.current !== null) window.clearTimeout(refreshRowsTimerRef.current)
+    refreshRowsTimerRef.current = window.setTimeout(() => { refreshRowsTimerRef.current = null; setRefreshRows(null) }, 5000)
   }
 
   const detailFor = (id: string): string => {
@@ -1020,6 +1023,8 @@ function AboutTab() {
 }
 
 function ModsTab({ onJumpToSources }: { onJumpToSources: () => void }) {
+  const savedKeyTimerRef = useRef<number | null>(null)
+  useEffect(() => () => { if (savedKeyTimerRef.current !== null) window.clearTimeout(savedKeyTimerRef.current) }, [])
   const [apiKey, setApiKey] = useState("")
   const [reveal, setReveal] = useState(false)
   const [savedKey, setSavedKey] = useState<string | null>(null)
@@ -1055,7 +1060,8 @@ function ModsTab({ onJumpToSources }: { onJumpToSources: () => void }) {
     try {
       await window.ucSettings?.set?.(key, value.trim() || null)
       setSavedKey(key)
-      window.setTimeout(() => setSavedKey(null), 1600)
+      if (savedKeyTimerRef.current !== null) window.clearTimeout(savedKeyTimerRef.current)
+      savedKeyTimerRef.current = window.setTimeout(() => { savedKeyTimerRef.current = null; setSavedKey(null) }, 1600)
     } catch {  }
   }
 

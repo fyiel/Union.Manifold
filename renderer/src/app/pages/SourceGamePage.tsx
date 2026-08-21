@@ -1,5 +1,5 @@
 import { DOWNLOAD_STATUS_LABEL } from "@/lib/downloads"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate, useParams } from "react-router-dom"
 import { Bookmark, BookmarkCheck, Maximize2, TriangleAlert, X } from "lucide-react"
 import { SOURCE_PRIORITY, type StartResult, collectDownloadEntries, downloadAppidFor, getRememberedGame, rememberGames, rememberGameAs, getSourceDetail, resolveInstalledGame, loadSourcePriority, orderSourcesByPreference, pickPrimaryDownload, sourceName, sourceDirect, startSourceDownload, startBestDownload, type DownloadEntry, sortDownloadOptions } from "@/lib/sources"
@@ -17,7 +17,7 @@ const LIVE_LABEL: Record<string, string> = {
   completed: "Installed",
   extracted: "Installed",
 }
-const LIVE_ORDER = ["downloading", "extracting", "installing", "verifying", "retrying", "paused", "install_ready", "queued", "completed", "extracted", "failed"]
+const LIVE_ORDER = ["downloading", "extracting", "installing", "paused", "install_ready", "queued", "completed", "extracted", "failed"]
 
 type OptState = "idle" | "working" | "queued" | "opened" | "error"
 
@@ -85,6 +85,8 @@ export function SourceGamePage() {
   const [coverFailed, setCoverFailed] = useState(false)
   const [zoomedScreenshot, setZoomedScreenshot] = useState<string | null>(null)
   const [priority, setPriority] = useState<string[]>(SOURCE_PRIORITY)
+  const copiedTimerRef = useRef<number | null>(null)
+  useEffect(() => () => { if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current) }, [])
   useEffect(() => { void loadSourcePriority().then(setPriority) }, [])
   useEffect(() => {
     if (!zoomedScreenshot) return
@@ -232,7 +234,7 @@ export function SourceGamePage() {
   const copyPrimary = async () => {
     const url = primary?.option.url || primary?.option.pageUrl
     if (!url) return
-    try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1400) } catch {  }
+    try { await navigator.clipboard.writeText(url); setCopied(true); if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current); copiedTimerRef.current = window.setTimeout(() => { copiedTimerRef.current = null; setCopied(false) }, 1400) } catch {  }
   }
 
   const openSourcePage = (url?: string) => { if (url) void window.ucSystem?.openExternal?.(url) }

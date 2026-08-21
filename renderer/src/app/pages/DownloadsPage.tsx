@@ -64,6 +64,8 @@ export function DownloadsPage() {
   const [installing, setInstalling] = useState<Set<string>>(new Set())
   const [, setArtTick] = useState(0)
   useEffect(() => { void hydrateDownloadArt().then(() => setArtTick((t) => t + 1)) }, [])
+  const copiedTimerRef = useRef<number | null>(null)
+  useEffect(() => () => { if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current) }, [])
 
   const groups = useMemo<Group[]>(() => {
     const m = new Map<string, DownloadItem[]>()
@@ -103,7 +105,7 @@ export function DownloadsPage() {
   const copyLink = async (g: Group) => {
     const url = g.items[0]?.originalUrl || g.items[0]?.url
     if (!url) return
-    try { await navigator.clipboard.writeText(url); setCopied(g.appid); setTimeout(() => setCopied((c) => (c === g.appid ? null : c)), 1600) } catch {  }
+    try { await navigator.clipboard.writeText(url); setCopied(g.appid); if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current); copiedTimerRef.current = window.setTimeout(() => { copiedTimerRef.current = null; setCopied((c) => (c === g.appid ? null : c)) }, 1600) } catch {  }
   }
   const togglePause = (g: Group) => { if (has(g.items, ...PAUSABLE)) void pauseGroup(g.appid); else void resumeGroup(g.appid) }
   const install = async (appid: string) => {
