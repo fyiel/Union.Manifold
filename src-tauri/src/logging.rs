@@ -16,6 +16,7 @@ static REDACT: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
             "$1=[redacted]",
         ),
         (Regex::new(r"/home/[^/\s]+").unwrap(), "/home/[user]"),
+        (Regex::new(r"/Users/[^/\s]+").unwrap(), "/Users/[user]"),
         (
             Regex::new(r"C:\\Users\\[^\\\s]+").unwrap(),
             r"C:\Users\[user]",
