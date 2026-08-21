@@ -1,6 +1,6 @@
-use std::sync::LazyLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::LazyLock;
 use unicode_normalization::UnicodeNormalization;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -160,7 +160,6 @@ static EDITION_NOISE: &[&str] = &[
     "goty",
     "repack",
     "preinstalled",
-    "pre-installed",
     "edition",
     "definitive",
     "ultimate",
@@ -184,7 +183,9 @@ static PUNCT: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"[^\w
 static WS: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"\s+").unwrap());
 
 pub fn normalize_title(title: &str) -> String {
-    let lowered = title.to_lowercase();
+    let lowered = title
+        .to_lowercase()
+        .replace("pre-installed", "preinstalled");
     let decomposed: String = lowered.nfd().collect();
     let stripped = COMBINING.replace_all(&decomposed, "");
     let anded = stripped.replace('&', " and ");
@@ -477,7 +478,14 @@ impl PartialPool {
         ordered.sort_unstable();
         ordered
             .into_iter()
-            .map(|(_, root)| self.groups.get(&root).unwrap().materialized.as_ref().unwrap())
+            .map(|(_, root)| {
+                self.groups
+                    .get(&root)
+                    .unwrap()
+                    .materialized
+                    .as_ref()
+                    .unwrap()
+            })
             .collect()
     }
 
@@ -580,7 +588,6 @@ fn max_opt<T: Ord + Copy>(a: Option<T>, b: Option<T>) -> Option<T> {
         (None, y) => y,
     }
 }
-
 
 #[cfg(test)]
 mod tests {

@@ -65,7 +65,9 @@ fn browse_summary_keeps_card_and_directness_but_drops_detail_payload() {
     assert!(summary.sources[0].direct);
     assert!(summary.sources[0].description.is_none());
     assert!(summary.sources[0].download_options.is_empty());
-    assert!(serde_json::to_vec(&summary).unwrap().len() * 4 < serde_json::to_vec(&full).unwrap().len());
+    assert!(
+        serde_json::to_vec(&summary).unwrap().len() * 4 < serde_json::to_vec(&full).unwrap().len()
+    );
 }
 
 #[test]
@@ -98,16 +100,8 @@ fn normalize_title_drops_edition_noise_words() {
 }
 
 #[test]
-fn normalize_title_hyphenated_pre_installed_slips_past_the_noise_list() {
-    assert_eq!(
-        normalize_title("Portal 2 Pre-Installed"),
-        "portal 2 pre installed"
-    );
-}
-
-#[test]
-#[ignore]
-fn known_bug_pre_installed_with_hyphen_should_dedupe_against_plain_title() {
+fn normalize_title_hyphenated_pre_installed_dedupes_against_plain_title() {
+    assert_eq!(normalize_title("Portal 2 Pre-Installed"), "portal 2");
     assert_eq!(
         normalize_title("Portal 2 Pre-Installed"),
         normalize_title("Portal 2")
@@ -214,7 +208,6 @@ fn merge_games_takes_max_timestamps_and_first_size() {
     assert_eq!(out[0].size_text.as_deref(), Some("111 B"));
 }
 
-
 #[test]
 fn merge_games_appid_bridges_title_variants_transitively() {
     let mut a = SourceGame {
@@ -261,11 +254,21 @@ fn partial_pool_matches_batch_merge_at_every_prefix() {
         pool_game("gamebounty", "Dark Souls", None, &["Action"]),
         pool_game("steamrip", "Overcooked", Some(100), &["Party"]),
         pool_game("gamebounty", "Overcooked", Some(200), &["Party"]),
-        pool_game("kaoskrew", "Outer Wilds (Director's Cut)", None, &["Exploration"]),
+        pool_game(
+            "kaoskrew",
+            "Outer Wilds (Director's Cut)",
+            None,
+            &["Exploration"],
+        ),
         pool_game("steamrip", "Outer Wilds", None, &["Mystery"]),
         pool_game("gog", "Bridger", None, &[]),
         pool_game("empress", "Something Else", Some(4242), &["Racing"]),
-        pool_game("onlinefix", "Bridger Remastered", Some(4242), &["Open World"]),
+        pool_game(
+            "onlinefix",
+            "Bridger Remastered",
+            Some(4242),
+            &["Open World"],
+        ),
     ];
     let mut all = records.clone();
     let mut acc = PartialPool::new();
@@ -307,7 +310,12 @@ fn partial_pool_emits_batch_equal_results_across_source_batches() {
         ],
         vec![
             pool_game("onlinefix", "Elden Ring (v1.12)", None, &["Co-op"]),
-            pool_game("onlinefix", "Sekiro Shadows Die Twice", Some(814380), &["Stealth"]),
+            pool_game(
+                "onlinefix",
+                "Sekiro Shadows Die Twice",
+                Some(814380),
+                &["Stealth"],
+            ),
         ],
     ];
     let mut all: Vec<SourceGame> = Vec::new();
