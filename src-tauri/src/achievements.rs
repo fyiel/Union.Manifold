@@ -204,6 +204,21 @@ impl AchievementService {
         }
     }
 
+    pub fn forget(&self, appid: &str) {
+        let mut changed = false;
+        {
+            let mut games = self.games.lock();
+            if let Some(index) = games.iter().position(|game| game.appid == appid) {
+                games.remove(index);
+                changed = true;
+            }
+            self.watches.lock().remove(appid);
+        }
+        if changed {
+            self.persist();
+        }
+    }
+
     pub fn stop_all(&self) {
         let mut watches = self.watches.lock();
         for entry in watches.values() {
@@ -2062,6 +2077,32 @@ mod tests {
         assert!(file.is_file());
         let loaded = AchievementService::new(file);
         assert_eq!(loaded.list(), vec![expected]);
+    }
+
+    #[test]
+    fn forget_removes_game_and_stops_watch() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("achievements.json");
+        let service = AchievementService::new(file);
+        service.games.lock().push(AchievementGame {
+            appid: "local-card-corner".to_string(),
+            steam_app_id: None,
+            title: "Card Corner".to_string(),
+            image: None,
+            provider: "CODEX".to_string(),
+            catalog_complete: false,
+            updated_at: 900,
+            achievements: Vec::new(),
+        });
+
+        service.forget("local-card-corner");
+        service.forget("local-never-there");
+
+        assert!(service.list().is_empty());
+        assert!(service.watches.lock().is_empty());
+
+        let reloaded = AchievementService::new(temp.path().join("achievements.json"));
+        assert!(reloaded.list().is_empty());
     }
     #[test]
     fn merge_game_keeps_fresh_timestamp_when_previous_unlocked_at_is_none() {

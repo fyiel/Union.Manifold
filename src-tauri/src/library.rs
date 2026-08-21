@@ -419,6 +419,7 @@ pub fn installed_delete(state: State<'_, AppState>, appid: String) -> Value {
         std::fs::remove_dir_all(&dir).ok();
         invalidate_scan();
     }
+    state.achievements.forget(&appid);
     json!({ "ok": true })
 }
 
