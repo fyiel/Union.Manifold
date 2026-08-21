@@ -158,13 +158,8 @@ fn to_epoch_ms_accepts_common_site_date_formats() {
 }
 
 #[test]
-fn to_epoch_ms_truncates_time_of_day_in_space_separated_datetimes() {
-    assert_eq!(to_epoch_ms("1970-01-01 06:30:00"), Some(0));
-}
-
-#[test]
-#[ignore]
-fn known_bug_space_separated_datetime_should_keep_its_time_component() {
+fn to_epoch_ms_keeps_time_of_day_in_space_separated_datetimes() {
+    assert_eq!(to_epoch_ms("1970-01-01 06:30:00"), Some(23_400_000));
     assert_eq!(to_epoch_ms("1970-01-01 00:00:01"), Some(1_000));
 }
 
