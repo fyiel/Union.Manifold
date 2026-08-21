@@ -7,7 +7,9 @@ async fn gated_hosts_resolve_via_slipgate_only_when_configured() {
     assert!(cfg().is_none());
 
     let gated = "https://1fichier.com/?abcdef";
-    assert!(!crate::sources::hosts::is_resolvable(gated));
+    // Gate hosts resolve in-app through the webview solver now, so they are
+    // resolvable regardless of Slipgate configuration.
+    assert!(crate::sources::hosts::is_resolvable(gated));
     let res = crate::sources::hosts::gate::resolve(gated).await;
     assert!(!res.resolvable);
     assert_eq!(res.open_url.as_deref(), Some(gated));
@@ -40,7 +42,8 @@ async fn gated_hosts_resolve_via_slipgate_only_when_configured() {
     std::env::remove_var("SLIPGATE_URL");
     std::env::remove_var("SLIPGATE_KEY");
     assert!(cfg().is_none());
-    assert!(!crate::sources::hosts::is_resolvable(gated));
+    // Still resolvable: the webview solver covers gate hosts without Slipgate.
+    assert!(crate::sources::hosts::is_resolvable(gated));
 }
 
 #[test]

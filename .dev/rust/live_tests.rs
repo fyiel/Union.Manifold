@@ -210,8 +210,12 @@ async fn live_gamebounty_multipart_resolves_every_part() {
     );
     let mut failures = Vec::new();
     for option in &candidates {
-        eprintln!("trying multi-part option: {} parts={}", option.label, option.parts.len() + 1);
-        let result = super::adapter_resolve("gamebounty", option).await;
+        eprintln!(
+            "trying multi-part option: {} parts={}",
+            option.label,
+            option.parts.len() + 1
+        );
+        let result = super::adapter_resolve_with(None, "gamebounty", option).await;
         if result.resolvable {
             let files = result.files.expect("merged part files");
             assert!(
@@ -244,10 +248,15 @@ async fn live_gamebounty_detail_prunes_dead_mirrors() {
         .collect();
     eprintln!("surviving mirrors: {hosts:?}");
     for dead in ["datanodes", "vikingfile", "filemirage", "rootz"] {
-        assert!(!hosts.contains(&dead), "{dead} mirror is dead and must be pruned");
+        assert!(
+            !hosts.contains(&dead),
+            "{dead} mirror is dead and must be pruned"
+        );
     }
     assert!(
-        hosts.iter().any(|h| ["fileditch", "fileq", "gofile"].contains(h)),
+        hosts
+            .iter()
+            .any(|h| ["fileditch", "fileq", "gofile"].contains(h)),
         "at least one known-alive mirror must survive: {hosts:?}"
     );
     assert!(!detail.download_options.is_empty());
@@ -349,10 +358,12 @@ async fn live_every_source_returns_current_games() {
             eprintln!("{host}: external torrent client fallback");
             continue;
         }
-        let result =
-            tokio::time::timeout(Duration::from_secs(240), adapter_resolve(source_id, option))
-                .await
-                .unwrap_or_else(|_| panic!("{host} resolution timed out"));
+        let result = tokio::time::timeout(
+            Duration::from_secs(240),
+            adapter_resolve_with(None, source_id, option),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("{host} resolution timed out"));
         if result.resolvable {
             verify_direct_file(host, &result).await;
         } else {
@@ -382,6 +393,61 @@ async fn live_every_source_returns_current_games() {
         total >= 10,
         "expected at least ten current games, got {total}"
     );
+}
+
+#[tokio::test]
+#[ignore]
+async fn live_solver_target_hosts_resolve_natively_when_ungated() {
+    // datanodes/datavaults carry the webview-solver escalation fallback, so
+    // their native resolvers must keep working untouched when the page is
+    // not gated. Scans the freshest catalogs for live mirrors of each.
+    let params = QueryParams {
+        limit: 60,
+        ..Default::default()
+    };
+    let mut found: HashMap<String, DownloadOption> = HashMap::new();
+    'outer: for source in ["zeigames", "gamebounty"] {
+        let games = match source {
+            "zeigames" => adapters::zeigames::query(&params).await,
+            _ => adapters::gamebounty::query(&params).await,
+        }
+        .unwrap_or_default();
+        for game in games {
+            let Some(detail) = adapter_detail(source, &game.source_slug).await else {
+                continue;
+            };
+            for option in detail.download_options {
+                if matches!(option.host_type.as_str(), "datanodes" | "datavaults")
+                    && !found.contains_key(&option.host_type)
+                {
+                    let url = option.url.clone().unwrap_or_default();
+                    eprintln!("{} sample: {}", option.host_type, url);
+                    found.insert(option.host_type.clone(), option);
+                }
+            }
+            if found.len() == 2 {
+                break 'outer;
+            }
+        }
+    }
+    assert!(
+        found.contains_key("datanodes") || found.contains_key("datavaults"),
+        "no live datanodes/datavaults mirrors surfaced this run"
+    );
+    for (host, option) in &found {
+        let result = hosts::resolve_url(option).await;
+        // Gated pages legitimately fall back to the browser; only assert on
+        // hard failures of the native flow itself.
+        if result.resolvable {
+            eprintln!("{host}: resolved -> {:?}", result.url);
+            verify_direct_file(host, &result).await;
+        } else {
+            eprintln!(
+                "{host}: gated or dead ({})",
+                result.reason.as_deref().unwrap_or("?")
+            );
+        }
+    }
 }
 
 #[tokio::test]

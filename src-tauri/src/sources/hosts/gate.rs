@@ -1,8 +1,9 @@
 use serde_json::json;
 
+use super::not_resolvable;
 use crate::slipgate;
 use crate::sources::ResolveResult;
-use super::not_resolvable;
+use tauri::AppHandle;
 
 pub struct GateHost {
     pub recipe: &'static str,
@@ -54,36 +55,94 @@ pub fn host_type(url: &str) -> Option<&'static str> {
 }
 
 pub async fn resolve(url: &str) -> ResolveResult {
+    resolve_inner(url, None).await
+}
+
+/// Slipgate first (its recipes parse these pages unattended), then the
+/// in-app webview solver for setups without a Slipgate URL or when the
+/// recipe fails.
+pub async fn resolve_via(app: &AppHandle, url: &str) -> ResolveResult {
+    resolve_inner(url, Some(app)).await
+}
+
+async fn resolve_inner(url: &str, app: Option<&AppHandle>) -> ResolveResult {
     let Some(g) = entry_for(url) else {
         return not_resolvable(url, Some("not a Slipgate host"));
     };
-    let Some(cfg) = slipgate::cfg() else {
+    let mut slipgate_error: Option<String> = None;
+    if let Some(cfg) = slipgate::cfg() {
+        match slipgate::resolve(&cfg, g.recipe, url, json!({}), json!([])).await {
+            Ok(link) if link.url.trim_end_matches('/') != url.trim_end_matches('/') => {
+                return ResolveResult {
+                    resolvable: true,
+                    url: Some(link.url),
+                    file_name: link.file_name,
+                    size_bytes: link.size_bytes,
+                    headers: (!link.headers.is_empty()).then_some(link.headers),
+                    ephemeral: true,
+                    ..Default::default()
+                };
+            }
+            Ok(_) => {}
+            Err(e) => slipgate_error = Some(e),
+        }
+    }
+    let Some(app) = app else {
         return not_resolvable(
             url,
-            Some(&format!(
-                "{} ({}) — set a Slipgate URL in Settings to resolve in-app",
-                g.recipe, g.wall
-            )),
+            Some(&match slipgate_error {
+                Some(e) => format!("Slipgate: {e}"),
+                None => format!(
+                    "{} ({}) — set a Slipgate URL in Settings to resolve in-app",
+                    g.recipe, g.wall
+                ),
+            }),
         );
     };
-    match slipgate::resolve(&cfg, g.recipe, url, json!({}), json!([])).await {
-        Ok(link) if link.url.trim_end_matches('/') != url.trim_end_matches('/') => ResolveResult {
-            resolvable: true,
-            url: Some(link.url),
-            file_name: link.file_name,
-            size_bytes: link.size_bytes,
-            headers: (!link.headers.is_empty()).then_some(link.headers),
-            ephemeral: true,
-            ..Default::default()
-        },
-        Ok(_) => not_resolvable(
-            url,
-            Some(&format!(
-                "{} returned the host page instead of a direct download",
-                g.recipe
-            )),
-        ),
-        Err(e) => not_resolvable(url, Some(&format!("Slipgate: {e}"))),
+    match crate::resolver::solve(app, url).await {
+        Ok(solved) => {
+            let extra = solved.headers(Some(url));
+            if let Some(direct) = solved.url {
+                return ResolveResult {
+                    resolvable: true,
+                    url: Some(direct),
+                    file_name: solved.file_name,
+                    headers: (!extra.is_empty()).then_some(extra),
+                    ephemeral: true,
+                    ..Default::default()
+                };
+            }
+            // Clearance without a captured download: replay the page once
+            // with the solved session and look for an exposed direct link.
+            if let Ok(resp) = crate::http::fetch(
+                url,
+                &crate::http::FetchOpts {
+                    headers: extra.clone(),
+                    ..Default::default()
+                },
+            )
+            .await
+            {
+                let body = resp.text().await.unwrap_or_default();
+                if let Some(link) = super::scan_direct_link(&crate::http::decode_entities(&body)) {
+                    return ResolveResult {
+                        resolvable: true,
+                        url: Some(link),
+                        headers: Some(extra),
+                        ephemeral: true,
+                        ..Default::default()
+                    };
+                }
+            }
+            not_resolvable(
+                url,
+                Some(&format!(
+                    "{} verification passed but no direct download was exposed",
+                    g.recipe
+                )),
+            )
+        }
+        Err(e) => not_resolvable(url, Some(&format!("verification failed: {e}"))),
     }
 }
 

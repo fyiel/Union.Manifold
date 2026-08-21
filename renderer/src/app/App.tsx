@@ -7,6 +7,7 @@ import { GameLaunchProvider } from "@/context/game-launch-context"
 import { ToastProvider } from "@/context/toast-context"
 import { Toaster } from "@/components/Toaster"
 import { ControllerNavigation } from "@/components/ControllerNavigation"
+import { ResolverStatusGuard } from "@/components/ResolverStatusGuard"
 import { ThemeBoundary } from "@/components/ThemeBoundary"
 import { loadGameModsPage, loadSourceGamePage } from "@/app/route-loaders"
 import { applySavedSourceSettings } from "@/lib/sources"
@@ -166,6 +167,7 @@ function AppWithDownloads() {
     <>
       <ExtractionCloseGuard />
       <DownloadBlockedGuard />
+      <ResolverStatusGuard />
       <ControllerNavigation />
       <ForkLayout />
     </>

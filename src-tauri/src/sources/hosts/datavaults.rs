@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::time::Duration;
 
 use std::sync::LazyLock;
@@ -47,13 +48,24 @@ fn form(pairs: &[(&str, &str)]) -> Vec<u8> {
         .into_bytes()
 }
 
-fn post_opts(jar: &Jar, referer: &str, body: Vec<u8>, manual_redirect: bool) -> FetchOpts {
+fn post_opts(
+    jar: &Jar,
+    referer: &str,
+    body: Vec<u8>,
+    manual_redirect: bool,
+    extra: &HashMap<String, String>,
+) -> FetchOpts {
     let mut headers = std::collections::HashMap::new();
     headers.insert(
         "Content-Type".to_string(),
         "application/x-www-form-urlencoded".to_string(),
     );
     headers.insert("Referer".to_string(), referer.to_string());
+    for (key, value) in extra {
+        if !key.eq_ignore_ascii_case("referer") && !key.eq_ignore_ascii_case("content-type") {
+            headers.insert(key.clone(), value.clone());
+        }
+    }
     FetchOpts {
         method: Some("POST".to_string()),
         headers,
@@ -95,6 +107,13 @@ fn needs_interactive_captcha(html: &str) -> bool {
 }
 
 pub async fn resolve(url: &str) -> ResolveResult {
+    resolve_with(url, &HashMap::new()).await
+}
+
+/// Resolve with extra headers from a solved webview session (Cookie/UA
+/// handoff). The solved cookies ride along on every request so the gate
+/// stays open for the whole timer + captcha flow.
+pub async fn resolve_with(url: &str, extra: &HashMap<String, String>) -> ResolveResult {
     let parsed = match url::Url::parse(url) {
         Ok(u) => u,
         Err(_) => return not_resolvable(url, Some("bad datavaults url")),
@@ -115,6 +134,13 @@ pub async fn resolve(url: &str) -> ResolveResult {
         url,
         &FetchOpts {
             jar: Some(jar.clone()),
+            headers: extra
+                .iter()
+                .filter(|(k, _)| {
+                    k.eq_ignore_ascii_case("cookie") || k.eq_ignore_ascii_case("user-agent")
+                })
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
             timeout: Some(Duration::from_secs(30)),
             ..Default::default()
         },
@@ -129,7 +155,7 @@ pub async fn resolve(url: &str) -> ResolveResult {
         ("referer", ""),
         ("method_free", "Free Download"),
     ]);
-    let page2 = match http::fetch(url, &post_opts(&jar, url, dl1, false)).await {
+    let page2 = match http::fetch(url, &post_opts(&jar, url, dl1, false, extra)).await {
         Ok(r) => r.text().await.unwrap_or_default(),
         Err(_) => return not_resolvable(url, Some("datavaults download1 failed")),
     };
@@ -158,7 +184,7 @@ pub async fn resolve(url: &str) -> ResolveResult {
         ("method_premium", ""),
         ("code", &code),
     ]);
-    let resp = match http::fetch(url, &post_opts(&jar, url, dl2, true)).await {
+    let resp = match http::fetch(url, &post_opts(&jar, url, dl2, true, extra)).await {
         Ok(r) => r,
         Err(_) => return not_resolvable(url, Some("datavaults download2 failed")),
     };
@@ -179,6 +205,24 @@ pub async fn resolve(url: &str) -> ResolveResult {
         Some(m) => ok(m.as_str(), fname),
         None => not_resolvable(url, Some(&reason(&body))),
     }
+}
+
+/// Feed a webview-solver outcome back into the native flow. Returns `Some`
+/// only when it produced a downloadable result; otherwise the caller keeps
+/// its original failure and continues down the fallback chain.
+pub async fn with_solved(url: &str, solved: crate::resolver::Solved) -> Option<ResolveResult> {
+    if let Some(direct) = solved.url {
+        return Some(ResolveResult {
+            resolvable: true,
+            url: Some(direct),
+            file_name: solved.file_name,
+            ephemeral: true,
+            ..Default::default()
+        });
+    }
+    let extra = solved.headers(Some(url));
+    let retried = resolve_with(url, &extra).await;
+    retried.resolvable.then_some(retried)
 }
 
 fn ok(direct: &str, fname: &str) -> ResolveResult {

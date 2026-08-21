@@ -1,0 +1,583 @@
+//! In-app webview challenge solver.
+//!
+//! When a download page sits behind a Cloudflare gate, an interactive captcha
+//! or a JS-only download flow, the plain HTTP resolvers cannot proceed. This
+//! module drives the page through a real browser engine — the same WebView2 /
+//! WKWebView / WebKitGTK that renders the app UI — so challenges pass exactly
+//! the way they pass for a normal user:
+//!
+//! - hidden by default: managed "verifying you are human" interstitials
+//!   auto-pass without a window ever appearing;
+//! - if an interactive widget (Turnstile/hCaptcha) is detected, or no progress
+//!   is made within the hidden budget, the same window is shown and focused
+//!   for one manual click, then closed — never a second code path;
+//! - success is either a captured direct download URL (webview download
+//!   interception or direct-file navigation) or a `cf_clearance` cookie handed
+//!   back together with the webview's exact User-Agent so reqwest/aria2 can
+//!   replay the cleared session.
+//!
+//! The solver window is deliberately absent from capabilities/default.json, so
+//! remote pages get no Tauri IPC access; the host observes progress through
+//! the platform cookie store and host-injected probes only.
+
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock};
+use std::time::{Duration, Instant};
+
+use base64::Engine as _;
+use parking_lot::Mutex;
+use serde_json::{json, Value};
+use tauri::webview::DownloadEvent;
+use tauri::{AppHandle, Emitter, Manager, Url, WebviewUrl, WebviewWindowBuilder};
+
+const WINDOW_LABEL: &str = "resolver";
+const TICK_MS: u64 = 500;
+/// How long the window stays hidden before giving up on an unattended pass.
+const HIDDEN_BUDGET_MS: u128 = 15_000;
+/// An interactive widget that persists this long triggers the visible phase.
+const INTERACTIVE_GRACE_MS: u128 = 6_000;
+/// Total budget including the time a user may spend clicking a challenge.
+const OVERALL_BUDGET_MS: u128 = 150_000;
+/// How long a queued solve waits for the active one before failing.
+const SLOT_WAIT_MS: u128 = 120_000;
+/// A solved clearance is reused for this long before the window runs again.
+const CLEARANCE_TTL_MS: i64 = 20 * 60_000;
+/// Probe payloads older than this are considered stale (page navigated away
+/// between eval and title read).
+const PROBE_FRESHNESS_MS: i64 = 5_000;
+
+/// Marker prefix written into `document.title` by the injected probe. A zero
+/// width space plus a private-use character: real page titles never start
+/// with this pair, so stale/genuine titles are rejected cheaply.
+const PROBE_MARK: &str = "\u{200b}\u{e00d}UCR:";
+
+#[derive(Debug, Default, Clone)]
+pub struct Solved {
+    /// Direct download URL captured from the webview, when the solve produced
+    /// one (download interception or direct-file navigation).
+    pub url: Option<String>,
+    pub file_name: Option<String>,
+    /// `Cookie` header value covering the session (includes HttpOnly cookies
+    /// such as `cf_clearance`), scoped to the solved URL.
+    pub cookie_header: Option<String>,
+    /// Exact navigator.userAgent of the solver webview. Replay requests must
+    /// send the same UA or Cloudflare rejects the clearance.
+    pub user_agent: Option<String>,
+}
+
+impl Solved {
+    pub fn headers(&self, referer: Option<&str>) -> HashMap<String, String> {
+        let mut headers = HashMap::new();
+        if let Some(ua) = &self.user_agent {
+            headers.insert("User-Agent".to_string(), ua.clone());
+        }
+        if let Some(cookie) = &self.cookie_header {
+            headers.insert("Cookie".to_string(), cookie.clone());
+        }
+        if let Some(referer) = referer {
+            headers.insert("Referer".to_string(), referer.to_string());
+        }
+        headers
+    }
+}
+
+#[derive(Default)]
+struct Shared {
+    captured: Mutex<Option<(String, Option<String>)>>,
+    cancelled: Mutex<bool>,
+    /// Latest document.title of the solver webview, delivered by the
+    /// platform-level title-changed signal (works for remote origins).
+    title: Mutex<Option<String>>,
+}
+
+impl Shared {
+    fn cancel(&self) {
+        *self.cancelled.lock() = true;
+    }
+
+    fn is_cancelled(&self) -> bool {
+        *self.cancelled.lock()
+    }
+
+    fn take_captured(&self) -> Option<(String, Option<String>)> {
+        self.captured.lock().take()
+    }
+
+    fn set_title(&self, title: String) {
+        *self.title.lock() = Some(title);
+    }
+
+    fn take_title(&self) -> Option<String> {
+        self.title.lock().take()
+    }
+}
+
+static ACTIVE: Mutex<Option<Arc<Shared>>> = Mutex::new(None);
+
+/// Serializes solver sessions: one gated page at a time, queued callers wait.
+static SLOT: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(tokio::sync::Mutex::default);
+
+struct CachedClearance {
+    cookie_header: String,
+    user_agent: Option<String>,
+    at_ms: i64,
+}
+
+static CLEARANCE_CACHE: LazyLock<Mutex<HashMap<String, CachedClearance>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
+fn emit_status(app: &AppHandle, state: &str, host: &str, reason: Option<&str>) {
+    app.emit(
+        "uc:resolver-status",
+        json!({ "state": state, "host": host, "reason": reason }),
+    )
+    .ok();
+}
+
+/// A clearance solved earlier for this host that is still fresh. Callers use
+/// it to replay their native resolution without opening any window.
+pub fn cached_clearance(host: &str) -> Option<(String, Option<String>)> {
+    let cache = CLEARANCE_CACHE.lock();
+    let entry = cache.get(host)?;
+    if now_ms() - entry.at_ms > CLEARANCE_TTL_MS {
+        return None;
+    }
+    Some((entry.cookie_header.clone(), entry.user_agent.clone()))
+}
+
+fn cache_clearance(host: &str, cookie_header: String, user_agent: Option<String>) {
+    CLEARANCE_CACHE.lock().insert(
+        host.to_string(),
+        CachedClearance {
+            cookie_header,
+            user_agent,
+            at_ms: now_ms(),
+        },
+    );
+}
+
+/// Ask the active session to stop (renderer cancel button, solver window
+/// closed by the user, app shutdown).
+pub fn request_cancel(app: &AppHandle) {
+    if let Some(shared) = ACTIVE.lock().clone() {
+        shared.cancel();
+    }
+    if let Some(window) = app.get_webview_window(WINDOW_LABEL) {
+        window.destroy().ok();
+    }
+}
+
+/// The solver window was closed natively (user dismissed the challenge);
+/// flag the active session cancelled without touching the closing window.
+pub fn note_window_closed() {
+    if let Some(shared) = ACTIVE.lock().clone() {
+        shared.cancel();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Probe channel
+//
+// The solver webview navigates to the remote page, so no Tauri IPC exists
+// there. Progress is read back through document.title: the host evaluates a
+// probe script (eval works on any origin) and the page answers by encoding a
+// JSON payload into its own title behind PROBE_MARK. Title reads are cheap
+// and cross-origin safe on all three platforms.
+// ---------------------------------------------------------------------------
+
+fn probe_js() -> String {
+    format!(
+        r#"(function(){{try{{var d={{h:location.href,r:document.readyState,c:document.cookie,u:navigator.userAgent,t:!!document.querySelector('iframe[src*="challenges.cloudflare.com"],iframe[src*="turnstile"],.cf-turnstile,#challenge-form,#challenge-error-text,.g-recaptcha'),e:Date.now()}};document.title="{PROBE_MARK}"+btoa(unescape(encodeURIComponent(JSON.stringify(d))));}}catch(e){{}}}})()"#
+    )
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize, PartialEq, serde::Serialize)]
+struct Probe {
+    #[serde(default)]
+    h: String,
+    #[serde(default)]
+    r: String,
+    #[serde(default)]
+    c: String,
+    #[serde(default)]
+    u: String,
+    #[serde(default)]
+    t: bool,
+    #[serde(default)]
+    e: i64,
+}
+
+/// Test-only mirror of the probe JS encoder, so the title-channel codec is
+/// exercised as a pair.
+#[cfg(test)]
+fn encode_probe_payload(payload: &Probe) -> String {
+    let json = serde_json::to_string(payload).unwrap_or_default();
+    format!(
+        "{PROBE_MARK}{}",
+        base64::engine::general_purpose::STANDARD.encode(json.as_bytes())
+    )
+}
+
+fn decode_probe(title: &str) -> Option<Probe> {
+    let encoded = title.strip_prefix(PROBE_MARK)?.trim();
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded.as_bytes())
+        .ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn probe_fresh(probe: &Probe) -> bool {
+    probe.e > 0 && now_ms() - probe.e <= PROBE_FRESHNESS_MS
+}
+
+// ---------------------------------------------------------------------------
+// Success classification
+// ---------------------------------------------------------------------------
+
+static FILE_EXT_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(?i)\.(zip|rar|7z|001|iso|exe|bin|tar|gz|xz|zst|apk)([?#]|$)").unwrap()
+});
+
+static PAGE_HINT_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(?i)\.(html?|php|aspx?|jsp)([?#]|$)").unwrap());
+
+/// Top-level navigations to something that smells like an archive/installer
+/// are treated as a solved download rather than followed.
+fn looks_like_direct_file(url: &str) -> bool {
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    FILE_EXT_RE.is_match(path) && !PAGE_HINT_RE.is_match(path)
+}
+
+fn file_name_from_url(url: &str) -> Option<String> {
+    let parsed = url::Url::parse(url).ok()?;
+    let segment = parsed.path_segments()?.rfind(|s| !s.is_empty())?;
+    let decoded = percent_encoding::percent_decode_str(segment)
+        .decode_utf8_lossy()
+        .to_string();
+    (!decoded.is_empty()).then_some(decoded)
+}
+
+fn cookie_header_from(cookies: &[tauri::webview::Cookie<'static>]) -> Option<String> {
+    if cookies.is_empty() {
+        return None;
+    }
+    let header = cookies
+        .iter()
+        .map(|c| format!("{}={}", c.name(), c.value()))
+        .collect::<Vec<_>>()
+        .join("; ");
+    (!header.is_empty()).then_some(header)
+}
+
+fn clearance_cookie(cookies: &[tauri::webview::Cookie<'static>]) -> bool {
+    cookies.iter().any(|c| c.name() == "cf_clearance")
+}
+
+// ---------------------------------------------------------------------------
+// Escalation policy
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Escalation {
+    StayHidden,
+    Show,
+}
+
+/// Pure decision for the hidden -> visible transition: escalate once an
+/// interactive widget has persisted past its grace period, or once the
+/// unattended budget is spent. Never escalates twice.
+pub fn escalation_action(
+    escalated: bool,
+    elapsed_ms: u128,
+    interactive_for_ms: Option<u128>,
+) -> Escalation {
+    if escalated {
+        return Escalation::StayHidden;
+    }
+    let due = match interactive_for_ms {
+        Some(ms) => ms >= INTERACTIVE_GRACE_MS,
+        None => elapsed_ms >= HIDDEN_BUDGET_MS,
+    };
+    if due {
+        Escalation::Show
+    } else {
+        Escalation::StayHidden
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Session driver
+// ---------------------------------------------------------------------------
+
+/// Solve `page_url` in the solver webview. Serialized globally; concurrent
+/// callers queue until the active session finishes.
+pub async fn solve(app: &AppHandle, page_url: &str) -> Result<Solved, String> {
+    let (parsed, host) = parse_solve_url(page_url)?;
+
+    if let Some((cookie_header, user_agent)) = cached_clearance(&host) {
+        return Ok(Solved {
+            cookie_header: Some(cookie_header),
+            user_agent,
+            ..Default::default()
+        });
+    }
+
+    let slot = acquire_slot().await?;
+
+    // Another queued caller may have refreshed the cache while we waited.
+    if let Some((cookie_header, user_agent)) = cached_clearance(&host) {
+        drop(slot);
+        return Ok(Solved {
+            cookie_header: Some(cookie_header),
+            user_agent,
+            ..Default::default()
+        });
+    }
+
+    let result = drive(app, parsed, &host).await;
+    drop(slot);
+    result
+}
+
+fn parse_solve_url(page_url: &str) -> Result<(Url, String), String> {
+    let parsed: Url = page_url
+        .parse()
+        .map_err(|_| "solver: invalid url".to_string())?;
+    if parsed.scheme() != "https" && parsed.scheme() != "http" {
+        return Err("solver: only http(s) urls can be solved".to_string());
+    }
+    let host = parsed
+        .host_str()
+        .map(|h| h.to_lowercase())
+        .ok_or_else(|| "solver: url has no host".to_string())?;
+    Ok((parsed, host))
+}
+
+async fn acquire_slot() -> Result<tokio::sync::MutexGuard<'static, ()>, String> {
+    let started = Instant::now();
+    loop {
+        if let Ok(guard) = SLOT.try_lock() {
+            return Ok(guard);
+        }
+        if started.elapsed().as_millis() > SLOT_WAIT_MS {
+            return Err("another verification is still running".to_string());
+        }
+        tokio::time::sleep(Duration::from_millis(TICK_MS)).await;
+    }
+}
+
+async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, String> {
+    // A crashed previous session can leave the window behind; start clean.
+    if let Some(window) = app.get_webview_window(WINDOW_LABEL) {
+        window.destroy().ok();
+    }
+
+    let shared = Arc::new(Shared::default());
+    *ACTIVE.lock() = Some(shared.clone());
+    emit_status(app, "solving", host, None);
+
+    let capture_shared = shared.clone();
+    let nav_shared = shared.clone();
+    let title_shared = shared.clone();
+    let builder =
+        WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::External(page_url.clone()))
+            .title("Union.Manifold — security check")
+            .inner_size(920.0, 720.0)
+            .min_inner_size(420.0, 320.0)
+            .resizable(true)
+            .center()
+            .visible(false)
+            .focused(false)
+            .decorations(true)
+            // The probe channel's receive side: document title changes arrive
+            // through this platform signal no matter which origin the page
+            // is on (the remote page itself has no IPC access).
+            .on_document_title_changed(move |_webview, title| {
+                title_shared.set_title(title);
+            })
+            // Never let the webview save files: intercepted downloads become the
+            // resolved URL for aria2 instead.
+            .on_download(move |_webview, event| {
+                if let DownloadEvent::Requested { url, destination } = event {
+                    let name = destination
+                        .file_name()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .filter(|s| !s.is_empty());
+                    *capture_shared.captured.lock() = Some((url.to_string(), name));
+                }
+                false
+            })
+            .on_navigation(move |url| {
+                if looks_like_direct_file(url.as_str()) {
+                    let name = file_name_from_url(url.as_str());
+                    *nav_shared.captured.lock() = Some((url.to_string(), name));
+                    return false;
+                }
+                true
+            });
+
+    // WebView2 throttles timers of occluded windows and Cloudflare treats
+    // visibility as a bot signal, so keep the hidden window treated as
+    // visible. These args replace wry's defaults, hence the repeated flags.
+    #[cfg(windows)]
+    let builder = builder.additional_browser_args(
+        "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion",
+    );
+
+    let window = match builder.build() {
+        Ok(window) => window,
+        Err(e) => {
+            *ACTIVE.lock() = None;
+            emit_status(
+                app,
+                "failed",
+                host,
+                Some("could not open the solver window"),
+            );
+            return Err(format!("solver window failed: {e}"));
+        }
+    };
+
+    let started = Instant::now();
+    let mut escalated = false;
+    let mut interactive_since: Option<Instant> = None;
+    let mut user_agent: Option<String> = None;
+
+    let outcome = loop {
+        tokio::time::sleep(Duration::from_millis(TICK_MS)).await;
+
+        if shared.is_cancelled() {
+            break Err("cancelled".to_string());
+        }
+        if app.get_webview_window(WINDOW_LABEL).is_none() {
+            shared.cancel();
+            break Err("cancelled".to_string());
+        }
+
+        // 1. A captured download wins immediately.
+        if let Some((url, name)) = shared.take_captured() {
+            let cookies = window
+                .cookies_for_url(page_url.clone())
+                .ok()
+                .unwrap_or_default();
+            let cookie_header = cookie_header_from(&cookies);
+            if let Some(header) = &cookie_header {
+                cache_clearance(host, header.clone(), user_agent.clone());
+            }
+            break Ok(Solved {
+                url: Some(url),
+                file_name: name,
+                cookie_header,
+                user_agent: user_agent.clone(),
+            });
+        }
+
+        // 2. Clearance cookie appeared: the managed challenge passed.
+        let cookies = window
+            .cookies_for_url(page_url.clone())
+            .ok()
+            .unwrap_or_default();
+        if clearance_cookie(&cookies) {
+            let cookie_header = cookie_header_from(&cookies);
+            if let Some(header) = &cookie_header {
+                cache_clearance(host, header.clone(), user_agent.clone());
+            }
+            break Ok(Solved {
+                cookie_header,
+                user_agent: user_agent.clone(),
+                ..Default::default()
+            });
+        }
+
+        // Success is checked before the budget so a solve completing on the
+        // final tick is not misreported as a timeout.
+        if started.elapsed().as_millis() >= OVERALL_BUDGET_MS {
+            break Err("verification did not complete in time".to_string());
+        }
+
+        // 3. Probe the page state (best effort; stale payloads are skipped).
+        if window.eval(probe_js().as_str()).is_ok() {
+            tokio::time::sleep(Duration::from_millis(TICK_MS / 2)).await;
+            if let Some(title) = shared.take_title() {
+                if let Some(probe) = decode_probe(&title).filter(probe_fresh) {
+                    if !probe.u.is_empty() && user_agent.is_none() {
+                        user_agent = Some(probe.u);
+                    }
+                    interactive_since = if probe.t {
+                        Some(*interactive_since.get_or_insert(Instant::now()))
+                    } else {
+                        None
+                    };
+                }
+            }
+        }
+
+        // 4. Hidden -> visible escalation.
+        if escalation_action(
+            escalated,
+            started.elapsed().as_millis(),
+            interactive_since.map(|t| t.elapsed().as_millis()),
+        ) == Escalation::Show
+        {
+            window.show().ok();
+            window.set_focus().ok();
+            escalated = true;
+            emit_status(app, "interactive", host, None);
+        }
+    };
+
+    window.destroy().ok();
+    *ACTIVE.lock() = None;
+
+    match &outcome {
+        Ok(solved) => {
+            let state = if solved.url.is_some() {
+                "captured"
+            } else {
+                "cleared"
+            };
+            emit_status(app, state, host, None);
+        }
+        Err(reason) => {
+            let state = if reason == "cancelled" {
+                "cancelled"
+            } else {
+                "failed"
+            };
+            emit_status(app, state, host, Some(reason));
+        }
+    }
+
+    outcome
+}
+
+// ---------------------------------------------------------------------------
+// Commands
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn resolver_solve_start(app: AppHandle, url: String) -> Value {
+    match solve(&app, &url).await {
+        Ok(solved) => json!({
+            "ok": true,
+            "url": solved.url,
+            "fileName": solved.file_name,
+            "headers": solved.headers(None),
+        }),
+        Err(e) => json!({ "ok": false, "error": e }),
+    }
+}
+
+#[tauri::command]
+pub async fn resolver_solve_cancel(app: AppHandle) -> Value {
+    request_cancel(&app);
+    json!({ "ok": true })
+}
+
+#[cfg(test)]
+#[path = "../../.dev/rust/resolver_tests.rs"]
+mod dev_resolver_tests;

@@ -1,11 +1,12 @@
+use super::not_resolvable;
 use crate::http::{self, FetchOpts};
 use crate::sources::ResolveResult;
-use std::sync::LazyLock;
 use regex::Regex;
 use std::collections::HashMap;
-use super::not_resolvable;
+use std::sync::LazyLock;
 
-static HOST_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)(^|\.)datanodes\.to$").unwrap());
+static HOST_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)(^|\.)datanodes\.to$").unwrap());
 
 const BOUNDARY: &str = "----UnionManifoldBoundary7kJ2xQ9vRt3mWp";
 
@@ -42,6 +43,13 @@ fn direct_url(encoded: &str) -> Option<String> {
 }
 
 pub async fn resolve(url: &str) -> ResolveResult {
+    resolve_with(url, &HashMap::new()).await
+}
+
+/// Resolve with extra headers from a solved webview session (Cookie/UA
+/// handoff). Solved cookies replace the built-in ones; `lang=english` is
+/// kept because the download endpoint depends on it.
+pub async fn resolve_with(url: &str, extra: &HashMap<String, String>) -> ResolveResult {
     let code = match file_code(url) {
         Some(c) => c,
         None => return not_resolvable(url, Some("datanodes link has no file code")),
@@ -70,6 +78,17 @@ pub async fn resolve(url: &str) -> ResolveResult {
         "https://datanodes.to/download".to_string(),
     );
     headers.insert("Origin".to_string(), "https://datanodes.to".to_string());
+    for (key, value) in extra {
+        if key.eq_ignore_ascii_case("cookie") {
+            let merged = match headers.get("Cookie") {
+                Some(existing) => format!("{existing}; {value}"),
+                None => value.clone(),
+            };
+            headers.insert("Cookie".to_string(), merged);
+        } else if !key.eq_ignore_ascii_case("referer") && !key.eq_ignore_ascii_case("origin") {
+            headers.insert(key.clone(), value.clone());
+        }
+    }
 
     let opts = FetchOpts {
         method: Some("POST".to_string()),
@@ -84,7 +103,8 @@ pub async fn resolve(url: &str) -> ResolveResult {
     };
     if !resp.status().is_success() {
         return not_resolvable(
-            url, Some(&format!("datanodes returned {}", resp.status().as_u16())),
+            url,
+            Some(&format!("datanodes returned {}", resp.status().as_u16())),
         );
     }
     let json = match resp.json::<serde_json::Value>().await {
@@ -105,4 +125,22 @@ pub async fn resolve(url: &str) -> ResolveResult {
         },
         None => not_resolvable(url, Some("no datanodes download url")),
     }
+}
+
+/// Feed a webview-solver outcome back into the native flow. Returns `Some`
+/// only when it produced a downloadable result; otherwise the caller keeps
+/// its original failure and continues down the fallback chain.
+pub async fn with_solved(url: &str, solved: crate::resolver::Solved) -> Option<ResolveResult> {
+    if let Some(direct) = solved.url {
+        return Some(ResolveResult {
+            resolvable: true,
+            url: Some(direct),
+            file_name: solved.file_name,
+            ephemeral: true,
+            ..Default::default()
+        });
+    }
+    let extra = solved.headers(Some("https://datanodes.to/download"));
+    let retried = resolve_with(url, &extra).await;
+    retried.resolvable.then_some(retried)
 }

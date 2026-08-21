@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities for the main, theme editor, and achievement toast windows",
+  "description": "Capabilities for the main, theme editor, and achievement toast windows. The resolver window (webview challenge solver) is deliberately absent: it loads remote pages and must have no Tauri IPC access.",
   "windows": [
     "main",
     "theme-editor",
