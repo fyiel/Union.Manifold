@@ -107,7 +107,7 @@ function BrowseCard({ picture, name, author, metaLine, installed, busy, onInstal
   return (
     <div className="mf-card" style={{ borderRadius: 10, border: "1px solid var(--mf-line)", background: "var(--mf-panel)", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       {picture ? (
-        <img src={proxyImageUrl(picture)} alt="" loading="lazy" style={{ width: "100%", height: 104, objectFit: "cover", display: "block", background: "#0f0f0f" }} />
+        <img src={proxyImageUrl(picture)} alt="" loading="lazy" style={{ width: "100%", height: 104, objectFit: "cover", display: "block", background: "var(--mf-well)" }} />
       ) : (
         <div style={{ width: "100%", height: 104, background: COVER_LINES }} />
       )}

@@ -268,7 +268,7 @@ export function SourceGamePage() {
     <div className="mf-scroll" style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto", overflowX: "hidden" }}>
 
       <div style={{ position: "relative", height: 300, overflow: "hidden" }}>
-        <div style={{ position: "absolute", inset: 0, background: heroFailed || !heroCandidates.length ? HERO_LINES : "#0f0f0f" }}>
+        <div style={{ position: "absolute", inset: 0, background: heroFailed || !heroCandidates.length ? HERO_LINES : "var(--mf-well)" }}>
           {!heroFailed && heroCandidates.length > 0 && (
             <SmartImage candidates={heroCandidates} steamAppId={game?.steamAppId} onAllFailed={() => setHeroFailed(true)} style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.55 }} />
           )}
@@ -281,7 +281,7 @@ export function SourceGamePage() {
 
       <div style={{ position: "relative", maxWidth: 980, margin: "0 auto", padding: "0 40px" }}>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 22, marginTop: -118 }}>
-          <div style={{ width: 152, height: 202, flexShrink: 0, borderRadius: 10, background: coverFailed || !coverCandidates.length ? COVER_LINES : "#0f0f0f", border: "1px solid var(--mf-line-2)", boxShadow: "0 20px 50px rgba(0,0,0,0.55)", display: "flex", alignItems: "flex-end", padding: 12, overflow: "hidden", position: "relative" }}>
+          <div style={{ width: 152, height: 202, flexShrink: 0, borderRadius: 10, background: coverFailed || !coverCandidates.length ? COVER_LINES : "var(--mf-well)", border: "1px solid var(--mf-line-2)", boxShadow: "0 20px 50px rgba(0,0,0,0.55)", display: "flex", alignItems: "flex-end", padding: 12, overflow: "hidden", position: "relative" }}>
             {!coverFailed && coverCandidates.length > 0
               ? <SmartImage candidates={coverCandidates} steamAppId={game?.steamAppId} alt={game?.title} onAllFailed={() => setCoverFailed(true)} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
               : <span style={{ fontFamily: MONO, fontSize: 11, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--mf-t2)" }}>{game?.title}</span>}
@@ -367,7 +367,7 @@ export function SourceGamePage() {
             <span style={{ fontFamily: MONO, fontSize: 13, color: "var(--mf-t4)" }}>no download links found.</span>
           )}
           {primary && !liveStatus && !installed && (
-            <button type="button" title={copied ? "copied" : "copy download link"} onClick={() => void copyPrimary()} className="mf-ghost" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 44, height: 44, borderRadius: 9, border: "1px solid var(--mf-line-2)", background: "transparent", color: copied ? "#7fcf9b" : "var(--mf-t3)", cursor: "pointer" }}>
+            <button type="button" title={copied ? "Copied" : "Copy Download Link"} onClick={() => void copyPrimary()} className="mf-ghost" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 44, height: 44, borderRadius: 9, border: "1px solid var(--mf-line-2)", background: "transparent", color: copied ? "var(--mf-success)" : "var(--mf-t3)", cursor: "pointer" }}>
               {copied
                 ? <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><polyline points="3 8.5 6.5 12 13 4" /></svg>
                 : <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="5" width="9" height="9" rx="1.5" /><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2H3.5A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5" /></svg>}
@@ -551,7 +551,7 @@ function LiveButton({ status, onClick }: { status: string; onClick: () => void }
   const done = status === "completed" || status === "extracted"
   const label = LIVE_LABEL[status] || status
   return (
-    <button type="button" onClick={onClick} className="mf-ghost" style={{ display: "flex", alignItems: "center", gap: 9, padding: "12px 22px", borderRadius: 9, border: `1px solid ${failed ? "rgba(221,138,138,0.45)" : "var(--mf-line-2)"}`, background: "transparent", color: failed ? "#dd8a8a" : done ? "#7fcf9b" : "var(--mf-t1)", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
+    <button type="button" onClick={onClick} className="mf-ghost" style={{ display: "flex", alignItems: "center", gap: 9, padding: "12px 22px", borderRadius: 9, border: `1px solid ${failed ? "color-mix(in srgb, var(--mf-danger) 45%, transparent)" : "var(--mf-line-2)"}`, background: "transparent", color: failed ? "var(--mf-danger)" : done ? "var(--mf-success)" : "var(--mf-t1)", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
       {done
         ? <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><polyline points="3 8.5 6.5 12 13 4" /></svg>
         : <Spinner size={15} />}
@@ -567,13 +567,13 @@ function optAppearance(state: OptState, resolvable: boolean, errorBorderAlpha = 
   const working = state === "working"
   const opened = state === "opened"
   const border = queued
-    ? "rgba(127,207,155,0.4)"
+    ? "color-mix(in srgb, var(--mf-success) 40%, transparent)"
     : error
-      ? `rgba(221,138,138,${errorBorderAlpha})`
+      ? `color-mix(in srgb, var(--mf-danger) ${Number(errorBorderAlpha) * 100}%, transparent)`
       : resolvable
         ? "color-mix(in srgb, var(--mf-t0) 16%, transparent)"
         : "var(--mf-line-2)"
-  const color = queued ? "#7fcf9b" : error ? "#dd8a8a" : resolvable ? "var(--mf-t1)" : "var(--mf-t3)"
+  const color = queued ? "var(--mf-success)" : error ? "var(--mf-danger)" : resolvable ? "var(--mf-t1)" : "var(--mf-t3)"
   return { queued, error, working, opened, border, color, disabled: working || queued }
 }
 
@@ -591,7 +591,7 @@ function PrimaryButton({ state, resolvable, sourceLabel, sizeText, label, onClic
         display: "flex", alignItems: "center", gap: 9, padding: "12px 22px", borderRadius: 9,
         border: queued || error ? `1px solid ${border}` : "none",
         background: filled ? "var(--mf-accent)" : "transparent",
-        color: filled ? "var(--mf-accent-ink)" : queued ? "#7fcf9b" : "#dd8a8a",
+        color: filled ? "var(--mf-accent-ink)" : queued ? "var(--mf-success)" : "var(--mf-danger)",
         fontSize: 14, fontWeight: 600, cursor: disabled ? "default" : "pointer",
       }}
     >

@@ -179,13 +179,13 @@ export function DownloadsPage() {
                         <span>{paused ? "paused" : a.speed > 0 ? fmtSpeed(a.speed) : "—"}</span>
                         <span>ETA {paused ? "—" : fmtEta(a.eta)}</span>
                         <div style={{ marginLeft: "auto", display: "flex", gap: 9 }}>
-                          <button type="button" onClick={() => void copyLink(primary)} className="mf-ghost" style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 14px", borderRadius: 8, border: `1px solid ${isCopied ? "rgba(127,207,155,0.4)" : "var(--mf-line-2)"}`, background: "transparent", color: isCopied ? "#7fcf9b" : "var(--mf-t2)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                          <button type="button" onClick={() => void copyLink(primary)} className="mf-ghost" style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 14px", borderRadius: 8, border: `1px solid ${isCopied ? "color-mix(in srgb, var(--mf-success) 40%, transparent)" : "var(--mf-line-2)"}`, background: "transparent", color: isCopied ? "var(--mf-success)" : "var(--mf-t2)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
                             {isCopied ? <CheckIcon /> : <CopyIcon />}{isCopied ? "Copied" : "Copy link"}
                           </button>
                           <button type="button" onClick={() => togglePause(primary)} className="mf-ghost" style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 16px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t1)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
                             {paused ? <PlayIcon /> : <PauseIcon />}{paused ? "Resume" : "Pause"}
                           </button>
-                          <button type="button" title="cancel" onClick={() => void cancelGroup(primary.appid)} className="mf-iconcircle" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 36, height: 36, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t4)", cursor: "pointer" }}><XIcon /></button>
+                          <button type="button" title="Cancel" onClick={() => void cancelGroup(primary.appid)} className="mf-iconcircle" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 36, height: 36, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t4)", cursor: "pointer" }}><XIcon /></button>
                         </div>
                       </div>
                     </div>
@@ -237,7 +237,7 @@ export function DownloadsPage() {
                       <Cover appid={g.appid} w={30} h={40} r={5} />
                       <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.name}</span>
                       <span style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)" }}>{total > 0 ? gbLabel(total) : "—"}</span>
-                      <button type="button" title="remove" onClick={() => void cancelGroup(g.appid)} className="mf-iconcircle" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, borderRadius: 7, border: "none", background: "transparent", color: "var(--mf-t4)", cursor: "pointer", flexShrink: 0 }}><XIcon size={13} /></button>
+                      <button type="button" title="Remove" onClick={() => void cancelGroup(g.appid)} className="mf-iconcircle" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 30, borderRadius: 7, border: "none", background: "transparent", color: "var(--mf-t4)", cursor: "pointer", flexShrink: 0 }}><XIcon size={13} /></button>
                     </div>
                   )
                 })}
@@ -267,7 +267,7 @@ export function DownloadsPage() {
                           <PlayIcon />Play
                         </button>
                       )}
-                      <button type="button" title="remove" onClick={() => void discardGroup(g.appid)} className="mf-iconcircle" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t4)", cursor: "pointer", flexShrink: 0 }}><XIcon size={13} /></button>
+                      <button type="button" title="Remove" onClick={() => void discardGroup(g.appid)} className="mf-iconcircle" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t4)", cursor: "pointer", flexShrink: 0 }}><XIcon size={13} /></button>
                     </div>
                   )
                 })}
@@ -281,17 +281,17 @@ export function DownloadsPage() {
                   const err = g.items.find((i) => i.error)?.error || "download failed"
                   return (
                     <div key={g.appid} style={{ display: "flex", alignItems: "center", gap: 14, padding: "11px 16px", border: "1px solid rgba(220,120,120,0.18)", borderRadius: 10, background: "color-mix(in srgb, var(--mf-danger) 6%, var(--mf-bg))" }}>
-                      <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 40, flexShrink: 0, color: "#c98080" }}>
+                      <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 30, height: 40, flexShrink: 0, color: "var(--mf-danger-dim)" }}>
                         <svg viewBox="0 0 16 16" width="17" height="17" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="6" /><line x1="8" y1="5" x2="8" y2="9" /><circle cx="8" cy="11.3" r="0.7" fill="currentColor" stroke="none" /></svg>
                       </span>
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{g.name}</div>
-                        <div style={{ fontFamily: MONO, fontSize: 10, color: "#b07a7a", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{err}</div>
+                        <div style={{ fontFamily: MONO, fontSize: 10, color: "var(--mf-danger-faint)", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{err}</div>
                       </div>
                       <button type="button" onClick={() => void resumeGroup(g.appid)} className="mf-ghost" style={{ display: "flex", alignItems: "center", gap: 7, height: 32, padding: "0 15px", borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t1)", fontSize: 12, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}>
                         <RetryIcon />Retry
                       </button>
-                      <button type="button" title="cancel" onClick={() => void cancelGroup(g.appid)} className="mf-iconcircle" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t4)", cursor: "pointer", flexShrink: 0 }}><XIcon size={13} /></button>
+                      <button type="button" title="Cancel" onClick={() => void cancelGroup(g.appid)} className="mf-iconcircle" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t4)", cursor: "pointer", flexShrink: 0 }}><XIcon size={13} /></button>
                     </div>
                   )
                 })}
@@ -307,7 +307,7 @@ export function DownloadsPage() {
 function Cover({ appid, w, h, r, border }: { appid: string; w: number; h: number; r: number; border?: boolean }) {
   const img = getDownloadArt(appid)?.image || getRememberedGame(appid)?.image
   return (
-    <div style={{ width: w, height: h, borderRadius: r, flexShrink: 0, overflow: "hidden", background: img ? "#0f0f0f" : COVER_LINES, border: border ? "1px solid var(--mf-line)" : undefined }}>
+    <div style={{ width: w, height: h, borderRadius: r, flexShrink: 0, overflow: "hidden", background: img ? "var(--mf-well)" : COVER_LINES, border: border ? "1px solid var(--mf-line)" : undefined }}>
       {img && <img src={proxyImageUrl(img)} alt="" loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
     </div>
   )
