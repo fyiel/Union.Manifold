@@ -30,7 +30,7 @@
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http: https: uc-asset://localhost http://uc-asset.localhost; font-src 'self' data:; connect-src 'self' http: https: uc-asset://localhost http://uc-asset.localhost; object-src 'none'; base-uri 'self'; form-action 'self'",
       "assetProtocol": {
         "enable": true,
-        "scope": ["**"]
+        "scope": []
       }
     }
   },
