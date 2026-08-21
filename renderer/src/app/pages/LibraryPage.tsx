@@ -181,7 +181,7 @@ function InstallingStrip({ installingMeta, installedIds, filter, query }: { inst
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {installing.map((g) => (
           <div key={g.appid} style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", border: "1px solid var(--mf-line)", borderRadius: 11, background: "var(--mf-panel-2)" }}>
-            <div style={{ width: 38, height: 50, borderRadius: 6, flexShrink: 0, background: g.image ? "#0f0f0f" : COVER_LINES, overflow: "hidden" }}>
+            <div style={{ width: 38, height: 50, borderRadius: 6, flexShrink: 0, background: g.image ? "var(--mf-well)" : COVER_LINES, overflow: "hidden" }}>
               {g.image && <img src={proxyImageUrl(g.image)} alt="" loading="lazy" decoding="async" onError={(e) => { e.currentTarget.style.display = "none" }} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
             </div>
             <div style={{ minWidth: 0, flex: 1 }}>
@@ -597,10 +597,10 @@ export function LibraryPage() {
               {SORT_LABEL[sort]}
             </button>
             <div style={{ display: "flex", gap: 2, padding: 3, borderRadius: 9, border: "1px solid color-mix(in srgb, var(--mf-t0) 9%, transparent)", background: "var(--mf-panel-2)" }}>
-              <ViewBtn active={view === "grid"} onClick={() => setView("grid")} title="grid">
+              <ViewBtn active={view === "grid"} onClick={() => setView("grid")} title="Grid">
                 <LayoutGrid size={14} strokeWidth={1.6} />
               </ViewBtn>
-              <ViewBtn active={view === "list"} onClick={() => setView("list")} title="list">
+              <ViewBtn active={view === "list"} onClick={() => setView("list")} title="List">
                 <List size={14} strokeWidth={1.6} />
               </ViewBtn>
             </div>
@@ -628,7 +628,7 @@ export function LibraryPage() {
             </span>
           </CenterState>
         ) : view === "grid" ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(168px, 1fr))", gap: 18, alignContent: "start" }}>
+          <div className="library-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(168px, 1fr))", gap: 18, alignContent: "start" }}>
             {rendered.map((g) => (
               <LibCard key={g.appid} game={g} hasUpdate={updates.has(g.appid)} onOpen={openDetail} onContextMenu={openRowMenuAt} onPlay={play} onStop={onStop} onMenu={openMenu} />
             ))}
@@ -757,11 +757,11 @@ type LibRowProps = {
 
 const LibCard = memo(function LibCard({ game: g, hasUpdate, onOpen, onContextMenu, onPlay, onStop, onMenu }: LibRowProps) {
   return (
-    <div onClick={() => onOpen(g)} onContextMenu={(e) => { e.preventDefault(); onContextMenu(g, e.clientX, e.clientY) }} className="mf-card" style={{ display: "flex", flexDirection: "column", border: "1px solid color-mix(in srgb, var(--mf-t0) 7%, transparent)", borderRadius: 10, overflow: "hidden", background: "var(--mf-panel)", cursor: "pointer", contentVisibility: "auto", containIntrinsicSize: "auto 300px" }}>
-      <div style={{ position: "relative", aspectRatio: "3 / 4", background: g.image ? "#0f0f0f" : COVER_LINES, display: "flex", alignItems: "flex-end", padding: 12 }}>
+    <div onClick={() => onOpen(g)} onContextMenu={(e) => { e.preventDefault(); onContextMenu(g, e.clientX, e.clientY) }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(g) } }} role="button" tabIndex={0} aria-label={`Open ${g.name}`} className="mf-card" style={{ display: "flex", flexDirection: "column", border: "1px solid color-mix(in srgb, var(--mf-t0) 7%, transparent)", borderRadius: 10, overflow: "hidden", background: "var(--mf-panel)", cursor: "pointer", contentVisibility: "auto", containIntrinsicSize: "auto 300px" }}>
+      <div style={{ position: "relative", aspectRatio: "3 / 4", background: g.image ? "var(--mf-well)" : COVER_LINES, display: "flex", alignItems: "flex-end", padding: 12 }}>
         {g.image && <SmartImage candidates={g.covers || []} steamAppId={g.steamAppId} name={g.name} alt={g.name} lazy style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />}
         {hasUpdate && (
-          <span title="update available" style={{ position: "absolute", top: 10, right: 10, padding: "3px 8px", borderRadius: 99, background: "rgba(0,0,0,0.6)", border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--mf-t1)" }}>update</span>
+          <span title="Update Available" style={{ position: "absolute", top: 10, right: 10, padding: "3px 8px", borderRadius: 99, background: "rgba(0,0,0,0.6)", border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--mf-t1)" }}>update</span>
         )}
         {!g.image && <span style={{ fontFamily: MONO, fontSize: 11, lineHeight: 1.35, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--mf-t2)" }}>{g.name}</span>}
       </div>
@@ -786,8 +786,8 @@ const LibCard = memo(function LibCard({ game: g, hasUpdate, onOpen, onContextMen
 
 const LibRow = memo(function LibRow({ game: g, hasUpdate, onOpen, onContextMenu, onPlay, onStop, onMenu }: LibRowProps) {
   return (
-    <div onClick={() => onOpen(g)} onContextMenu={(e) => { e.preventDefault(); onContextMenu(g, e.clientX, e.clientY) }} className="mf-listrow" style={{ display: "grid", gridTemplateColumns: "44px minmax(0,1fr) 150px 120px 140px", gap: 14, alignItems: "center", padding: "8px 14px", borderRadius: 8, cursor: "pointer", contentVisibility: "auto", containIntrinsicSize: "auto 64px" }}>
-      <div style={{ width: 40, height: 50, borderRadius: 5, overflow: "hidden", background: g.image ? "#0f0f0f" : COVER_LINES }}>
+    <div onClick={() => onOpen(g)} onContextMenu={(e) => { e.preventDefault(); onContextMenu(g, e.clientX, e.clientY) }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(g) } }} role="button" tabIndex={0} aria-label={`Open ${g.name}`} className="mf-listrow" style={{ display: "grid", gridTemplateColumns: "44px minmax(0,1fr) 150px 120px 140px", gap: 14, alignItems: "center", padding: "8px 14px", borderRadius: 8, cursor: "pointer", contentVisibility: "auto", containIntrinsicSize: "auto 64px" }}>
+      <div style={{ width: 40, height: 50, borderRadius: 5, overflow: "hidden", background: g.image ? "var(--mf-well)" : COVER_LINES }}>
         {g.image && <SmartImage candidates={g.covers || []} steamAppId={g.steamAppId} name={g.name} lazy style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
       </div>
       <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 9 }}>
