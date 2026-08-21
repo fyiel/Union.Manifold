@@ -30,6 +30,296 @@ mod updater;
 mod wand;
 mod window_cmds;
 
+/// End-to-end probe surface for the `dev-probes` example binary. Compiled
+/// only with `--features dev-probes`; production builds never include it.
+#[cfg(feature = "dev-probes")]
+pub mod probes {
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use serde_json::{json, Value};
+    use tauri::Manager;
+
+    pub use crate::resolver::solve;
+
+    fn manifest_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    }
+
+    /// Boot diagnostics: where the sidecars, CA bundle and resources resolve
+    /// to in this environment.
+    pub fn boot_report(app: &tauri::AppHandle) -> Value {
+        let resource_dir = app.path().resource_dir().ok();
+        let resource_dir = resource_dir.unwrap_or_else(manifest_dir);
+        let cacert = crate::bins::resolve_resource_file(&resource_dir, "cacert.pem");
+        json!({
+            "resourceDir": resource_dir.to_string_lossy(),
+            "cacert": cacert.as_ref().map(|p| p.to_string_lossy()),
+            "aria2c": crate::bins::resolve_sidecar("aria2c").as_ref().map(|p| p.to_string_lossy()),
+            "sevenZip": crate::bins::resolve_sidecar("7z").as_ref().map(|p| p.to_string_lossy()),
+        })
+    }
+
+    /// Resolve a download page natively (no webview solver), exactly as the
+    /// renderer's first attempt does.
+    pub async fn resolve_host(url: &str) -> Value {
+        let option = crate::sources::schema::DownloadOption {
+            url: Some(url.to_string()),
+            ..Default::default()
+        };
+        let result = crate::sources::hosts::resolve_url(&option).await;
+        json!({
+            "resolvable": result.resolvable,
+            "url": result.url,
+            "fileName": result.file_name,
+            "headers": result.headers,
+            "reason": result.reason,
+        })
+    }
+
+    /// The full production resolution path: native first, webview-solver
+    /// escalation on gate failures, Slipgate fallback.
+    pub async fn resolve_via(app: &tauri::AppHandle, url: &str) -> Value {
+        let option = crate::sources::schema::DownloadOption {
+            url: Some(url.to_string()),
+            ..Default::default()
+        };
+        let result = crate::sources::hosts::resolve_url_via(app, &option).await;
+        json!({
+            "resolvable": result.resolvable,
+            "url": result.url,
+            "fileName": result.file_name,
+            "headers": result.headers,
+            "reason": result.reason,
+        })
+    }
+
+    /// Run the webview solver against a page and return the raw outcome.
+    pub async fn solve_report(app: &tauri::AppHandle, url: &str) -> Value {
+        match solve(app, url).await {
+            Ok(solved) => json!({
+                "ok": true,
+                "url": solved.url,
+                "fileName": solved.file_name,
+                "cookieHeader": solved.cookie_header,
+                "userAgent": solved.user_agent,
+            }),
+            Err(e) => json!({ "ok": false, "error": e }),
+        }
+    }
+
+    /// Find a fresh download-page URL of `host_type` from the live catalogs.
+    pub async fn find_sample(host_type: &str) -> Option<String> {
+        let params = crate::sources::QueryParams {
+            limit: 60,
+            ..Default::default()
+        };
+        for source in ["zeigames", "gamebounty"] {
+            let games = match source {
+                "zeigames" => crate::sources::adapters::zeigames::query(&params).await,
+                _ => crate::sources::adapters::gamebounty::query(&params).await,
+            }
+            .unwrap_or_default();
+            for game in games {
+                let Some(detail) = (match source {
+                    "zeigames" => {
+                        crate::sources::adapters::zeigames::get_detail(&game.source_slug).await
+                    }
+                    _ => crate::sources::adapters::gamebounty::get_detail(&game.source_slug)
+                        .await,
+                }) else {
+                    continue;
+                };
+                if let Some(option) = detail
+                    .download_options
+                    .iter()
+                    .find(|o| o.host_type == host_type)
+                {
+                    return option.url.clone().or(option.page_url.clone());
+                }
+            }
+        }
+        None
+    }
+
+    /// Range-check a direct URL with optional headers; proves the link is a
+    /// real downloadable file rather than an HTML page.
+    pub async fn range_check(url: &str, headers: HashMap<String, String>) -> Value {
+        let mut headers = headers;
+        headers.insert("Range".to_string(), "bytes=0-0".to_string());
+        let opts = crate::http::FetchOpts {
+            headers,
+            retries: Some(1),
+            timeout: Some(std::time::Duration::from_secs(30)),
+            ..Default::default()
+        };
+        match crate::http::fetch(url, &opts).await {
+            Ok(resp) => {
+                let status = resp.status().as_u16();
+                let content_type = resp
+                    .headers()
+                    .get(reqwest::header::CONTENT_TYPE)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("")
+                    .to_string();
+                json!({ "status": status, "contentType": content_type, "html": content_type.contains("text/html") })
+            }
+            Err(e) => json!({ "status": 0, "error": e.to_string() }),
+        }
+    }
+
+    /// Full download-engine E2E: enqueue `url` through aria2 and wait for the
+    /// file to land on disk.
+    pub async fn download_e2e(
+        app: &tauri::AppHandle,
+        url: &str,
+        filename: &str,
+        headers: Option<HashMap<String, String>>,
+    ) -> Value {
+        let settings = Arc::new(crate::settings::SettingsStore::load(
+            std::env::temp_dir().join("union-manifold-probe-settings.json"),
+        ));
+        let resource_dir = app.path().resource_dir().ok();
+        let cacert = crate::downloads::aria2::resolve_ca_cert(
+            resource_dir.or_else(|| Some(manifest_dir())),
+        );
+        let aria2 = Arc::new(crate::downloads::aria2::Aria2Manager::new(cacert, None));
+        let root = std::env::temp_dir().join("union-manifold-probe-downloads");
+        let engine = crate::downloads::DownloadEngine::new(
+            app.clone(),
+            settings,
+            root.clone(),
+            aria2,
+        );
+        let appid = "probe-appid";
+        let req = crate::downloads::DownloadRequest {
+            appid: appid.to_string(),
+            id: format!("{appid}-1"),
+            game_name: Some("Probe Game".to_string()),
+            url: url.to_string(),
+            filename: Some(filename.to_string()),
+            total_bytes: 0,
+            headers,
+            part_index: None,
+            part_total: None,
+            update: false,
+            install_metadata: None,
+            preserve_existing: false,
+        };
+        if let Err(e) = engine.enqueue(req) {
+            return json!({ "ok": false, "stage": "enqueue", "error": e.to_string() });
+        }
+        let save_path = root.join("Probe Game").join(filename);
+        let started = std::time::Instant::now();
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            let status = engine.active_status(appid);
+            let downloading = status.get("downloading").and_then(Value::as_bool).unwrap_or(false);
+            let size = std::fs::metadata(&save_path).map(|m| m.len()).unwrap_or(0);
+            if !downloading && size > 0 {
+                return json!({
+                    "ok": true,
+                    "path": save_path.to_string_lossy(),
+                    "bytes": size,
+                    "elapsedMs": started.elapsed().as_millis(),
+                });
+            }
+            if started.elapsed() > std::time::Duration::from_secs(120) {
+                return json!({
+                    "ok": false,
+                    "stage": "timeout",
+                    "downloading": downloading,
+                    "bytes": size,
+                    "savePath": save_path.to_string_lossy(),
+                });
+            }
+        }
+    }
+
+    /// Diagnose the session-page fetch behind datanodes token scraping.
+    pub async fn page_check(url: &str, cookie: &str, ua: &str) -> Value {
+        let mut headers = HashMap::new();
+        if !cookie.is_empty() {
+            headers.insert("Cookie".to_string(), cookie.to_string());
+        }
+        if !ua.is_empty() {
+            headers.insert("User-Agent".to_string(), ua.to_string());
+        }
+        match crate::http::fetch(
+            url,
+            &crate::http::FetchOpts {
+                headers,
+                timeout: Some(std::time::Duration::from_secs(30)),
+                ..Default::default()
+            },
+        )
+        .await
+        {
+            Ok(resp) => {
+                let status = resp.status().as_u16();
+                let final_url = resp.url().to_string();
+                let body = resp.text().await.unwrap_or_default();
+                json!({
+                    "status": status,
+                    "finalUrl": final_url,
+                    "len": body.len(),
+                    "hasRand": body.contains("rand=\""),
+                    "hasDlToken": body.contains("dl-token=\""),
+                    "head": body.chars().take(200).collect::<String>(),
+                })
+            }
+            Err(e) => json!({ "error": e.to_string() }),
+        }
+    }
+
+    /// Settings persistence sweep over every app-level key.
+    pub fn settings_sweep(path: PathBuf) -> Value {
+        let store = Arc::new(crate::settings::SettingsStore::load(path.clone()));
+        let cases: Vec<(&str, Value)> = vec![
+            ("achievementNotifications", json!(false)),
+            ("autoCheckUpdates", json!(false)),
+            ("closeBehavior", json!("quit")),
+            ("closeOnGameLaunch", json!(true)),
+            ("disabledSources", json!(["gamebounty"])),
+            ("downloadBandwidthLimitKBps", json!(1024)),
+            ("downloadPath", json!("/tmp/probe-downloads")),
+            ("hideTorrentSources", json!(true)),
+            ("maxConcurrentDownloads", json!(5)),
+            ("nexusApiKey", json!("probe-key")),
+            ("onlineFixEnabled", json!(true)),
+            ("proxyUrl", json!("http://127.0.0.1:8080")),
+            ("slipgateKey", json!("probe-slipgate")),
+            ("slipgateUrl", json!("http://127.0.0.1:1")),
+            ("startMinimized", json!(true)),
+            ("theme", json!("probe-theme")),
+        ];
+        for (key, value) in &cases {
+            store.set(key, value.clone());
+        }
+        // Reload from disk: everything must survive the round trip.
+        let reloaded = crate::settings::SettingsStore::load(path.clone());
+        let mut failures = Vec::new();
+        for (key, value) in &cases {
+            if reloaded.get(key) != *value {
+                failures.push((*key).to_string());
+            }
+        }
+        // Null deletes.
+        store.set("theme", Value::Null);
+        let after_delete = crate::settings::SettingsStore::load(path).get("theme");
+        if !after_delete.is_null() {
+            failures.push("theme:null-delete".to_string());
+        }
+        json!({
+            "checked": cases.len() + 1,
+            "failures": failures,
+            "ok": failures.is_empty(),
+        })
+    }
+}
+
+
 use std::sync::Arc;
 
 use tauri::{Emitter, Manager};
