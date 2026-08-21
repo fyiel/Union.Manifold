@@ -3,6 +3,86 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.7.0
+
+### Fixed
+
+- Deleting a game from the library now also drops its stored achievement
+  progress, so a reinstalled or re-imported game starts with a clean
+  achievements state instead of resurrecting unlocks from the deleted entry.
+
+- Browse scroll windowing and wheel smoothing work again. The
+  scroll-window virtualization and the inertial wheel handler had drifted
+  out of sync with the live grid, producing misaligned rows and jerky
+  scrolling; the window geometry and wheel velocity handling are repaired
+  and the native WebKitGTK smoothing path is wired back up.
+
+- Game cards and library menu rows are keyboard accessible: focus lands
+  on the card itself and menu rows activate with Enter and Space instead
+  of responding only to mouse clicks.
+
+- Leftover console errors in the exe picker and controller hooks are
+  routed through the app logger instead of hitting the raw console, so
+  they show up in diagnostics like every other logged error.
+
+- Steam library detection on macOS checks the macOS Steam library roots,
+  so imported Steam games resolve on Mac installs. Log output redacts the
+  user's home path, keeping usernames out of shared diagnostics.
+
+- Arch pacman updates pick the right package again: the updater path
+  guessed x86_64 unconditionally, so ARM installs were handed the wrong
+  pacman package. Architecture is now detected the same way the install
+  script does it.
+
+- The install script detects architecture correctly, verifies downloads
+  against checksums before installing, and ships a proper icon, so a
+  corrupted or truncated download no longer gets installed as if it were
+  fine.
+
+- Deleting an installed game asks for confirmation first, and favorite
+  toggles ignore clicks while a favorite change is still in flight, so
+  double clicks can no longer delete a game by accident or flip a
+  favorite twice.
+
+- Timers started by the downloads, settings, and source game pages are
+  cleared when the page unmounts, so status updates no longer fire into
+  unmounted pages after navigation.
+
+- Download rows no longer carry statuses the queue can never produce
+  again; the renderer only recognizes statuses the backend actually
+  emits, so nothing gets stuck rendering a state that will never
+  resolve.
+
+- Advanced Search's max year filter follows the current date instead of
+  a hardcoded year, so new releases stay reachable as time passes.
+
+- Games with broken install manifests are surfaced instead of silently
+  hidden from the library. A damaged manifest previously made the whole
+  entry vanish from the scan with no explanation; the entry now shows up
+  marked as broken so it can be repaired or removed.
+
+### Changed
+
+- Updater manifests are built once per platform with friendly release
+  notes attached, replacing the per-job manifest race fixed in 3.6.10
+  with a cleaner per-platform build step in the release workflow.
+
+- Hardcoded colors in the downloads, mods, and source game pages are
+  replaced with theme tokens, so those surfaces follow the active theme
+  and custom palettes like the rest of the app.
+
+- Settings tooltip titles are consistently capitalized.
+
+### Removed
+
+- Upstream telemetry and the legacy user-history cookie: the UC Plus
+  hook, cloud collection calls, and the old history cookie are gone, so
+  the app no longer phones anything home from the upstream fork.
+
+- The unused built-in asset protocol scope entry was dropped from the
+  Tauri config, keeping the asset protocol allowlist to what the app
+  actually serves.
+
 ## 3.6.10
 
 ### Fixed
