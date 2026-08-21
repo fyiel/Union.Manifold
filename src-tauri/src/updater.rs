@@ -78,12 +78,21 @@ async fn install_via_pacman(app: &AppHandle, new_version: &str) -> Result<(), St
         return Err("refusing to install: invalid version string".to_string());
     }
 
+    // Package names follow the build host arch (see build-arch-pkg.sh);
+    // releases currently only publish x86_64 packages, so on other arches
+    // the download fails with a clear http 404 and the manual-install hint.
+    let arch = if cfg!(target_arch = "aarch64") {
+        "aarch64"
+    } else {
+        "x86_64"
+    };
+    let pkg_name = format!("union-manifold-{new_version}-1-{arch}.pkg.tar.zst");
     let base = format!(
-        "https://github.com/fyiel/Union.Manifold/releases/download/v{new_version}/union-manifold-{new_version}-1-x86_64.pkg.tar.zst"
+        "https://github.com/fyiel/Union.Manifold/releases/download/v{new_version}/{pkg_name}"
     );
     let dir = std::env::temp_dir();
-    let pkg_path = dir.join(format!("union-manifold-{new_version}-1-x86_64.pkg.tar.zst"));
-    let sig_path = dir.join(format!("union-manifold-{new_version}-1-x86_64.pkg.tar.zst.sig"));
+    let pkg_path = dir.join(&pkg_name);
+    let sig_path = dir.join(format!("{pkg_name}.sig"));
 
     // Fetch the detached PGP signature first so pacman can verify the
     // package against the user's imported key; never install an unsigned
