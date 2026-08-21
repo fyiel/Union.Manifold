@@ -877,7 +877,7 @@ const resolveWithTimeout = useCallback(async (host: string, targetUrl: string) =
         const regressiveStates = ["downloading", "queued", "paused"]
         const finalStatus = isTerminal && regressiveStates.includes(nextStatus) ? existing.status : nextStatus
 
-        const isEnteringTerminal = terminalStates.includes(finalStatus) || finalStatus === "extracted"
+        const isEnteringTerminal = terminalStates.includes(finalStatus)
 
         const next: DownloadItem = {
           ...existing,
