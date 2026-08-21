@@ -21,6 +21,14 @@
   --mf-accent: var(--primary);
   --mf-accent-ink: var(--primary-foreground);
   --mf-danger: var(--destructive);
+  --mf-danger-dim: color-mix(in srgb, var(--mf-danger) 78%, var(--mf-bg));
+  --mf-danger-faint: color-mix(in srgb, var(--mf-danger) 58%, var(--mf-bg));
+  /* Success/positive state: the shadcn token set has no success slot, so this
+     stays a fixed hue instead of being baked into inline styles everywhere */
+  --mf-success: #7fcf9b;
+  /* Deep well behind cover art / hero images: darker than any surface so
+     partially-loaded art never flashes bright */
+  --mf-well: color-mix(in srgb, var(--mf-bg) 86%, black);
   /* Hairlines */
   --mf-line: var(--border);
   --mf-line-2: color-mix(in srgb, var(--foreground) 10%, transparent);
@@ -103,7 +111,12 @@ body.uc-nav-collapsed .uc-collapse { display: none; }
 .mf-navitem { transition: background 0.14s ease, color 0.14s ease; }
 .mf-navitem:hover:not(.mf-navitem-active) { background: color-mix(in srgb, var(--mf-t0) 4%, transparent); color: var(--mf-t2); }
 
-.mf-card { transition: border-color 0.14s ease, transform 0.14s ease; content-visibility: auto; contain-intrinsic-size: auto 300px; }
+/* Library grid cards keep CSS content-visibility (the library renders a
+   capped page of cards, not JS windowing). Browse/Advanced-search grids use
+   JS windowing via GameCard, which drops these properties inline — layering
+   the 300px estimate on top of virtualization caused scroll jitter. */
+.mf-card { transition: border-color 0.14s ease, transform 0.14s ease; }
+.library-grid .mf-card { content-visibility: auto; contain-intrinsic-size: auto 300px; }
 .mf-card:hover { border-color: color-mix(in srgb, var(--mf-t0) 24%, transparent); transform: translateY(-3px); }
 
 /* Library list row, subtle row highlight on hover. */

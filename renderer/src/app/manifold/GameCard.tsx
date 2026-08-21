@@ -25,9 +25,12 @@ export const GameCard = memo(function GameCard({
   return (
     <div
       className="mf-card"
-      style={{ display: "flex", flexDirection: "column", border: "1px solid color-mix(in srgb, var(--mf-t0) 7%, transparent)", borderRadius: 10, overflow: "hidden", background: "var(--mf-panel)", contentVisibility: "auto", containIntrinsicSize: "auto 300px" }}
+      // No content-visibility here: BrowsePage already JS-windows the grid,
+      // and stacking CSS c-v on top made its 300px estimate fight real layout
+      // (jitter as estimates get replaced during scroll/resize).
+      style={{ display: "flex", flexDirection: "column", border: "1px solid color-mix(in srgb, var(--mf-t0) 7%, transparent)", borderRadius: 10, overflow: "hidden", background: "var(--mf-panel)" }}
     >
-      <div style={{ position: "relative", aspectRatio: "3 / 4", background: hasImg ? "#0f0f0f" : COVER_LINES }}>
+      <div style={{ position: "relative", aspectRatio: "3 / 4", background: hasImg ? "var(--mf-well)" : COVER_LINES }}>
         <Link
           to={detailUrl}
           state={detailState}
@@ -45,7 +48,7 @@ export const GameCard = memo(function GameCard({
           )}
         </Link>
         {resolvable && (
-          <span title="direct download available" style={{ position: "absolute", top: 10, right: 10, display: "flex", alignItems: "center", justifyContent: "center", width: 25, height: 25, borderRadius: 7, background: "rgba(0,0,0,0.55)", border: "1px solid color-mix(in srgb, var(--mf-t0) 14%, transparent)", color: "var(--mf-t1)", pointerEvents: "none" }}>
+          <span title="Direct Download Available" style={{ position: "absolute", top: 10, right: 10, display: "flex", alignItems: "center", justifyContent: "center", width: 25, height: 25, borderRadius: 7, background: "rgba(0,0,0,0.55)", border: "1px solid color-mix(in srgb, var(--mf-t0) 14%, transparent)", color: "var(--mf-t1)", pointerEvents: "none" }}>
             <ArrowDownToLine size={12} strokeWidth={1.6} />
           </span>
         )}

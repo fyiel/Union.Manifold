@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -77,6 +77,10 @@ describe("Browse scroll window", () => {
       scrollHeight: { configurable: true, value: 4200 },
     })
     fireEvent.scroll(scroller)
+    // The page coalesces scroll handling into one animation frame.
+    await act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)))
+    })
 
     const first = screen.getAllByTestId("card")[0].textContent
     expect(first).toBe("game-05")

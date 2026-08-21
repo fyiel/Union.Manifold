@@ -105,18 +105,12 @@ fn install_panic_hook() {
 }
 
 // WebKitGTK wheel scrolling is discrete by default: each notch is one jump,
-// which reads as "chunky". enable-smooth-scrolling animates scroll deltas.
-// webkit2gtk is a Linux-only dependency, so the helper is a no-op elsewhere
-// (Windows/macOS use the JS shim in renderer/src/lib/wheel-smooth.ts).
+// which reads as "chunky". The JS shim in renderer/src/lib/wheel-smooth.ts
+// (gated to Linux in main.tsx) converts ticks into an animated glide, so the
+// native enable-smooth-scrolling flag stays OFF — enabling both made them
+// fight each other (double-applied deltas, stutter during resizes).
 #[cfg(target_os = "linux")]
-pub(crate) fn enable_smooth_scrolling(window: &tauri::WebviewWindow) {
-    let _ = window.with_webview(|webview| {
-        use webkit2gtk::{SettingsExt, WebViewExt};
-        if let Some(settings) = webview.inner().settings() {
-            settings.set_enable_smooth_scrolling(true);
-        }
-    });
-}
+pub(crate) fn enable_smooth_scrolling(_window: &tauri::WebviewWindow) {}
 
 #[cfg(not(target_os = "linux"))]
 pub(crate) fn enable_smooth_scrolling(_window: &tauri::WebviewWindow) {}
@@ -282,14 +276,11 @@ pub fn run() {
             }
             #[cfg(target_os = "linux")]
             if let Some(main) = app.get_webview_window("main") {
-                main.with_webview(|webview| {
-                    use webkit2gtk::{SettingsExt, WebViewExt};
-                    let wv = webview.inner();
-                    if let Some(settings) = WebViewExt::settings(&wv) {
-                        settings.set_enable_smooth_scrolling(true);
-                    }
-                })
-                .ok();
+                // No native set_enable_smooth_scrolling here: the renderer's
+                // wheel shim (wheel-smooth.ts, Linux-gated in main.tsx) owns
+                // smoothing; enabling the WebKitGTK flag on top made both
+                // animate the same deltas and fight each other.
+                let _ = main;
             }
             Ok(())
         })

@@ -16,7 +16,11 @@ installBridge()
 applyCachedStartPageRoute()
 mark('main:pre-render')
 void initPerf()
-initWheelSmoothing()
+// The wheel shim is a WebKitGTK workaround only: on Linux, WebKitGTK applies
+// each wheel tick as one hard jump. macOS WKWebView and Windows WebView2
+// already glide natively — running the shim there double-smooths momentum
+// and would swallow ctrl+wheel pinch zoom.
+if (typeof navigator !== "undefined" && /linux/i.test(navigator.userAgent)) initWheelSmoothing()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

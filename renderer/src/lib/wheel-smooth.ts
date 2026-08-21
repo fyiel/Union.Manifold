@@ -13,6 +13,9 @@
 //   Browse scroll-window virtualization and loadMore thresholds behave as
 //   before.
 // - Passive:false is required so we can preventDefault the native jump.
+// - Linux only: main.tsx gates initWheelSmoothing() on a Linux UA. On macOS
+//   WKWebView and Windows WebView2 native momentum already glides, and the
+//   shim would double-smooth it and swallow ctrl+wheel pinch zoom.
 
 let vel = 0 // px/ms
 let lastWheelAt = 0
@@ -30,13 +33,27 @@ function findScroller(target: EventTarget | null): HTMLElement | null {
 
 function tick(now: number) {
   raf = null
-  if (!scroller) return
+  // Re-resolve each frame: the element can be swapped, unmounted, or resized
+  // mid-glide; holding a stale reference either scrolls nothing or fights a
+  // re-rendered scroller. The data attribute survives remounts of the page.
+  const el =
+    scroller?.isConnected && scroller.scrollHeight > scroller.clientHeight + 4
+      ? scroller
+      : findScroller(scroller ?? document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2))
+  if (!el) {
+    vel = 0
+    scroller = null
+    return
+  }
+  scroller = el
   // Cap dt so a long pause cannot cause a jump: the decay just continues.
   const dt = Math.min(50, Math.max(1, now - lastWheelAt))
-  const prev = scroller.scrollTop
-  scroller.scrollTop = prev + vel * dt
+  const prev = el.scrollTop
+  el.scrollTop = prev + vel * dt
   vel *= Math.exp(-dt / 120)
-  if (scroller.scrollTop === prev || Math.abs(vel) < 0.02) {
+  // A clamped write (scrollTop unchanged) means we hit a scroll bound: stop
+  // instead of spinning frames against the clamp.
+  if (el.scrollTop === prev || Math.abs(vel) < 0.02) {
     vel = 0
     scroller = null
     return
@@ -48,6 +65,9 @@ export function initWheelSmoothing() {
   window.addEventListener(
     "wheel",
     (e) => {
+      // Never intercept ctrl+wheel: that is pinch zoom on macOS/Windows and
+      // browser zoom everywhere else.
+      if (e.ctrlKey || e.metaKey) return
       const el = findScroller(e.target)
       if (!el) return
       const delta = e.deltaY * (e.deltaMode === 1 ? 40 : 1)
