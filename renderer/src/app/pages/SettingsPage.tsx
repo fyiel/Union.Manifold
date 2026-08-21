@@ -1087,7 +1087,7 @@ function ModsTab({ onJumpToSources }: { onJumpToSources: () => void }) {
             spellCheck={false}
             style={{ ...MONO_INPUT, flex: 1 }}
           />
-          <RevealButton shown={reveal} onToggle={() => setReveal((v) => !v)} title="key" />
+          <RevealButton shown={reveal} onToggle={() => setReveal((v) => !v)} title="Key" />
           <button type="button" className="mf-ghost" disabled={validating || !apiKey.trim()} onClick={() => void validate()} style={{ display: "flex", alignItems: "center", gap: 7, padding: "0 15px", height: 38, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: !apiKey.trim() ? "var(--mf-t4)" : "var(--mf-t1)", fontSize: 12, fontWeight: 600, cursor: validating || !apiKey.trim() ? "default" : "pointer", opacity: validating ? 0.6 : 1, flexShrink: 0 }}>
             {validating ? "Validating…" : "Validate"}
           </button>
@@ -1135,7 +1135,7 @@ function ModsTab({ onJumpToSources }: { onJumpToSources: () => void }) {
             spellCheck={false}
             style={{ ...MONO_INPUT, flex: 1 }}
           />
-          <RevealButton shown={sessionRevealed} onToggle={() => setSessionRevealed((v) => !v)} title="cookie" />
+          <RevealButton shown={sessionRevealed} onToggle={() => setSessionRevealed((v) => !v)} title="Cookie" />
         </div>
         <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t4)", marginTop: 12, lineHeight: 1.5 }}>
           Browser User-Agent (required when using cf_clearance): in the SAME browser's devtools console run <code>navigator.userAgent</code> and paste the result here. A cf_clearance cookie only validates against the exact User-Agent that created it.{savedKey === "nexusUserAgent" ? " (saved)" : ""}
