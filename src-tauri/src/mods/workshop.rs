@@ -58,7 +58,7 @@ static AUTHOR_RE: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
-fn parse_browse(html: &str) -> Vec<Value> {
+pub(crate) fn parse_browse(html: &str) -> Vec<Value> {
     let mut out = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
     for segment in html.split(r#"class="workshopItem""#).skip(1) {
@@ -89,7 +89,7 @@ static NEW_ITEM_RE: LazyLock<Regex> = LazyLock::new(|| {
 static NEW_TOTAL_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"\\"workshopNumbers\\":\{\\"total\\":(\d+)"#).unwrap());
 
-fn parse_browse_new(html: &str) -> Vec<Value> {
+pub(crate) fn parse_browse_new(html: &str) -> Vec<Value> {
     let mut out = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
     for cap in NEW_ITEM_RE.captures_iter(html) {
@@ -106,7 +106,6 @@ fn parse_browse_new(html: &str) -> Vec<Value> {
     }
     out
 }
-
 
 fn browse_item(id: String, name: String, author: String, picture: Option<String>) -> Value {
     json!({
@@ -143,7 +142,7 @@ fn trend_days(browsesort: &str, period: &str) -> Option<i64> {
     })
 }
 
-fn browse_url(
+pub(crate) fn browse_url(
     steam_appid: u64,
     browsesort: &str,
     days: Option<i64>,
@@ -158,6 +157,28 @@ fn browse_url(
         "https://steamcommunity.com/workshop/browse/?appid={steam_appid}&browsesort={browsesort}&section=readytouseitems{days_part}&p={page}&searchtext={}",
         urlenc(query.trim())
     )
+}
+
+/// First item id on a title's public workshop listing; used by the probe
+/// harness to pick a real download target at runtime.
+#[cfg(feature = "dev-probes")]
+pub(crate) async fn first_workshop_item(steam_appid: u64) -> Option<String> {
+    let url = browse_url(steam_appid, "textsearch", None, 1, "");
+    let html = http::get_text(&url).await.ok()?;
+    if html.contains(r#"class="workshopItem""#) {
+        let items = parse_browse(&html);
+        return items
+            .first()
+            .and_then(|i| i.get("remoteId"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+    }
+    let items = parse_browse_new(&html);
+    items
+        .first()
+        .and_then(|i| i.get("remoteId"))
+        .and_then(|v| v.as_str())
+        .map(String::from)
 }
 
 #[tauri::command]

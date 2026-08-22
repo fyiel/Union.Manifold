@@ -417,10 +417,14 @@ pub mod probes {
                 }
             }
         }
-        let install_ok = match &install_result {
-            Ok(n) => push_stage(&mut stages, "install", true, json!({ "resolved": n })),
-            Err(e) => push_stage(&mut stages, "install", false, json!(e.clone())),
-        };
+        match &install_result {
+            Ok(n) => {
+                push_stage(&mut stages, "install", true, json!({ "resolved": n }));
+            }
+            Err(e) => {
+                push_stage(&mut stages, "install", false, json!(e.clone()));
+            }
+        }
 
         // 2. Config entry + staging on disk.
         let cfg_after_install = load_config(&paths, appid);
@@ -513,6 +517,76 @@ pub mod probes {
 
         let all_ok = stages.iter().all(|s| s["ok"].as_bool().unwrap_or(false));
         json!({ "ok": all_ok, "stages": stages })
+    }
+
+    /// Workshop end-to-end: bootstrap SteamCMD from Valve's CDN, find a
+    /// real workshop item on a title whose downloads allow anonymous
+    /// SteamCMD, and pull it through the production download path.
+    pub async fn workshop_e2e() -> Value {
+        use crate::paths::AppPaths;
+        let mut stages: Vec<Value> = Vec::new();
+
+        let root = std::env::temp_dir().join(format!("union-probe-ws-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let paths = AppPaths::for_data_root(root.join("data"));
+
+        // Project Zomboid and Don't Starve Together historically allow
+        // anonymous SteamCMD downloads; try them in order.
+        for appid in [108600u64, 322330u64] {
+            let Some(item) = crate::mods::workshop::first_workshop_item(appid).await else {
+                stages.push(json!({
+                    "stage": format!("browse-{appid}"), "ok": false,
+                    "detail": "no item surfaced on the public listing",
+                }));
+                continue;
+            };
+            let file_id: u64 = match item.parse() {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            stages.push(json!({
+                "stage": format!("browse-{appid}"), "ok": true,
+                "detail": { "fileId": file_id },
+            }));
+            let started = std::time::Instant::now();
+            match crate::mods::steamcmd::run_workshop_download(&paths, appid, file_id).await {
+                Ok(content_dir) => {
+                    let bytes = dir_size_quick(&content_dir);
+                    stages.push(json!({
+                        "stage": format!("download-{appid}"), "ok": true,
+                        "detail": {
+                            "contentDir": content_dir.to_string_lossy(),
+                            "bytes": bytes,
+                            "elapsedMs": started.elapsed().as_millis(),
+                        },
+                    }));
+                    let _ = std::fs::remove_dir_all(&root);
+                    return json!({ "ok": true, "stages": stages });
+                }
+                Err(e) => {
+                    stages.push(json!({
+                        "stage": format!("download-{appid}"), "ok": false,
+                        "detail": e,
+                    }));
+                }
+            }
+        }
+        let _ = std::fs::remove_dir_all(&root);
+        json!({
+            "ok": false,
+            "stages": stages,
+            "note": "anonymous SteamCMD downloads were refused by every tried title",
+        })
+    }
+
+    fn dir_size_quick(dir: &std::path::Path) -> u64 {
+        walkdir::WalkDir::new(dir)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter_map(|e| e.metadata().ok())
+            .filter(|m| m.is_file())
+            .map(|m| m.len())
+            .sum()
     }
 
     /// Settings persistence sweep over every app-level key.
