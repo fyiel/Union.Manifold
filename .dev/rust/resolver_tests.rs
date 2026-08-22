@@ -179,3 +179,20 @@ fn solver_rejects_non_http_urls() {
     assert_eq!(host, "datanodes.to");
     assert_eq!(url.as_str(), "https://datanodes.to/download");
 }
+
+#[tokio::test]
+async fn solver_slots_serialize_per_host_not_globally() {
+    let a = acquire_slot("slots-a.example")
+        .await
+        .expect("first host locks");
+    // A different host never waits for the first session.
+    let b = tokio::time::timeout(Duration::from_millis(500), acquire_slot("slots-b.example"))
+        .await
+        .expect("different host must not block")
+        .expect("second host locks");
+    // The same host queues behind the active session.
+    let again =
+        tokio::time::timeout(Duration::from_millis(200), acquire_slot("slots-a.example")).await;
+    assert!(again.is_err(), "same-host second solve must wait");
+    drop((a, b));
+}

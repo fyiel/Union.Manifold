@@ -121,8 +121,10 @@ impl Shared {
 
 static ACTIVE: Mutex<Option<Arc<Shared>>> = Mutex::new(None);
 
-/// Serializes solver sessions: one gated page at a time, queued callers wait.
-static SLOT: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(tokio::sync::Mutex::default);
+/// Serializes solver sessions per host: two different hosts solve in
+/// parallel, repeated requests for the same host queue behind the active one.
+static HOST_SLOTS: LazyLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 struct CachedClearance {
     cookie_header: String,
@@ -360,7 +362,7 @@ pub async fn solve(app: &AppHandle, page_url: &str) -> Result<Solved, String> {
         });
     }
 
-    let slot = acquire_slot().await?;
+    let slot = acquire_slot(&host).await?;
 
     // Another queued caller may have refreshed the cache while we waited.
     if let Some((cookie_header, user_agent)) = cached_clearance(&host) {
@@ -391,16 +393,20 @@ fn parse_solve_url(page_url: &str) -> Result<(Url, String), String> {
     Ok((parsed, host))
 }
 
-async fn acquire_slot() -> Result<tokio::sync::MutexGuard<'static, ()>, String> {
-    let started = Instant::now();
-    loop {
-        if let Ok(guard) = SLOT.try_lock() {
-            return Ok(guard);
-        }
-        if started.elapsed().as_millis() > SLOT_WAIT_MS {
-            return Err("another verification is still running".to_string());
-        }
-        tokio::time::sleep(Duration::from_millis(TICK_MS)).await;
+async fn acquire_slot(host: &str) -> Result<tokio::sync::OwnedMutexGuard<()>, String> {
+    let slot = HOST_SLOTS
+        .lock()
+        .entry(host.to_string())
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone();
+    match tokio::time::timeout(
+        Duration::from_millis(SLOT_WAIT_MS as u64),
+        slot.clone().lock_owned(),
+    )
+    .await
+    {
+        Ok(guard) => Ok(guard),
+        Err(_) => Err("another verification is still running".to_string()),
     }
 }
 
@@ -541,7 +547,7 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
 
     // Last-chance UA fetch for sessions that finish before any probe
     // payload arrived: aria2 replay needs the exact webview UA.
-    fn grab_user_agent(
+    async fn grab_user_agent(
         window: &tauri::WebviewWindow,
         shared: &Shared,
         user_agent: &mut Option<String>,
@@ -551,7 +557,7 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
         }
         for _ in 0..4 {
             let _ = window.eval(probe_js().as_str());
-            std::thread::sleep(Duration::from_millis(300));
+            tokio::time::sleep(Duration::from_millis(300)).await;
             ingest_title(
                 false,
                 Instant::now(),
@@ -600,7 +606,7 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
                     started.elapsed().as_millis()
                 );
             }
-            grab_user_agent(&window, &shared, &mut user_agent);
+            grab_user_agent(&window, &shared, &mut user_agent).await;
             let cookies = window
                 .cookies_for_url(page_url.clone())
                 .ok()
@@ -638,7 +644,7 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
                 }
                 Some(at) => {
                     if at.elapsed().as_millis() >= POST_CLEARANCE_GRACE_MS {
-                        grab_user_agent(&window, &shared, &mut user_agent);
+                        grab_user_agent(&window, &shared, &mut user_agent).await;
                         let cookie_header = cookie_header_from(&cookies);
                         if let Some(header) = &cookie_header {
                             cache_clearance(host, header.clone(), user_agent.clone());
