@@ -12,11 +12,20 @@ type ResolverState = "solving" | "interactive" | "captured" | "cleared" | "faile
 export function ResolverStatusGuard() {
   const { toast } = useToast()
   const escalatedForHost = useRef<string | null>(null)
+  const hintShownForHost = useRef(new Set<string>())
+  const doneForHost = useRef(new Set<string>())
 
   useEffect(() => {
     const unlisten = window.ucResolver?.onStatus?.((data) => {
       const state = data?.state as ResolverState
       const host = data?.host || "the file host"
+      if (state === "solving" && !hintShownForHost.current.has(host)) {
+        hintShownForHost.current.add(host)
+        window.setTimeout(() => {
+          if (escalatedForHost.current === host || doneForHost.current.has(host)) return
+          toast(`Opening ${host} through a secure browser session…`, "info", 5_000)
+        }, 8_000)
+      }
       if (state === "interactive") {
         escalatedForHost.current = host
         toast(
@@ -45,6 +54,7 @@ export function ResolverStatusGuard() {
         )
       } else if (state === "captured" || state === "cleared") {
         escalatedForHost.current = null
+        doneForHost.current.add(host)
       }
     })
     return () => unlisten?.()
