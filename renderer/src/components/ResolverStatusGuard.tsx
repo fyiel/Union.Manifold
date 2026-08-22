@@ -22,11 +22,22 @@ export function ResolverStatusGuard() {
         toast(
           `Finish the security check for ${host} in the window that just opened — the download continues automatically.`,
           "info",
-          10_000,
+          {
+            duration: 10_000,
+            action: {
+              label: "Cancel",
+              onClick: () => void window.ucResolver?.cancel?.(),
+            },
+          },
         )
       } else if ((state === "failed" || state === "cancelled") && escalatedForHost.current === host) {
         escalatedForHost.current = null
-        const reason = data?.reason === "cancelled" ? "was closed" : "timed out"
+        const reason =
+          data?.reason === "cancelled"
+            ? "was closed or cancelled"
+            : data?.reason === "link appears dead or expired"
+              ? "looks dead or expired"
+              : "timed out"
         toast(
           `Verification for ${host} ${reason}. Opening the link in your browser instead.`,
           "error",
