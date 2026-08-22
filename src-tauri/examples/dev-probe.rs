@@ -46,6 +46,7 @@ mod imp {
                 probes::download_e2e(app, url, &name, None).await
             }
             "resolve" => probes::resolve_host(arg).await,
+            "mods" => probes::mods_e2e(app).await,
             "pagecheck" => {
                 let cookie = args.get(3).cloned().unwrap_or_default();
                 let ua = args.get(4).cloned().unwrap_or_default();

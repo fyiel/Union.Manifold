@@ -120,6 +120,12 @@ pub(crate) fn save_config(paths: &AppPaths, appid: &str, cfg: &GameMods) {
     }
 }
 
+/// Probe access: whether a deploy journal still has entries.
+#[cfg(feature = "dev-probes")]
+pub(crate) fn journal_is_empty(dir: &Path) -> bool {
+    load_journal(dir).files.is_empty()
+}
+
 fn load_journal(dir: &Path) -> Journal {
     std::fs::read_to_string(journal_path(dir))
         .ok()
@@ -971,7 +977,7 @@ fn is_game_dir(dir: &Path) -> bool {
     false
 }
 
-fn resolve_game_root(base: &Path) -> PathBuf {
+pub(crate) fn resolve_game_root(base: &Path) -> PathBuf {
     if is_game_dir(base) {
         return base.to_path_buf();
     }

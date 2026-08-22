@@ -38,6 +38,26 @@ impl AppPaths {
         })
     }
 
+    /// Probe/dev builds point the whole app at an isolated root.
+    #[cfg(feature = "dev-probes")]
+    pub fn for_data_root(data_dir: std::path::PathBuf) -> Self {
+        let asset_cache_dir = data_dir.join("uc-asset");
+        for d in [
+            data_dir.join("config"),
+            data_dir.clone(),
+            data_dir.join("logs"),
+            asset_cache_dir.clone(),
+        ] {
+            std::fs::create_dir_all(d).ok();
+        }
+        Self {
+            config_dir: data_dir.join("config"),
+            logs_dir: data_dir.join("logs"),
+            asset_cache_dir,
+            data_dir,
+        }
+    }
+
     pub fn settings_file(&self) -> PathBuf {
         self.config_dir.join("settings.json")
     }

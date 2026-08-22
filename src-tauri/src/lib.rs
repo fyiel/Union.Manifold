@@ -126,8 +126,7 @@ pub mod probes {
                     "zeigames" => {
                         crate::sources::adapters::zeigames::get_detail(&game.source_slug).await
                     }
-                    _ => crate::sources::adapters::gamebounty::get_detail(&game.source_slug)
-                        .await,
+                    _ => crate::sources::adapters::gamebounty::get_detail(&game.source_slug).await,
                 }) else {
                     continue;
                 };
@@ -181,17 +180,12 @@ pub mod probes {
             std::env::temp_dir().join("union-manifold-probe-settings.json"),
         ));
         let resource_dir = app.path().resource_dir().ok();
-        let cacert = crate::downloads::aria2::resolve_ca_cert(
-            resource_dir.or_else(|| Some(manifest_dir())),
-        );
+        let cacert =
+            crate::downloads::aria2::resolve_ca_cert(resource_dir.or_else(|| Some(manifest_dir())));
         let aria2 = Arc::new(crate::downloads::aria2::Aria2Manager::new(cacert, None));
         let root = std::env::temp_dir().join("union-manifold-probe-downloads");
-        let engine = crate::downloads::DownloadEngine::new(
-            app.clone(),
-            settings,
-            root.clone(),
-            aria2,
-        );
+        let engine =
+            crate::downloads::DownloadEngine::new(app.clone(), settings, root.clone(), aria2);
         let appid = "probe-appid";
         let req = crate::downloads::DownloadRequest {
             appid: appid.to_string(),
@@ -215,7 +209,10 @@ pub mod probes {
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             let status = engine.active_status(appid);
-            let downloading = status.get("downloading").and_then(Value::as_bool).unwrap_or(false);
+            let downloading = status
+                .get("downloading")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
             let size = std::fs::metadata(&save_path).map(|m| m.len()).unwrap_or(0);
             if !downloading && size > 0 {
                 return json!({
@@ -273,6 +270,251 @@ pub mod probes {
         }
     }
 
+    /// Smallest dependency-free, non-deprecated packages in a community,
+    /// smallest first: real content but fast downloads for the E2E.
+    pub async fn thunderstore_candidates(
+        paths: &crate::paths::AppPaths,
+        community: &str,
+    ) -> Vec<(String, String)> {
+        let Ok(packages) = crate::mods::thunderstore::load_packages(paths, community).await else {
+            return Vec::new();
+        };
+        let mut cands: Vec<(u64, String, String)> = packages
+            .iter()
+            .filter(|p| !p.deprecated && !p.versions.is_empty())
+            .filter_map(|p| {
+                let v = p.versions.last()?;
+                if !v.dependencies.is_empty() {
+                    return None;
+                }
+                let size = v.size_bytes;
+                if (2_000..=3_000_000).contains(&size) {
+                    Some((size, p.full_name.clone(), v.version.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        cands.sort();
+        cands
+            .into_iter()
+            .map(|(_, full, ver)| (full, ver))
+            .collect()
+    }
+
+    /// Mods subsystem end-to-end: fake installed game -> live Thunderstore
+    /// package install -> deploy -> toggle -> undeploy, verifying config,
+    /// staging, deployed files and the journal at every step.
+    pub async fn mods_e2e(app: &tauri::AppHandle) -> Value {
+        use crate::library;
+        use crate::mods::{
+            deploy_to, game_mods_dir, load_config, resolve_game_root, save_config, undeploy_from,
+            GameMods,
+        };
+        use crate::state::AppState;
+        use tauri::Manager;
+
+        let appid = "steam-2060160"; // The Farmer Was Replaced: forced BepInEx
+        let community = "riskofrain2";
+        let full_name = "RiskofThunder-FixPlugin";
+        let mut stages: Vec<Value> = Vec::new();
+        fn push_stage(stages: &mut Vec<Value>, name: &str, ok: bool, detail: Value) -> bool {
+            stages.push(json!({ "stage": name, "ok": ok, "detail": detail }));
+            ok
+        }
+
+        // Isolated root + fake installed game.
+        let root = std::env::temp_dir().join(format!("union-probe-mods-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let library_dir = root.join("library");
+        let game_files = library_dir.join("Probe Game");
+        std::fs::create_dir_all(&game_files).ok();
+        std::fs::write(game_files.join("UnityPlayer.dll"), b"probe").ok();
+        std::fs::write(
+            game_files.join("installed.json"),
+            json!({ "appid": appid, "name": "Probe Game", "installStatus": "downloaded" })
+                .to_string(),
+        )
+        .ok();
+
+        let paths = Arc::new(crate::paths::AppPaths::for_data_root(root.join("data")));
+        let settings = Arc::new(crate::settings::SettingsStore::load(paths.settings_file()));
+        settings.set(
+            "downloadPath",
+            json!(library_dir.to_string_lossy().to_string()),
+        );
+        if app.try_state::<AppState>().is_none() {
+            let achievements =
+                crate::achievements::AchievementService::new(paths.data_dir.join("a.json"));
+            let aria2 = Arc::new(crate::downloads::aria2::Aria2Manager::new(None, None));
+            let downloads = crate::downloads::DownloadEngine::new(
+                app.clone(),
+                settings.clone(),
+                crate::paths::default_download_root(&paths.data_dir),
+                aria2,
+            );
+            app.manage(AppState {
+                paths: paths.clone(),
+                settings: settings.clone(),
+                sources: Arc::new(crate::sources::Registry::new(&[])),
+                downloads,
+                achievements,
+            });
+        }
+        let state = app.state::<AppState>();
+        let paths = state.paths.clone();
+
+        // Seed config: forced BepInEx via title id.
+        save_config(
+            &paths,
+            appid,
+            &GameMods {
+                steam_appid: Some(2060160),
+                thunderstore_community: Some(community.to_string()),
+                ..Default::default()
+            },
+        );
+
+        // 1. Live install of a tiny dependency-free package, auto-picked
+        // from the community index (catalog contents rotate constantly).
+        let mods_dir = game_mods_dir(&paths, appid);
+        let candidates = thunderstore_candidates(&paths, community).await;
+        let mut full_name = full_name.to_string();
+        let mut install_result: Result<usize, String> =
+            Err("no candidate package surfaced".to_string());
+        for (idx, (cand_full, cand_ver)) in candidates.iter().take(5).enumerate() {
+            full_name = cand_full.clone();
+            let attempt = match crate::mods::thunderstore::resolve_install(
+                &paths, community, &full_name, cand_ver,
+            )
+            .await
+            {
+                Ok(resolved) => {
+                    let n = resolved.len();
+                    crate::mods::thunderstore::install_batch(
+                        app,
+                        appid,
+                        &format!("thunderstore-{full_name}"),
+                        full_name.rsplit('-').next().unwrap_or(full_name.as_str()),
+                        &resolved,
+                    )
+                    .await
+                    .map(|_| n)
+                }
+                Err(e) => Err(e),
+            };
+            match attempt {
+                Ok(n) => {
+                    install_result = Ok(n);
+                    break;
+                }
+                Err(e) => {
+                    stages.push(json!({
+                        "stage": format!("install-attempt-{}", idx + 1),
+                        "ok": false,
+                        "detail": { "package": full_name, "error": e }
+                    }));
+                }
+            }
+        }
+        let install_ok = match &install_result {
+            Ok(n) => push_stage(&mut stages, "install", true, json!({ "resolved": n })),
+            Err(e) => push_stage(&mut stages, "install", false, json!(e.clone())),
+        };
+
+        // 2. Config entry + staging on disk.
+        let cfg_after_install = load_config(&paths, appid);
+        let installed_id = format!("thunderstore-{full_name}");
+        let staged_ok = cfg_after_install
+            .mods
+            .iter()
+            .any(|m| m.id == installed_id && m.enabled)
+            && mods_dir.join("staging").join(&installed_id).is_dir();
+        push_stage(
+            &mut stages,
+            "config-and-staging",
+            staged_ok,
+            json!({
+                "package": installed_id,
+                "entries": cfg_after_install.mods.iter().map(|m| m.id.clone()).collect::<Vec<_>>(),
+            }),
+        );
+
+        // Deploy target through the real library scan.
+        let roots = library::scan_roots(&state);
+        let target = library::game_files_dir(&roots, appid)
+            .map(|base| resolve_game_root(&base))
+            .unwrap_or_else(|| game_files.clone());
+
+        // 3. Deploy: BepInEx tree must land in the game dir; journal written.
+        let mut cfg = load_config(&paths, appid);
+        let deploy_result = deploy_to(&mods_dir, &target, &cfg);
+        let deployed_ok = deploy_result.is_ok() && {
+            let plugins = target.join("BepInEx").join("plugins");
+            std::fs::read_dir(&plugins)
+                .map(|rd| rd.flatten().count() > 0)
+                .unwrap_or(false)
+        };
+        push_stage(
+            &mut stages,
+            "deploy",
+            deployed_ok,
+            json!({
+                "files": deploy_result.unwrap_or_default(),
+                "target": target.to_string_lossy(),
+            }),
+        );
+
+        // 4. Disable: deployed plugin files must disappear from the target.
+        for m in cfg.mods.iter_mut() {
+            m.enabled = false;
+        }
+        save_config(&paths, appid, &cfg);
+        let _ = deploy_to(&mods_dir, &target, &cfg);
+        let disabled_ok = !std::path::Path::new(&target)
+            .join("BepInEx")
+            .join("plugins")
+            .read_dir()
+            .map(|rd| rd.flatten().count() > 0)
+            .unwrap_or(false);
+        push_stage(&mut stages, "disable", disabled_ok, json!({}));
+
+        // 5. Re-enable: files come back.
+        for m in cfg.mods.iter_mut() {
+            m.enabled = true;
+        }
+        save_config(&paths, appid, &cfg);
+        let _ = deploy_to(&mods_dir, &target, &cfg);
+        let reenabled_ok = std::path::Path::new(&target)
+            .join("BepInEx")
+            .join("plugins")
+            .read_dir()
+            .map(|rd| rd.flatten().count() > 0)
+            .unwrap_or(false);
+        push_stage(&mut stages, "re-enable", reenabled_ok, json!({}));
+
+        // 6. Undeploy: journal cleared, no mod leftovers in the game dir.
+        let undeploy_result = undeploy_from(&mods_dir, &target);
+        let journal_empty = crate::mods::journal_is_empty(&mods_dir);
+        let leftovers = std::path::Path::new(&target).join("BepInEx").exists();
+        push_stage(
+            &mut stages,
+            "undeploy",
+            undeploy_result.is_ok() && journal_empty && !leftovers,
+            json!({
+                "journalEmpty": journal_empty,
+                "bepinexLeftover": leftovers,
+            }),
+        );
+
+        // Cleanup probe artifacts.
+        let _ = std::fs::remove_dir_all(&mods_dir);
+        let _ = std::fs::remove_dir_all(&root);
+
+        let all_ok = stages.iter().all(|s| s["ok"].as_bool().unwrap_or(false));
+        json!({ "ok": all_ok, "stages": stages })
+    }
+
     /// Settings persistence sweep over every app-level key.
     pub fn settings_sweep(path: PathBuf) -> Value {
         let store = Arc::new(crate::settings::SettingsStore::load(path.clone()));
@@ -318,7 +560,6 @@ pub mod probes {
         })
     }
 }
-
 
 use std::sync::Arc;
 
@@ -579,12 +820,10 @@ pub fn run() {
             settings::setting_get,
             settings::setting_set,
             settings::setting_merge_library_game_meta,
-
             logging::log,
             window_cmds::window_minimize,
             window_cmds::window_maximize,
             window_cmds::window_close,
-
             window_cmds::app_close_response,
             system::system_open_external,
             system::system_launch_steam,
@@ -595,7 +834,6 @@ pub fn run() {
             import::steam_library_scan,
             import::steam_library_import,
             system::download_open,
-
             achievements::achievements_list,
             achievements::achievements_toast_hide,
             achievements::achievements_toast_pull,
@@ -631,7 +869,6 @@ pub fn run() {
             downloads::catalog_state_load,
             downloads::catalog_state_save,
             downloads::download_path_get,
-
             install::install_from_archive,
             install::install_downloaded_archive,
             install::delete_archive_files,
@@ -642,13 +879,11 @@ pub fn run() {
             library::installed_appids,
             library::installed_get,
             library::installing_list,
-
             library::installed_save,
             library::installed_update_metadata,
             library::installing_status_set,
             library::installed_delete,
             library::installing_delete,
-
             launch::game_exe_list,
             launch::game_subfolder_find,
             launch::game_exe_preflight,
@@ -659,7 +894,6 @@ pub fn run() {
             launch::linux::game_linux_config_set,
             launch::linux::linux_detect_proton,
             storage::storage_precheck,
-
             assets::assets_size,
             assets::assets_clear,
             updater::check_for_updates,
@@ -678,11 +912,9 @@ pub fn run() {
             misc::theme_editor_close,
             misc::theme_preview,
             misc::theme_preview_end,
-
             misc::autostart_get,
             misc::autostart_set,
             dialogs::folder_pick,
-
             net::auth_fetch,
             mods::mods_game_get,
             mods::mods_game_set,
@@ -710,7 +942,6 @@ pub fn run() {
             mods::workshop::workshop_browse,
             perf::perf_enabled,
             perf::perf_dump,
-
             mods::workshop::workshop_install,
             mods::workshop::workshop_status,
             mods::thunderstore::thunderstore_communities,
