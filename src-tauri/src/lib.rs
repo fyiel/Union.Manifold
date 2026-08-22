@@ -38,6 +38,7 @@ pub mod probes {
     use std::path::PathBuf;
     use std::sync::Arc;
 
+
     use serde_json::{json, Value};
     use tauri::Manager;
 
@@ -519,16 +520,16 @@ pub mod probes {
         json!({ "ok": all_ok, "stages": stages })
     }
 
+    /// Settings persistence sweep over every app-level key.
     /// Workshop end-to-end: bootstrap SteamCMD from Valve's CDN, find a
     /// real workshop item on a title whose downloads allow anonymous
     /// SteamCMD, and pull it through the production download path.
     pub async fn workshop_e2e() -> Value {
-        use crate::paths::AppPaths;
         let mut stages: Vec<Value> = Vec::new();
 
         let root = std::env::temp_dir().join(format!("union-probe-ws-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        let paths = AppPaths::for_data_root(root.join("data"));
+        let paths = crate::paths::AppPaths::for_data_root(root.join("data"));
 
         // Project Zomboid and Don't Starve Together historically allow
         // anonymous SteamCMD downloads; try them in order.
@@ -589,7 +590,203 @@ pub mod probes {
             .sum()
     }
 
-    /// Settings persistence sweep over every app-level key.
+    /// Shared isolated environment for the big gauntlet probes.
+    fn gauntlet_setup(
+        app: &tauri::AppHandle,
+        library_dir: &std::path::Path,
+    ) {
+        use crate::state::AppState;
+        use tauri::Manager;
+
+        let paths = Arc::new(crate::paths::AppPaths::for_data_root(
+            std::env::temp_dir().join("union-manifold-gauntlet-data"),
+        ));
+        let settings = Arc::new(crate::settings::SettingsStore::load(paths.settings_file()));
+        settings.set("downloadPath", json!(library_dir.to_string_lossy().to_string()));
+        if app.try_state::<AppState>().is_some() {
+            return;
+        }
+        let achievements =
+            crate::achievements::AchievementService::new(paths.data_dir.join("a.json"));
+        let aria2 = Arc::new(crate::downloads::aria2::Aria2Manager::new(None, None));
+        let downloads = crate::downloads::DownloadEngine::new(
+            app.clone(),
+            settings.clone(),
+            crate::paths::default_download_root(&paths.data_dir),
+            aria2,
+        );
+        app.manage(AppState {
+            paths: paths.clone(),
+            settings: settings.clone(),
+            sources: Arc::new(crate::sources::Registry::new(&[])),
+            downloads,
+            achievements,
+        });
+    }
+
+    /// Ten small games from ten distinct providers through the real
+    /// pipeline: resolver (with solver escalation) -> aria2 -> extract.
+    pub async fn games_e2e(app: &tauri::AppHandle) -> Value {
+        use crate::sources::schema::DownloadOption;
+
+        // Isolated library root.
+        let root = std::env::temp_dir().join("union-manifold-gauntlet");
+        let _ = std::fs::remove_dir_all(&root);
+        let library_dir = root.join("library");
+        std::fs::create_dir_all(&library_dir).ok();
+
+        gauntlet_setup(app, &library_dir);
+        let state = app.state::<crate::state::AppState>();
+
+        // Non-interactive hosts that work unattended.
+        const TARGET_HOSTS: &[&str] = &[
+            "buzzheavier", "fileditch", "pixeldrain", "mediafire",
+            "rootz", "fuckingfast", "datanodes", "datavaults",
+            "filekeeper", "gofile",
+        ];
+
+        let params = crate::sources::QueryParams {
+            limit: 250,
+            ..Default::default()
+        };
+        let mut by_host: HashMap<String, Vec<DownloadOption>> = HashMap::new();
+        for source in ["gamebounty", "zeigames", "steamrip"] {
+            let games = match source {
+                "gamebounty" => crate::sources::adapters::gamebounty::query(&params).await,
+                "zeigames" => crate::sources::adapters::zeigames::query(&params).await,
+                _ => crate::sources::adapters::steamrip::query(&params).await,
+            }
+            .unwrap_or_default();
+            for g in games {
+                for o in g.download_options {
+                    if !o.resolvable || !o.parts.is_empty() {
+                        continue;
+                    }
+                    if !TARGET_HOSTS.contains(&o.host_type.as_str()) {
+                        continue;
+                    }
+                    by_host.entry(o.host_type.clone()).or_default().push(o);
+                }
+            }
+        }
+
+        let mut stages: Vec<Value> = Vec::new();
+        let mut ok_count = 0usize;
+
+        for host in TARGET_HOSTS {
+            let candidates = match by_host.get(*host) {
+                Some(c) if !c.is_empty() => c,
+                _ => {
+                    stages.push(json!({
+                        "host": host, "ok": false, "stage": "no-sample",
+                        "reason": format!("no current {} mirror surfaced this run", host),
+                    }));
+                    continue;
+                }
+            };
+
+            for (attempt_idx, opt) in candidates.iter().take(3).enumerate() {
+                let url = opt.url.clone().unwrap_or_default();
+                let title = format!("Gauntlet Game {}", attempt_idx);
+                let game_appid = format!("gauntlet-{}", attempt_idx);
+                let started = std::time::Instant::now();
+
+                let option = DownloadOption {
+                    url: Some(url.clone()),
+                    ..Default::default()
+                };
+                let resolved =
+                    crate::sources::hosts::resolve_url_via(app, &option).await;
+                if !resolved.resolvable {
+                    stages.push(json!({
+                        "host": host,
+                        "ok": false,
+                        "stage": format!("resolve-attempt-{}", attempt_idx + 1),
+                        "reason": resolved.reason,
+                    }));
+                    continue;
+                }
+                let direct = resolved.url.clone().unwrap_or_default();
+                let req = crate::downloads::DownloadRequest {
+                    appid: game_appid.clone(),
+                    id: format!("{game_appid}-{attempt_idx}"),
+                    game_name: Some(title.clone()),
+                    url: direct,
+                    filename: None,
+                    total_bytes: 0,
+                    headers: resolved.headers.clone(),
+                    part_index: None,
+                    part_total: None,
+                    update: false,
+                    install_metadata: None,
+                    preserve_existing: false,
+                };
+                if let Err(e) = state.downloads.enqueue(req) {
+                    stages.push(json!({
+                        "host": host, "ok": false, "stage": "enqueue",
+                        "error": e.to_string(),
+                    }));
+                    continue;
+                }
+
+                let safe_name = crate::downloads::safe_folder_name(&title);
+                let game_dir = library_dir.join(safe_name);
+                let manifest_path = game_dir.join(crate::downloads::MANIFEST_NAME);
+                let mut installed = false;
+                while started.elapsed().as_secs() < 25 * 60 {
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    let busy = state.downloads.active_status(&game_appid);
+                    let downloading = busy
+                        .get("downloading")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    if !downloading {
+                        if let Ok(text) = std::fs::read_to_string(&manifest_path) {
+                            if let Ok(v) = serde_json::from_str::<Value>(&text) {
+                                let status = v
+                                    .get("installStatus")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("");
+                                if matches!(status, "installed" | "extracted") {
+                                    installed = true;
+                                    break;
+                                }
+                                if matches!(status, "failed") {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                let files = walkdir::WalkDir::new(&game_dir)
+                    .into_iter()
+                    .filter_map(|e| e.ok())
+                    .filter_map(|e| e.metadata().ok())
+                    .filter(|m| m.is_file())
+                    .count();
+                let ok = installed && files > 1;
+                if ok {
+                    ok_count += 1;
+                }
+                stages.push(json!({
+                    "host": host, "ok": ok,
+                    "stage": if installed { "installed" } else { "timeout-or-failed" },
+                    "files": files,
+                    "elapsedMs": started.elapsed().as_millis(),
+                }));
+                if ok {
+                    break;
+                }
+            }
+        }
+
+        json!({
+            "okCount": ok_count,
+            "attempted": TARGET_HOSTS.len(),
+            "results": stages,
+        })
+    }
+
     pub fn settings_sweep(path: PathBuf) -> Value {
         let store = Arc::new(crate::settings::SettingsStore::load(path.clone()));
         let cases: Vec<(&str, Value)> = vec![
@@ -720,6 +917,113 @@ pub(crate) fn enable_smooth_scrolling(_window: &tauri::WebviewWindow) {}
 
 #[cfg(not(target_os = "linux"))]
 pub(crate) fn enable_smooth_scrolling(_window: &tauri::WebviewWindow) {}
+
+
+/// Drive the live Browse page: scroll its grid step by step while auditing
+/// every thumbnail for load completion, natural-vs-rendered size sanity and
+/// breakage. Results come back through document.title (works on any origin).
+#[cfg(feature = "dev-probes")]
+#[cfg(feature = "dev-probes")]
+const UI_PROBE_JS: &str = r#"(function(){
+  try{window.ucPerf&&window.ucPerf.dump(JSON.stringify({_t:'ui-probe',phase:'start'}))}catch(e){document.title='UIPPING-FAIL:'+e}
+  function findScroller(){
+    var best=document.scrollingElement,max=0;
+    document.querySelectorAll('div').forEach(function(e){
+      var s=getComputedStyle(e);
+      if((s.overflowY==='auto'||s.overflowY==='scroll')&&e.scrollHeight>e.clientHeight+50&&e.scrollHeight>max){max=e.scrollHeight;best=e;}
+    });
+    return best;
+  }
+  var seen={};
+  function snap(){
+    document.querySelectorAll('.mf-card img, [class*=card] img').forEach(function(i){
+      var src=(i.currentSrc||i.getAttribute('src')||'');
+      if(!src)return;
+      var key=src.split('?')[0].slice(-90);
+      var rec={complete:i.complete,nw:i.naturalWidth,nh:i.naturalHeight,cw:i.clientWidth,ch:i.clientHeight};
+      rec.broken=rec.complete&&rec.nw===0&&src.indexOf('svg')===-1;
+      rec.unloaded=!rec.complete;
+      rec.oversized=rec.cw>40&&rec.nw>Math.max(rec.cw*2.5,700);
+      var pa=rec.nw/Math.max(rec.nh,1),pb=rec.cw/Math.max(rec.ch,1);
+      rec.stretched=rec.cw>40&&rec.ch>10&&Math.abs(pa-pb)/Math.max(pb,0.01)>0.15;
+      var prev=seen[key]||{};
+      prev.rec=rec;
+      prev.everBroken=prev.everBroken||rec.broken;
+      prev.everOversized=prev.everOversized||rec.oversized;
+      prev.everStretched=prev.everStretched||rec.stretched;
+      seen[key]=prev;
+    });
+  }
+  (async function(){
+    var el=findScroller();
+    if(!el){document.title='\u200b\uE00DUIB:'+btoa(JSON.stringify({error:'no scroller'}));return;}
+    var last=-1,stuck=0;
+    for(var i=0;i<90;i++){
+      el.scrollTop+=Math.max(220,(el.clientHeight||600)*0.85);
+      await new Promise(function(r){setTimeout(r,1300)});
+      snap();
+      if(el.scrollTop===last){stuck++;if(stuck>=3)break;}else{stuck=0;last=el.scrollTop;}
+    }
+    await new Promise(function(r){setTimeout(r,1500)});
+    snap();
+    var imgs=Object.keys(seen);
+    var broken=[],oversized=[],stretched=[],unloaded=[];
+    imgs.forEach(function(k){
+      var v=seen[k],r=v.rec;
+      if(v.everBroken)broken.push(k);
+      if(r.unloaded&&!r.complete)unloaded.push(k);
+      if(v.everOversized)oversized.push({src:k,nw:r.nw,cw:r.cw});
+      if(v.everStretched)stretched.push({src:k,nw:r.nw,nh:r.nh,cw:r.cw,ch:r.ch});
+    });
+    var payload={
+      _t:'ui-probe',
+      done:true,steps:steps,uniqueImages:imgs.length,
+      brokenCount:broken.length,brokenSample:broken.slice(0,6),
+      unloadedNow:unloaded.length,
+      oversizedCount:oversized.length,oversizedSample:oversized.slice(0,6),
+      stretchedCount:stretched.length,stretchedSample:stretched.slice(0,6),
+      finalScrollTop:el.scrollTop,scrollHeight:el.scrollHeight
+    };
+    try{window.ucPerf&&window.ucPerf.dump(JSON.stringify(payload))}catch(e){}
+  })();
+})()"#;
+
+#[cfg(feature = "dev-probes")]
+async fn ui_image_probe(app: tauri::AppHandle) {
+    use tauri::Manager;
+    let mut win = None;
+    for _ in 0..90 {
+        if let Some(w) = app.get_webview_window("main") {
+            win = Some(w);
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    let Some(window) = win else {
+        crate::logging::write_line("warn", "ui probe: no main window");
+        return;
+    };
+    tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+    if window.eval(UI_PROBE_JS).is_err() {
+        crate::logging::write_line("warn", "ui probe: eval failed");
+        return;
+    }
+    // Results arrive through perf_dump into this process's own sink.
+    let sink = std::env::temp_dir().join(format!("um-perf-{}.jsonl", std::process::id()));
+    for _ in 0..240 {
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+        if app.get_webview_window("main").is_none() {
+            return;
+        }
+        if let Ok(text) = std::fs::read_to_string(&sink) {
+            let hit = text.lines().find(|l| l.contains("\"_t\":\"ui-probe\""));
+            if let Some(line) = hit {
+                println!("UI_PROBE_RESULT={line}");
+                return;
+            }
+        }
+    }
+}
 
 pub fn run() {
     install_panic_hook();
@@ -887,6 +1191,14 @@ pub fn run() {
                 // smoothing; enabling the WebKitGTK flag on top made both
                 // animate the same deltas and fight each other.
                 let _ = main;
+            }
+
+            #[cfg(feature = "dev-probes")]
+            if std::env::var("UM_UI_PROBE").map(|v| v == "1").unwrap_or(false) {
+                let probe_handle = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    ui_image_probe(probe_handle).await;
+                });
             }
             Ok(())
         })
