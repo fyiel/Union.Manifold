@@ -28,6 +28,16 @@ All notable changes to Union.Manifold. This project is a fork of
 - Space-separated dates keep their time of day ("2024-03-01 10:00:00" no
   longer collapses to midnight), so release timestamps sort correctly.
 
+- Verifications for different file hosts now run in parallel instead of
+  queueing behind one another, and a verification that needs your attention
+  can be cancelled straight from its toast. Long-running hidden sessions
+  announce themselves after a few seconds so a slow spinner is never
+  unexplained.
+
+- The aria2 downloader's RPC secret is passed through a private config file
+  instead of the process list, matching how proxy credentials were already
+  handled.
+
 - Deleting a game from the library now also drops its stored achievement
   progress, so a reinstalled or re-imported game starts with a clean
   achievements state instead of resurrecting unlocks from the deleted entry.
