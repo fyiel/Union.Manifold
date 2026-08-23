@@ -49,6 +49,10 @@ mod imp {
             "mods" => probes::mods_e2e(app).await,
             "games" => probes::games_e2e(app).await,
             "workshop" => probes::workshop_e2e().await,
+            "mods-gauntlet" => {
+                let lib = std::env::temp_dir().join("union-manifold-gauntlet").join("library");
+                probes::mods_gauntlet(app, &lib, 10).await
+            }
             "pagecheck" => {
                 let cookie = args.get(3).cloned().unwrap_or_default();
                 let ua = args.get(4).cloned().unwrap_or_default();

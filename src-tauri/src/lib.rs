@@ -787,6 +787,116 @@ pub mod probes {
         })
     }
 
+    /// Mods gauntlet: install N distinct live Thunderstore packages into
+    /// every game directory that exists under `library_dir`, deploy them
+    /// all, verify files landed, then undeploy clean.
+    pub async fn mods_gauntlet(
+        app: &tauri::AppHandle,
+        library_dir: &std::path::Path,
+        per_game: usize,
+    ) -> Value {
+        use crate::mods::{deploy_to, game_mods_dir, load_config, resolve_game_root, undeploy_from, GameMods};
+        use crate::state::AppState;
+        use tauri::Manager;
+
+        // Ensure AppState is managed (install_batch calls app.state()).
+        gauntlet_setup(app, library_dir);
+
+        // Discover games from installed manifests.
+        let mut game_entries: Vec<(std::path::PathBuf, String)> = Vec::new();
+        if let Ok(rd) = std::fs::read_dir(library_dir) {
+            for entry in rd.flatten() {
+                let manifest_path = entry.path().join("installed.json");
+                if let Ok(text) = std::fs::read_to_string(&manifest_path) {
+                    if let Ok(v) = serde_json::from_str::<Value>(&text) {
+                        if let Some(appid) = v.get("appid").and_then(Value::as_str) {
+                            game_entries.push((entry.path(), appid.to_string()));
+                        }
+                    }
+                }
+            }
+        }
+        if game_entries.is_empty() {
+            return json!({ "ok": false, "error": "no installed games found in library" });
+        }
+
+        // Pick packages from Thunderstore.
+        let paths = Arc::new(crate::paths::AppPaths::for_data_root(
+            std::env::temp_dir().join("union-manifold-gauntlet-data"),
+        ));
+        let candidates =
+            thunderstore_candidates(&paths, "riskofrain2").await;
+        if candidates.len() < per_game {
+            return json!({
+                "ok": false,
+                "error": format!("only {} candidate packages, need {}", candidates.len(), per_game),
+            });
+        }
+
+        let mut results = Vec::new();
+        for (gi, (game_dir, appid)) in game_entries.iter().enumerate() {
+            let mods_dir = game_mods_dir(&paths, appid);
+            let target = resolve_game_root(game_dir);
+
+            // Install `per_game` distinct packages sequentially.
+            let mut install_ok = 0usize;
+            let batch = &candidates[0..per_game];
+            for (pi, (full_name, version)) in batch.iter().enumerate() {
+                match crate::mods::thunderstore::resolve_install(&paths, "riskofrain2", full_name, version).await {
+                    Ok(resolved) => {
+                        match crate::mods::thunderstore::install_batch(
+                            app, &appid, &format!("thunderstore-{full_name}"),
+                            full_name.rsplit('-').next().unwrap_or(full_name), &resolved,
+                        ).await {
+                            Ok(()) => install_ok += 1,
+                            Err(e) => { results.push(json!({ "game": gi, "pkg": pi, "ok": false, "stage": "install", "error": e })); break; }
+                        }
+                    }
+                    Err(e) => { results.push(json!({ "game": gi, "pkg": pi, "ok": false, "stage": "resolve", "error": e })); break; }
+                }
+            }
+
+            let cfg = load_config(&paths, &appid);
+            let entries = cfg.mods.len();
+
+            // Deploy all enabled mods at once.
+            let deploy_result = deploy_to(&mods_dir, &target, &cfg);
+            let plugins_dir = target.join("BepInEx").join("plugins");
+            let deployed_files = walkdir::WalkDir::new(&plugins_dir)
+                .into_iter()
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_type().is_file())
+                .count();
+
+            // Undeploy: journal cleared, BepInEx gone.
+            let _ = undeploy_from(&mods_dir, &target);
+            let journal_clean = crate::mods::journal_is_empty(&mods_dir);
+            let leftover = target.join("BepInEx").exists();
+            let undeploy_ok = journal_clean && !leftover;
+
+            results.push(json!({
+                "game": gi,
+                "dir": game_dir.to_string_lossy(),
+                "installOk": install_ok,
+                "installTotal": per_game,
+                "configEntries": entries,
+                "deployOk": deploy_result.is_ok(),
+                "deployedFiles": deployed_files,
+                "undeployClean": undeploy_ok,
+                "allGood": install_ok == per_game && entries >= per_game && deployed_files > 0 && undeploy_ok,
+            }));
+
+            // Cleanup probe artifacts.
+            let _ = std::fs::remove_dir_all(&mods_dir);
+        }
+
+        json!({
+            "games": game_entries.len(),
+            "perGame": per_game,
+            "results": results,
+        })
+    }
+
     pub fn settings_sweep(path: PathBuf) -> Value {
         let store = Arc::new(crate::settings::SettingsStore::load(path.clone()));
         let cases: Vec<(&str, Value)> = vec![
