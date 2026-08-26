@@ -795,9 +795,7 @@ pub mod probes {
         library_dir: &std::path::Path,
         per_game: usize,
     ) -> Value {
-        use crate::mods::{deploy_to, game_mods_dir, load_config, resolve_game_root, undeploy_from, GameMods};
-        use crate::state::AppState;
-        use tauri::Manager;
+        use crate::mods::{deploy_to, game_mods_dir, load_config, resolve_game_root, undeploy_from};
 
         // Ensure AppState is managed (install_batch calls app.state()).
         gauntlet_setup(app, library_dir);
@@ -845,7 +843,7 @@ pub mod probes {
                 match crate::mods::thunderstore::resolve_install(&paths, "riskofrain2", full_name, version).await {
                     Ok(resolved) => {
                         match crate::mods::thunderstore::install_batch(
-                            app, &appid, &format!("thunderstore-{full_name}"),
+                            app, appid, &format!("thunderstore-{full_name}"),
                             full_name.rsplit('-').next().unwrap_or(full_name), &resolved,
                         ).await {
                             Ok(()) => install_ok += 1,
@@ -856,7 +854,7 @@ pub mod probes {
                 }
             }
 
-            let cfg = load_config(&paths, &appid);
+            let cfg = load_config(&paths, appid);
             let entries = cfg.mods.len();
 
             // Deploy all enabled mods at once.
@@ -1031,11 +1029,10 @@ pub(crate) fn enable_smooth_scrolling(_window: &tauri::WebviewWindow) {}
 
 /// Drive the live Browse page: scroll its grid step by step while auditing
 /// every thumbnail for load completion, natural-vs-rendered size sanity and
-/// breakage. Results come back through document.title (works on any origin).
-#[cfg(feature = "dev-probes")]
+/// breakage. Results are sent through the existing perf dump bridge.
 #[cfg(feature = "dev-probes")]
 const UI_PROBE_JS: &str = r#"(function(){
-  try{window.ucPerf&&window.ucPerf.dump(JSON.stringify({_t:'ui-probe',phase:'start'}))}catch(e){document.title='UIPPING-FAIL:'+e}
+  try{window.ucPerf&&window.ucPerf.dump(JSON.stringify({_t:'ui-probe',phase:'start'}))}catch(e){}
   function findScroller(){
     var best=document.scrollingElement,max=0;
     document.querySelectorAll('div').forEach(function(e){
@@ -1049,52 +1046,80 @@ const UI_PROBE_JS: &str = r#"(function(){
     document.querySelectorAll('.mf-card img, [class*=card] img').forEach(function(i){
       var src=(i.currentSrc||i.getAttribute('src')||'');
       if(!src)return;
-      var key=src.split('?')[0].slice(-90);
+      // The uc-asset endpoint uses one path for every image; its query
+      // identifies the upstream asset and requested size, so retain it.
+      var key=src.slice(-240);
       var rec={complete:i.complete,nw:i.naturalWidth,nh:i.naturalHeight,cw:i.clientWidth,ch:i.clientHeight};
       rec.broken=rec.complete&&rec.nw===0&&src.indexOf('svg')===-1;
       rec.unloaded=!rec.complete;
-      rec.oversized=rec.cw>40&&rec.nw>Math.max(rec.cw*2.5,700);
+      var loaded=rec.complete&&rec.nw>0&&rec.nh>0;
+      // object-fit cover/contain letterboxes or crops on purpose, so an
+      // aspect mismatch there is design, not distortion.
+      var fit='fill';
+      try{fit=getComputedStyle(i).objectFit||'fill'}catch(e){}
+      rec.fitted=(fit==='cover'||fit==='contain'||fit==='scale-down');
+      rec.undersized=loaded&&!rec.fitted&&rec.cw>40&&rec.nw<rec.cw;
+      rec.oversized=loaded&&!rec.fitted&&rec.cw>40&&rec.nw>Math.max(rec.cw*2.5,700);
       var pa=rec.nw/Math.max(rec.nh,1),pb=rec.cw/Math.max(rec.ch,1);
-      rec.stretched=rec.cw>40&&rec.ch>10&&Math.abs(pa-pb)/Math.max(pb,0.01)>0.15;
+      rec.stretched=loaded&&!rec.fitted&&rec.cw>40&&rec.ch>10&&Math.abs(pa-pb)/Math.max(pb,0.01)>0.15;
       var prev=seen[key]||{};
       prev.rec=rec;
       prev.everBroken=prev.everBroken||rec.broken;
+      prev.nowBroken=rec.broken;
+      prev.everUndersized=prev.everUndersized||rec.undersized;
       prev.everOversized=prev.everOversized||rec.oversized;
       prev.everStretched=prev.everStretched||rec.stretched;
       seen[key]=prev;
     });
   }
   (async function(){
-    var el=findScroller();
-    if(!el){document.title='\u200b\uE00DUIB:'+btoa(JSON.stringify({error:'no scroller'}));return;}
-    var last=-1,stuck=0;
-    for(var i=0;i<90;i++){
-      el.scrollTop+=Math.max(220,(el.clientHeight||600)*0.85);
-      await new Promise(function(r){setTimeout(r,1300)});
-      snap();
-      if(el.scrollTop===last){stuck++;if(stuck>=3)break;}else{stuck=0;last=el.scrollTop;}
+    function ping(extra){
+      try{window.ucPerf&&window.ucPerf.dump(JSON.stringify(Object.assign({_t:'ui-probe'},extra)))}catch(e){}
     }
-    await new Promise(function(r){setTimeout(r,1500)});
-    snap();
-    var imgs=Object.keys(seen);
-    var broken=[],oversized=[],stretched=[],unloaded=[];
-    imgs.forEach(function(k){
-      var v=seen[k],r=v.rec;
-      if(v.everBroken)broken.push(k);
-      if(r.unloaded&&!r.complete)unloaded.push(k);
-      if(v.everOversized)oversized.push({src:k,nw:r.nw,cw:r.cw});
-      if(v.everStretched)stretched.push({src:k,nw:r.nw,nh:r.nh,cw:r.cw,ch:r.ch});
-    });
-    var payload={
-      _t:'ui-probe',
-      done:true,steps:steps,uniqueImages:imgs.length,
-      brokenCount:broken.length,brokenSample:broken.slice(0,6),
-      unloadedNow:unloaded.length,
-      oversizedCount:oversized.length,oversizedSample:oversized.slice(0,6),
-      stretchedCount:stretched.length,stretchedSample:stretched.slice(0,6),
-      finalScrollTop:el.scrollTop,scrollHeight:el.scrollHeight
-    };
-    try{window.ucPerf&&window.ucPerf.dump(JSON.stringify(payload))}catch(e){}
+    try{
+      // Browse streams sources independently; wait for a useful first batch so
+      // a fast machine does not audit an empty or one-card intermediate render.
+      for(var ready=0;ready<30&&document.querySelectorAll('.mf-card').length<10;ready++){
+        await new Promise(function(r){setTimeout(r,1000)});
+      }
+      ping({phase:'cards',ready:ready,cards:document.querySelectorAll('.mf-card').length});
+      var el=findScroller();
+      if(!el){ping({done:true,error:'no scroller'});return;}
+      var last=-1,stuck=0;
+      for(var i=0;i<90;i++){
+        el.scrollTop+=Math.max(220,(el.clientHeight||600)*0.85);
+        await new Promise(function(r){setTimeout(r,1300)});
+        snap();
+        if(el.scrollTop===last){stuck++;if(stuck>=3)break;}else{stuck=0;last=el.scrollTop;}
+        if(i%10===9)ping({phase:'scroll',step:i+1,top:el.scrollTop});
+      }
+      await new Promise(function(r){setTimeout(r,1500)});
+      snap();
+      var imgs=Object.keys(seen);
+      var broken=[],brokenNow=[],undersized=[],oversized=[],stretched=[],unloaded=[];
+      imgs.forEach(function(k){
+        var v=seen[k],r=v.rec;
+        if(v.everBroken)broken.push(k);
+        if(v.nowBroken)brokenNow.push(k);
+        if(v.everUndersized)undersized.push({src:k,nw:r.nw,cw:r.cw});
+        if(r.unloaded&&!r.complete)unloaded.push(k);
+        if(v.everOversized)oversized.push({src:k,nw:r.nw,cw:r.cw});
+        if(v.everStretched)stretched.push({src:k,nw:r.nw,nh:r.nh,cw:r.cw,ch:r.ch});
+      });
+      var payload={
+        done:true,steps:i,uniqueImages:imgs.length,
+        brokenCount:broken.length,brokenSample:broken.slice(0,6),
+        brokenNowCount:brokenNow.length,brokenNowSample:brokenNow.slice(0,6),
+        unloadedNow:unloaded.length,
+        undersizedCount:undersized.length,undersizedSample:undersized.slice(0,6),
+        oversizedCount:oversized.length,oversizedSample:oversized.slice(0,6),
+        stretchedCount:stretched.length,stretchedSample:stretched.slice(0,6),
+        finalScrollTop:el.scrollTop,scrollHeight:el.scrollHeight
+      };
+      ping(payload);
+    }catch(err){
+      ping({done:true,error:String(err&&err.message||err)});
+    }
   })();
 })()"#;
 
@@ -1118,7 +1143,8 @@ async fn ui_image_probe(app: tauri::AppHandle) {
         crate::logging::write_line("warn", "ui probe: eval failed");
         return;
     }
-    // Results arrive through perf_dump into this process's own sink.
+    // Results arrive through perf_dump into this process's own sink. Ignore
+    // the initial ping and wait for the completed payload.
     let sink = std::env::temp_dir().join(format!("um-perf-{}.jsonl", std::process::id()));
     for _ in 0..240 {
         tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
@@ -1126,13 +1152,17 @@ async fn ui_image_probe(app: tauri::AppHandle) {
             return;
         }
         if let Ok(text) = std::fs::read_to_string(&sink) {
-            let hit = text.lines().find(|l| l.contains("\"_t\":\"ui-probe\""));
+            let hit = text
+                .lines()
+                .rev()
+                .find(|l| l.contains("\"_t\":\"ui-probe\"") && l.contains("\"done\":true"));
             if let Some(line) = hit {
                 println!("UI_PROBE_RESULT={line}");
                 return;
             }
         }
     }
+    crate::logging::write_line("warn", "ui probe: no completed payload within timeout");
 }
 
 pub fn run() {
