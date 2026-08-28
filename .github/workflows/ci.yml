@@ -66,7 +66,24 @@ jobs:
 
       - name: Cargo test
         working-directory: src-tauri
-        run: cargo test --locked
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cargo test --locked --no-run --message-format=json > test-build.json || exit 1
+            MT=$(find "/c/Program Files (x86)/Windows Kits/10/bin" -name "mt.exe" -path "*x64*" 2>/dev/null | sort -V | tail -1)
+            MANIFEST=$(cygpath -w "$PWD/windows/test-manifest.manifest")
+            jq -r 'select(.executable != null) | .executable' test-build.json | tr -d '\r' > test-exes.txt
+            while IFS= read -r exe; do
+              chmod +w "$exe"
+              "$MT" -nologo -manifest "$MANIFEST" "-outputresource:$exe;#1" || exit 1
+            done < test-exes.txt
+            status=0
+            while IFS= read -r exe; do
+              "$exe" || status=1
+            done < test-exes.txt
+            exit $status
+          fi
+          cargo test --locked
 
   verify:
     runs-on: ubuntu-latest
