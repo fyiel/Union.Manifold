@@ -116,7 +116,6 @@ pub(crate) fn invalidate_scan() {
     SCAN_CACHE.lock().clear();
 }
 
-/// Raw per-root manifest scan: every directory under `root` that parses as
 pub(crate) fn scan_root_manifests(root: &std::path::Path) -> Vec<(PathBuf, Value)> {
     let mut out = Vec::new();
     let entries = match std::fs::read_dir(root) {

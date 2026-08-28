@@ -219,7 +219,6 @@ async fn dispatch(app: Option<&AppHandle>, option: &DownloadOption) -> ResolveRe
         };
     }
 
-    // datanodes/datavaults: when the native resolver hits a Cloudflare gate or
     if let Some(r) = result {
         if r.resolvable {
             return r;

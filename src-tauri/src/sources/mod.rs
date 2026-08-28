@@ -999,7 +999,6 @@ pub async fn sources_resolve(
     source_id: String,
     option: schema::DownloadOption,
 ) -> Result<Value> {
-    // Non-unioncrax sources resolve through hosts::resolve_url (with a
     let result = adapter_resolve_with(Some(&app), &source_id, &option).await;
     Ok(json!({ "ok": true, "result": result }))
 }

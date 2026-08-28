@@ -153,7 +153,7 @@ fn probe_js_with(with_t: bool) -> String {
 }
 
 fn auto_click_js() -> String {
-    r#"(function(){try{var c=document.querySelectorAll('button,a,[role=button]');for(var i=0;i<c.length;i++){var t=(c[i].textContent||'').trim().toLowerCase();if(/^(start download|download|free download|generate direct link|generate link|get link|create download link)$/.test(t)){c[i].click();return;}}}catch(e){}})()"#
+    r#"(function(){try{var c=document.querySelectorAll('button,a,[role=button]');for(var i=0;i<c.length;i++){var el=c[i];if(el.offsetParent===null)continue;var t=(el.textContent||'').trim().toLowerCase();if(/^(start download|download|download now|free download|generate direct link|generate link|get link|create download link)$/.test(t)){el.click();return;}}}catch(e){}})()"#
         .to_string()
 }
 
@@ -319,6 +319,12 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
     let start_visible = std::env::var("UNION_SOLVER_VISIBLE").is_ok();
     if let Some(window) = app.get_webview_window(WINDOW_LABEL) {
         window.destroy().ok();
+        for _ in 0..100 {
+            if app.get_webview_window(WINDOW_LABEL).is_none() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
     }
 
     let shared = Arc::new(Shared::default());
@@ -393,6 +399,8 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
     let mut user_agent: Option<String> = None;
     let mut clearance_at: Option<Instant> = None;
     let mut last_not_found = false;
+    let mut last_href: Option<String> = None;
+    let mut referer_retried = false;
 
     fn ingest_title(
         trace: bool,
@@ -401,6 +409,7 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
         user_agent: &mut Option<String>,
         interactive_since: &mut Option<Instant>,
         not_found: &mut bool,
+        href: &mut Option<String>,
     ) {
         if let Some(title) = shared.take_title() {
             if let Some(probe) = decode_probe(&title).filter(probe_fresh) {
@@ -424,6 +433,7 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
                     None
                 };
                 *not_found = probe.n;
+                *href = Some(probe.h);
             }
         }
     }
@@ -446,6 +456,7 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
                 user_agent,
                 &mut None,
                 &mut false,
+                &mut None,
             );
             if user_agent.is_some() {
                 return;
@@ -471,7 +482,27 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
             &mut user_agent,
             &mut interactive_since,
             &mut last_not_found,
+            &mut last_href,
         );
+
+        if !referer_retried {
+            if let Some(href) = last_href.as_deref() {
+                if href.contains("/error?e=Referrer") {
+                    referer_retried = true;
+                    if trace {
+                        println!(
+                            "SOLVER_TRACE +{}ms referer wall detected; same-origin re-navigation",
+                            started.elapsed().as_millis()
+                        );
+                    }
+                    let js = format!(
+                        "location.assign({})",
+                        serde_json::to_string(page_url.as_str()).unwrap_or_default()
+                    );
+                    window.eval(&js).ok();
+                }
+            }
+        }
 
         if last_not_found && clearance_at.is_none() && started.elapsed().as_millis() > 5_000 {
             break Err("link appears dead or expired".to_string());
@@ -547,6 +578,7 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
                 &mut user_agent,
                 &mut interactive_since,
                 &mut last_not_found,
+                &mut last_href,
             );
         }
 
@@ -562,13 +594,14 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
             let _ = window.eval(auto_click_js().as_str());
         }
 
-        if clearance_at.is_none()
-            && escalation_action(
-                escalated,
-                started.elapsed().as_millis(),
-                interactive_since.map(|t| t.elapsed().as_millis()),
-            ) == Escalation::Show
-        {
+        let interactive_overdue = interactive_since
+            .is_some_and(|t| t.elapsed().as_millis() >= INTERACTIVE_GRACE_MS);
+        let due = escalation_action(
+            escalated,
+            started.elapsed().as_millis(),
+            interactive_since.map(|t| t.elapsed().as_millis()),
+        ) == Escalation::Show;
+        if due && (clearance_at.is_none() || interactive_overdue) {
             window.show().ok();
             window.set_focus().ok();
             escalated = true;
