@@ -1,6 +1,4 @@
 const HISTORY_COOKIE_NAME = "union_manifold_history"
-// Pre-fork cookie key; read once as a fallback so existing local data
-// migrates to the fork name instead of being silently dropped.
 const LEGACY_HISTORY_COOKIE_NAME = "unioncrax_history"
 const MAX_HISTORY_ITEMS = 50
 const COOKIE_EXPIRY_DAYS = 365
@@ -45,7 +43,6 @@ function getUserHistory(): UserHistory {
 
     const legacy = parseUserHistory(readHistoryCookie(LEGACY_HISTORY_COOKIE_NAME))
     if (legacy.downloadedGames.length > 0) {
-      // Migrate: re-save under the fork name and drop the old cookie.
       saveUserHistory(legacy)
       document.cookie = `${LEGACY_HISTORY_COOKIE_NAME}=; max-age=0; path=/`
       return legacy

@@ -1,24 +1,3 @@
-//! In-app webview challenge solver.
-//!
-//! When a download page sits behind a Cloudflare gate, an interactive captcha
-//! or a JS-only download flow, the plain HTTP resolvers cannot proceed. This
-//! module drives the page through a real browser engine — the same WebView2 /
-//! WKWebView / WebKitGTK that renders the app UI — so challenges pass exactly
-//! the way they pass for a normal user:
-//!
-//! - hidden by default: managed "verifying you are human" interstitials
-//!   auto-pass without a window ever appearing;
-//! - if an interactive widget (Turnstile/hCaptcha) is detected, or no progress
-//!   is made within the hidden budget, the same window is shown and focused
-//!   for one manual click, then closed — never a second code path;
-//! - success is either a captured direct download URL (webview download
-//!   interception or direct-file navigation) or a `cf_clearance` cookie handed
-//!   back together with the webview's exact User-Agent so reqwest/aria2 can
-//!   replay the cleared session.
-//!
-//! The solver window is deliberately absent from capabilities/default.json, so
-//! remote pages get no Tauri IPC access; the host observes progress through
-//! the platform cookie store and host-injected probes only.
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
@@ -32,43 +11,22 @@ use tauri::{AppHandle, Emitter, Manager, Url, WebviewUrl, WebviewWindowBuilder};
 
 const WINDOW_LABEL: &str = "resolver";
 const TICK_MS: u64 = 500;
-/// How long the window stays hidden before giving up on an unattended pass.
 const HIDDEN_BUDGET_MS: u128 = 15_000;
-/// An interactive widget that persists this long triggers the visible phase.
 const INTERACTIVE_GRACE_MS: u128 = 6_000;
-/// Total budget including the time a user may spend clicking a challenge.
 const OVERALL_BUDGET_MS: u128 = 150_000;
-/// How long a queued solve waits for the active one before failing.
 const SLOT_WAIT_MS: u128 = 120_000;
-/// A solved clearance is reused for this long before the window runs again.
 const CLEARANCE_TTL_MS: i64 = 20 * 60_000;
-/// Probe payloads older than this are considered stale (page navigated away
-/// between eval and title read).
 const PROBE_FRESHNESS_MS: i64 = 5_000;
-/// After a clearance cookie appears, the page's own flow (countdown,
-/// invisible Turnstile, download button JS) may still need to fire the
-/// actual download; keep the session alive this long to capture it.
 const POST_CLEARANCE_GRACE_MS: u128 = 30_000;
-/// During the grace, nudge the page's own primary download button at this
-/// interval (same-origin click; harmless when the button is absent).
 const AUTO_CLICK_INTERVAL_MS: u128 = 4_000;
 
-/// Marker prefix written into `document.title` by the injected probe. A zero
-/// width space plus a private-use character: real page titles never start
-/// with this pair, so stale/genuine titles are rejected cheaply.
 const PROBE_MARK: &str = "\u{200b}\u{e00d}UCR:";
 
 #[derive(Debug, Default, Clone)]
 pub struct Solved {
-    /// Direct download URL captured from the webview, when the solve produced
-    /// one (download interception or direct-file navigation).
     pub url: Option<String>,
     pub file_name: Option<String>,
-    /// `Cookie` header value covering the session (includes HttpOnly cookies
-    /// such as `cf_clearance`), scoped to the solved URL.
     pub cookie_header: Option<String>,
-    /// Exact navigator.userAgent of the solver webview. Replay requests must
-    /// send the same UA or Cloudflare rejects the clearance.
     pub user_agent: Option<String>,
 }
 
@@ -92,8 +50,6 @@ impl Solved {
 struct Shared {
     captured: Mutex<Option<(String, Option<String>)>>,
     cancelled: Mutex<bool>,
-    /// Latest document.title of the solver webview, delivered by the
-    /// platform-level title-changed signal (works for remote origins).
     title: Mutex<Option<String>>,
 }
 
@@ -121,8 +77,6 @@ impl Shared {
 
 static ACTIVE: Mutex<Option<Arc<Shared>>> = Mutex::new(None);
 
-/// Serializes solver sessions per host: two different hosts solve in
-/// parallel, repeated requests for the same host queue behind the active one.
 static HOST_SLOTS: LazyLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
@@ -147,8 +101,6 @@ fn emit_status(app: &AppHandle, state: &str, host: &str, reason: Option<&str>) {
     .ok();
 }
 
-/// A clearance solved earlier for this host that is still fresh. Callers use
-/// it to replay their native resolution without opening any window.
 pub fn cached_clearance(host: &str) -> Option<(String, Option<String>)> {
     let cache = CLEARANCE_CACHE.lock();
     let entry = cache.get(host)?;
@@ -169,8 +121,6 @@ fn cache_clearance(host: &str, cookie_header: String, user_agent: Option<String>
     );
 }
 
-/// Ask the active session to stop (renderer cancel button, solver window
-/// closed by the user, app shutdown).
 pub fn request_cancel(app: &AppHandle) {
     if let Some(shared) = ACTIVE.lock().clone() {
         shared.cancel();
@@ -180,35 +130,19 @@ pub fn request_cancel(app: &AppHandle) {
     }
 }
 
-/// The solver window was closed natively (user dismissed the challenge);
-/// flag the active session cancelled without touching the closing window.
 pub fn note_window_closed() {
     if let Some(shared) = ACTIVE.lock().clone() {
         shared.cancel();
     }
 }
 
-// ---------------------------------------------------------------------------
-// Probe channel
-//
-// The solver webview navigates to the remote page, so no Tauri IPC exists
-// there. Progress is read back through document.title: the host evaluates a
-// probe script (eval works on any origin) and the page answers by encoding a
-// JSON payload into its own title behind PROBE_MARK. Title reads are cheap
-// and cross-origin safe on all three platforms.
-// ---------------------------------------------------------------------------
 
 fn probe_js() -> String {
     probe_js_with(true)
 }
 
-/// `with_t=false` drops the widget detection from the payload: the
-/// initialization script variant fires on every navigation and must not
-/// reset the interactive-timer state each time.
 fn probe_js_with(with_t: bool) -> String {
     let t_field = if with_t {
-        // k: length of the solved Turnstile token, if the widget has produced
-        // one; x/y/w/h: bounding box of the widget for synthetic clicks.
         ",t:!!document.querySelector('iframe[src*=\"challenges.cloudflare.com\"],iframe[src*=\"turnstile\"],.cf-turnstile,#challenge-form,#challenge-error-text,.g-recaptcha'),k:(function(){var e=document.querySelector('textarea[name=cf-turnstile-response]');return e?e.value.length:0})(),g:(function(){var e=document.querySelector('.cf-turnstile');if(!e)return null;var r=e.getBoundingClientRect();return [Math.round(r.x+r.width/2),Math.round(r.y+r.height/2),Math.round(r.width),Math.round(r.height)]})(),n:(function(){var t=document.body?document.body.innerText.slice(0,6000):'';return /file not found|has been removed|no longer available|link (has )?expired|invalid file|was deleted/i.test(t)})()"
     } else {
         ""
@@ -218,8 +152,6 @@ fn probe_js_with(with_t: bool) -> String {
     )
 }
 
-/// Click the page's own primary download action, if one is visible. Only
-/// ever fired after a clearance pass, so challenge pages are never touched.
 fn auto_click_js() -> String {
     r#"(function(){try{var c=document.querySelectorAll('button,a,[role=button]');for(var i=0;i<c.length;i++){var t=(c[i].textContent||'').trim().toLowerCase();if(/^(start download|download|free download|generate direct link|generate link|get link|create download link)$/.test(t)){c[i].click();return;}}}catch(e){}})()"#
         .to_string()
@@ -259,9 +191,6 @@ fn probe_fresh(probe: &Probe) -> bool {
     probe.e > 0 && now_ms() - probe.e <= PROBE_FRESHNESS_MS
 }
 
-// ---------------------------------------------------------------------------
-// Success classification
-// ---------------------------------------------------------------------------
 
 static FILE_EXT_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"(?i)\.(zip|rar|7z|001|iso|exe|bin|tar|gz|xz|zst|apk)([?#]|$)").unwrap()
@@ -270,8 +199,6 @@ static FILE_EXT_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
 static PAGE_HINT_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(?i)\.(html?|php|aspx?|jsp)([?#]|$)").unwrap());
 
-/// Top-level navigations to something that smells like an archive/installer
-/// are treated as a solved download rather than followed.
 fn looks_like_direct_file(url: &str) -> bool {
     let path = url.split(['?', '#']).next().unwrap_or(url);
     FILE_EXT_RE.is_match(path) && !PAGE_HINT_RE.is_match(path)
@@ -302,9 +229,6 @@ fn clearance_cookie(cookies: &[tauri::webview::Cookie<'static>]) -> bool {
     cookies.iter().any(|c| c.name() == "cf_clearance")
 }
 
-// ---------------------------------------------------------------------------
-// Escalation policy
-// ---------------------------------------------------------------------------
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Escalation {
@@ -312,9 +236,6 @@ pub enum Escalation {
     Show,
 }
 
-/// Pure decision for the hidden -> visible transition: escalate once an
-/// interactive widget has persisted past its grace period, or once the
-/// unattended budget is spent. Never escalates twice.
 pub fn escalation_action(
     escalated: bool,
     elapsed_ms: u128,
@@ -334,12 +255,7 @@ pub fn escalation_action(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Session driver
-// ---------------------------------------------------------------------------
 
-/// Solve `page_url` in the solver webview. Serialized globally; concurrent
-/// callers queue until the active session finishes.
 pub async fn solve(app: &AppHandle, page_url: &str) -> Result<Solved, String> {
     let (parsed, host) = parse_solve_url(page_url)?;
 
@@ -353,7 +269,6 @@ pub async fn solve(app: &AppHandle, page_url: &str) -> Result<Solved, String> {
 
     let slot = acquire_slot(&host).await?;
 
-    // Another queued caller may have refreshed the cache while we waited.
     if let Some((cookie_header, user_agent)) = cached_clearance(&host) {
         drop(slot);
         return Ok(Solved {
@@ -400,10 +315,8 @@ async fn acquire_slot(host: &str) -> Result<tokio::sync::OwnedMutexGuard<()>, St
 }
 
 async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, String> {
-    // Diagnostics overrides.
     let trace = std::env::var("UNION_SOLVER_TRACE").is_ok();
     let start_visible = std::env::var("UNION_SOLVER_VISIBLE").is_ok();
-    // A crashed previous session can leave the window behind; start clean.
     if let Some(window) = app.get_webview_window(WINDOW_LABEL) {
         window.destroy().ok();
     }
@@ -429,14 +342,9 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
             .visible(start_visible)
             .focused(false)
             .decorations(true)
-            // The probe channel's receive side: document title changes arrive
-            // through this platform signal no matter which origin the page
-            // is on (the remote page itself has no IPC access).
             .on_document_title_changed(move |_webview, title| {
                 title_shared.set_title(title);
             })
-            // Never let the webview save files: intercepted downloads become the
-            // resolved URL for aria2 instead.
             .on_download(move |_webview, event| {
                 if let DownloadEvent::Requested { url, destination } = event {
                     let name = destination
@@ -448,9 +356,6 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
                 false
             })
             .on_navigation(move |url| {
-                // The target page itself may end in a file-looking extension
-                // (datanodes.to/<code>/name.zip is a viewer page); only
-                // navigations away from it count as captures.
                 if url.as_str().trim_end_matches('/') == nav_page_url.trim_end_matches('/') {
                     return true;
                 }
@@ -461,14 +366,8 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
                 }
                 true
             })
-            // Runs at document start of every navigation (any origin), so the
-            // user agent is reported even when a challenge passes before the
-            // first eval probe lands.
             .initialization_script(probe_js_with(false));
 
-    // WebView2 throttles timers of occluded windows and Cloudflare treats
-    // visibility as a bot signal, so keep the hidden window treated as
-    // visible. These args replace wry's defaults, hence the repeated flags.
     #[cfg(windows)]
     let builder = builder.additional_browser_args(
         "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion",
@@ -492,14 +391,9 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
     let mut escalated = false;
     let mut interactive_since: Option<Instant> = None;
     let mut user_agent: Option<String> = None;
-    // Set when cf_clearance appears; the session then stays alive for the
-    // post-clearance grace so the page's own download flow can be captured.
     let mut clearance_at: Option<Instant> = None;
     let mut last_not_found = false;
 
-    // Ingest any title payload delivered since the last tick (the
-    // initialization script reports on every navigation, the eval probe on
-    // every tick). Standalone fns: closures would tangle the mutable borrows.
     fn ingest_title(
         trace: bool,
         started: Instant,
@@ -534,8 +428,6 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
         }
     }
 
-    // Last-chance UA fetch for sessions that finish before any probe
-    // payload arrived: aria2 replay needs the exact webview UA.
     async fn grab_user_agent(
         window: &tauri::WebviewWindow,
         shared: &Shared,
@@ -581,13 +473,10 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
             &mut last_not_found,
         );
 
-        // Genuinely dead pages announce themselves; fail fast before any
-        // escalation so dead links never pop a window.
         if last_not_found && clearance_at.is_none() && started.elapsed().as_millis() > 5_000 {
             break Err("link appears dead or expired".to_string());
         }
 
-        // 1. A captured download wins immediately.
         if let Some((url, name)) = shared.take_captured() {
             if trace {
                 println!(
@@ -612,9 +501,6 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
             });
         }
 
-        // 2. Clearance cookie appeared: the managed challenge passed. Do not
-        // finish yet — the page may still need to run its own countdown and
-        // fire the download; wait for a capture or the grace to expire.
         let cookies = window
             .cookies_for_url(page_url.clone())
             .ok()
@@ -648,13 +534,10 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
             }
         }
 
-        // Success is checked before the budget so a solve completing on the
-        // final tick is not misreported as a timeout.
         if started.elapsed().as_millis() >= OVERALL_BUDGET_MS {
             break Err("verification did not complete in time".to_string());
         }
 
-        // 3. Probe the page state (best effort; stale payloads are skipped).
         if window.eval(probe_js().as_str()).is_ok() {
             tokio::time::sleep(Duration::from_millis(TICK_MS / 2)).await;
             ingest_title(
@@ -667,9 +550,6 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
             );
         }
 
-        // 3b. Nudge the page's own download button once the session is past
-        // its gate (clearance seen or window escalated): flows that finished
-        // their countdown/captcha then produce the capture.
         let nudging = clearance_at.is_some() || escalated;
         if nudging
             && started.elapsed().as_millis() / AUTO_CLICK_INTERVAL_MS
@@ -682,8 +562,6 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
             let _ = window.eval(auto_click_js().as_str());
         }
 
-        // 4. Hidden -> visible escalation. Once cleared, the page is already
-        // doing its own thing; popping the window would only disturb it.
         if clearance_at.is_none()
             && escalation_action(
                 escalated,
@@ -723,9 +601,6 @@ async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, Str
     outcome
 }
 
-// ---------------------------------------------------------------------------
-// Commands
-// ---------------------------------------------------------------------------
 
 #[tauri::command]
 pub async fn resolver_solve_start(app: AppHandle, url: String) -> Value {

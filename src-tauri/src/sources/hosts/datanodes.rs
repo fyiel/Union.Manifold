@@ -49,20 +49,12 @@ pub async fn resolve(url: &str) -> ResolveResult {
     resolve_with(url, &HashMap::new()).await
 }
 
-/// Resolve with extra headers from a solved webview session (Cookie/UA
-/// handoff). The current datanodes flow requires per-page `rand` and
-/// `dl_token` values that only exist on the session-rendered download page,
-/// so the page is fetched with the solved session first and the tokens are
-/// scraped from its `<download-countdown>` component.
 pub async fn resolve_with(url: &str, extra: &HashMap<String, String>) -> ResolveResult {
     let code = match file_code(url) {
         Some(c) => c,
         None => return not_resolvable(url, Some("datanodes link has no file code")),
     };
 
-    // Session page: carries the rand/dl_token pair for this file. Cookies
-    // ride in a jar (seeded with the solved session) so the ones the site
-    // sets during the redirect chain survive into the download POST.
     let host = "datanodes.to";
     let jar = Jar::default();
     for (key, value) in extra {
@@ -213,9 +205,6 @@ pub async fn resolve_with(url: &str, extra: &HashMap<String, String>) -> Resolve
     }
 }
 
-/// Feed a webview-solver outcome back into the native flow. Returns `Some`
-/// only when it produced a downloadable result; otherwise the caller keeps
-/// its original failure and continues down the fallback chain.
 pub async fn with_solved(url: &str, solved: crate::resolver::Solved) -> Option<ResolveResult> {
     if let Some(direct) = solved.url {
         return Some(ResolveResult {

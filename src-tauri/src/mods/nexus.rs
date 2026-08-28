@@ -428,9 +428,6 @@ async fn native_free_download(
     for (n, v) in &pairs {
         jar.set(WWW_HOST, n, v);
     }
-    // The pasted cookie stays authoritative for auth; the webview solver only
-    // contributes Cloudflare clearance and, when the user did not pin one,
-    // a matching user agent.
     let mut effective_ua = state
         .settings
         .get_string("nexusUserAgent")
@@ -444,7 +441,6 @@ async fn native_free_download(
         h
     };
 
-    // One webview pass clears the gate for every later request in this flow.
     let mut cleared = false;
     async fn clear_gate(
         app: &AppHandle,

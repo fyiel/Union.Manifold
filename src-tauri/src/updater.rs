@@ -78,9 +78,6 @@ async fn install_via_pacman(app: &AppHandle, new_version: &str) -> Result<(), St
         return Err("refusing to install: invalid version string".to_string());
     }
 
-    // Package names follow the build host arch (see build-arch-pkg.sh);
-    // releases currently only publish x86_64 packages, so on other arches
-    // the download fails with a clear http 404 and the manual-install hint.
     let arch = if cfg!(target_arch = "aarch64") {
         "aarch64"
     } else {

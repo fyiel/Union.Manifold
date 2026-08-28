@@ -25,9 +25,6 @@ export const GameCard = memo(function GameCard({
   return (
     <div
       className="mf-card"
-      // No content-visibility here: BrowsePage already JS-windows the grid,
-      // and stacking CSS c-v on top made its 300px estimate fight real layout
-      // (jitter as estimates get replaced during scroll/resize).
       style={{ display: "flex", flexDirection: "column", border: "1px solid color-mix(in srgb, var(--mf-t0) 7%, transparent)", borderRadius: 10, overflow: "hidden", background: "var(--mf-panel)" }}
     >
       <div style={{ position: "relative", aspectRatio: "3 / 4", background: hasImg ? "var(--mf-well)" : COVER_LINES }}>

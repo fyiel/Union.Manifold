@@ -1000,9 +1000,6 @@ pub async fn sources_resolve(
     option: schema::DownloadOption,
 ) -> Result<Value> {
     // Non-unioncrax sources resolve through hosts::resolve_url (with a
-    // webview-solver escalation for gated hosts, then a Slipgate fallback);
-    // multi-part mirrors resolve every part and merge the files so the
-    // renderer enqueues the whole set.
     let result = adapter_resolve_with(Some(&app), &source_id, &option).await;
     Ok(json!({ "ok": true, "result": result }))
 }

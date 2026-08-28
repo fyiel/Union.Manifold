@@ -11,13 +11,9 @@ say() { printf '\033[1m%s\033[0m\n' "$*"; }
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-# Verify a downloaded artifact against the sha256 checksum the release
-# publishes next to it (<artifact>.sha256). If no checksum file exists for
-# that asset, say so and skip verification rather than fail.
 verify_sha256() {
   local file="$1" url="$2" expected actual
   if curl -fsSL -o "$tmp/checksum" "$url.sha256" 2>/dev/null; then
-    # checksum files are "<hex>  <filename>" (or just "<hex>")
     expected=$(awk '{print $1}' "$tmp/checksum")
     actual=$(sha256sum "$file" | awk '{print $1}')
     if [ "$expected" != "$actual" ]; then
@@ -81,14 +77,10 @@ else
   curl -fL --progress-bar -o "$appimage" "$BASE/Union.Manifold_${ver}_amd64.AppImage"
   chmod +x "$appimage"
   verify_sha256 "$appimage" "$BASE/Union.Manifold_${ver}_amd64.AppImage"
-  # Ship the icon so the desktop entry has something spec-compliant to point at.
   icon="$HOME/.local/share/icons/hicolor/512x512/apps/union-manifold.png"
   if ! curl -fsSL --progress-bar -o "$icon" "$BASE/icon.png"; then
     rm -f "$icon"; icon=""
   fi
-  # Exec must be a single expanded path ($HOME already holds an absolute path,
-  # but expand it here explicitly so the entry stays valid even if the heredoc
-  # quoting changes later).
   cat > "$HOME/.local/share/applications/union-manifold.desktop" <<EOF
 [Desktop Entry]
 Name=Union.Manifold

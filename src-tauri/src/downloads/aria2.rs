@@ -114,8 +114,6 @@ impl Aria2Manager {
             "--enable-rpc".to_string(),
             "--rpc-listen-all=false".to_string(),
             format!("--rpc-listen-port={port}"),
-            // The RPC secret moves to the 0600 config file below so it is
-            // not readable from the process list.
             "--continue=true".to_string(),
             "--auto-file-renaming=false".to_string(),
             "--allow-overwrite=true".to_string(),
@@ -136,10 +134,6 @@ impl Aria2Manager {
         ];
         let proxy = self.proxy.lock().clone();
         let conf_path;
-        // The RPC secret (and proxy credentials, when set) must not be
-        // visible in the process list; aria2 reads them from this 0600
-        // config file instead. The file is parsed once at daemon startup
-        // and removed when the daemon stops.
         {
             let conf = std::env::temp_dir().join(format!(
                 "union-manifold-aria2-{}-{}.conf",

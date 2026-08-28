@@ -110,9 +110,6 @@ pub async fn resolve(url: &str) -> ResolveResult {
     resolve_with(url, &HashMap::new()).await
 }
 
-/// Resolve with extra headers from a solved webview session (Cookie/UA
-/// handoff). The solved cookies ride along on every request so the gate
-/// stays open for the whole timer + captcha flow.
 pub async fn resolve_with(url: &str, extra: &HashMap<String, String>) -> ResolveResult {
     let parsed = match url::Url::parse(url) {
         Ok(u) => u,
@@ -207,9 +204,6 @@ pub async fn resolve_with(url: &str, extra: &HashMap<String, String>) -> Resolve
     }
 }
 
-/// Feed a webview-solver outcome back into the native flow. Returns `Some`
-/// only when it produced a downloadable result; otherwise the caller keeps
-/// its original failure and continues down the fallback chain.
 pub async fn with_solved(url: &str, solved: crate::resolver::Solved) -> Option<ResolveResult> {
     if let Some(direct) = solved.url {
         return Some(ResolveResult {

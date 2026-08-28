@@ -138,8 +138,6 @@ pub fn is_resolvable(url: &str) -> bool {
         || datavaults::matches(url)
         || fileditch::matches(url)
         || filekeeper::matches(url)
-        // Gate hosts resolve in-app through the webview solver, so they no
-        // longer depend on a Slipgate URL being configured.
         || gate::matches(url)
 }
 
@@ -162,16 +160,10 @@ pub async fn resolve_url(option: &DownloadOption) -> ResolveResult {
     dispatch(None, option).await
 }
 
-/// Solver-aware path used by the renderer's resolve command: identical to
-/// `resolve_url`, except gated failures escalate to the in-app webview
-/// solver (hidden by default) before falling back to Slipgate or the browser.
 pub async fn resolve_url_via(app: &AppHandle, option: &DownloadOption) -> ResolveResult {
     dispatch(Some(app), option).await
 }
 
-/// Absolute direct-file link buried in a solved page's HTML. Best effort:
-/// only used after a verification pass, when the page is known to be past
-/// its gate.
 pub(crate) fn scan_direct_link(html: &str) -> Option<String> {
     static DIRECT_LINK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
         regex::Regex::new(
@@ -228,21 +220,12 @@ async fn dispatch(app: Option<&AppHandle>, option: &DownloadOption) -> ResolveRe
     }
 
     // datanodes/datavaults: when the native resolver hits a Cloudflare gate or
-    // interactive captcha, hand the page to the in-app webview solver first
-    // (hidden unless the challenge needs a click), then to Slipgate for
-    // unattended setups. Without either, fall through to the browser with the
-    // native reason.
     if let Some(r) = result {
         if r.resolvable {
             return r;
         }
 
         if let Some(app) = app {
-            // No link_is_dead pre-check here: gated hosts like datanodes
-            // redirect every visitor to /download, which 404s without a
-            // session, so status-based death checks misread live links as
-            // dead. The solver detects dead pages itself (probe payload's
-            // not-found signal) and fails fast without escalating.
             if let Ok(solved) = crate::resolver::solve(app, url).await {
                 let merged = match slipgate_host(url) {
                     Some("datanodes") => datanodes::with_solved(url, solved).await,

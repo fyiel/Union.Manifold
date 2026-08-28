@@ -10,9 +10,6 @@ use tauri::{AppHandle, Manager, State};
 use crate::downloads::{now_ms, MANIFEST_NAME};
 use crate::state::AppState;
 
-/// Statuses that count as "present in the library". A game whose install
-/// manifest is corrupt is surfaced with the synthetic `broken` status
-/// instead of silently vanishing from Library/Browse-installed views.
 const INSTALLED: &[&str] = &["installed", "broken"];
 const INSTALLING: &[&str] = &[
     "installing",
@@ -120,11 +117,6 @@ pub(crate) fn invalidate_scan() {
 }
 
 /// Raw per-root manifest scan: every directory under `root` that parses as
-/// JSON with an `appid` field. A directory whose manifest exists but fails
-/// to parse is kept as a synthetic "broken" entry (appid derived from the
-/// folder name) so the game stays visible instead of silently vanishing.
-/// Uncached — callers that need fresh state (right after a manifest write)
-/// must use this, not `load_all_cached`.
 pub(crate) fn scan_root_manifests(root: &std::path::Path) -> Vec<(PathBuf, Value)> {
     let mut out = Vec::new();
     let entries = match std::fs::read_dir(root) {
@@ -151,12 +143,6 @@ pub(crate) fn scan_root_manifests(root: &std::path::Path) -> Vec<(PathBuf, Value
     out
 }
 
-/// Synthetic manifest for a game dir whose install manifest exists but is
-/// unreadable/corrupt. The appid falls back to the folder name — the same
-/// value `safe_folder_name` derives from the game title at install time —
-/// so the entry remains addressable (delete, repair) without a valid file.
-/// TODO: surface a repair hint via repair.rs once a manifest-repair flow
-/// exists there (it currently only repairs Online-Fix installs).
 fn broken_manifest_entry(dir: &std::path::Path) -> Value {
     let appid = dir
         .file_name()
@@ -178,8 +164,6 @@ fn load_all(roots: &[PathBuf]) -> Vec<(PathBuf, Value)> {
     for root in roots {
         for (dir, mut v) in scan_root_manifests(root) {
             if let Some(obj) = v.as_object_mut() {
-                // Broken entries keep their synthetic status; real manifests
-                // without one default to installed.
                 if !obj.contains_key("installStatus") && obj.contains_key("appid") {
                     obj.insert("installStatus".into(), json!("installed"));
                 }
@@ -315,9 +299,6 @@ pub(crate) fn merge_manifest_updates(manifest: &mut serde_json::Map<String, Valu
 pub(crate) fn merge_into_manifest(roots: &[PathBuf], appid: &str, updates: &Value) -> bool {
     if let Some(dir) = find_dir(roots, appid) {
         let manifest_path = dir.join(MANIFEST_NAME);
-        // A corrupt manifest must never be silently replaced by a merge:
-        // abort so the broken entry keeps surfacing the problem instead of
-        // being overwritten with only the patch fields.
         let Some(mut manifest) = std::fs::read_to_string(&manifest_path)
             .ok()
             .and_then(|t| serde_json::from_str::<Value>(&t).ok())
@@ -393,8 +374,6 @@ pub fn installed_save(state: State<'_, AppState>, appid: String, metadata: Value
     if merge_into_manifest(&roots, &appid, &json!({ "metadata": metadata })) {
         return json!({ "ok": true });
     }
-    // Don't recreate a manifest over a corrupt one — the broken entry must
-    // keep surfacing the problem instead of being silently replaced.
     if find_dir(&roots, &appid).is_some() {
         return json!({ "ok": false, "error": "install manifest is corrupt; delete and reinstall this game" });
     }
@@ -769,7 +748,6 @@ mod tests {
         assert_eq!(listed[0]["folder"], json!(dir.to_string_lossy()));
         assert_eq!(listed[0]["installPath"], json!(dir.to_string_lossy()));
 
-        // Still addressable so delete/repair flows can act on it.
         assert_eq!(find_dir(&roots, "portal-2"), Some(dir));
         assert_eq!(all_appids(&roots), vec!["portal-2".to_string()]);
     }

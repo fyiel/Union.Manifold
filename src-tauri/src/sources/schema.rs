@@ -234,8 +234,6 @@ pub fn to_epoch_ms(s: &str) -> Option<i64> {
     if let Ok(dt) = chrono::DateTime::parse_from_rfc2822(s) {
         return Some(dt.timestamp_millis());
     }
-    // Space-separated datetimes must keep their time of day; the date-only
-    // loop below would silently truncate them to midnight.
     if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
         return Some(dt.and_utc().timestamp_millis());
     }

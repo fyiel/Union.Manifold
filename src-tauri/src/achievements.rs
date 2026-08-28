@@ -480,7 +480,6 @@ fn build_toast_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     #[cfg(not(target_os = "macos"))]
     let builder = builder.transparent(true);
     let window = builder.build()?;
-    crate::enable_smooth_scrolling(&window);
     Ok(window)
 }
 

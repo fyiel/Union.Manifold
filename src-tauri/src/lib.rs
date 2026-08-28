@@ -105,17 +105,6 @@ fn install_panic_hook() {
     }));
 }
 
-// WebKitGTK wheel scrolling is discrete by default: each notch is one jump,
-// which reads as "chunky". The JS shim in renderer/src/lib/wheel-smooth.ts
-// (gated to Linux in main.tsx) converts ticks into an animated glide, so the
-// native enable-smooth-scrolling flag stays OFF — enabling both made them
-// fight each other (double-applied deltas, stutter during resizes).
-#[cfg(target_os = "linux")]
-pub(crate) fn enable_smooth_scrolling(_window: &tauri::WebviewWindow) {}
-
-#[cfg(not(target_os = "linux"))]
-pub(crate) fn enable_smooth_scrolling(_window: &tauri::WebviewWindow) {}
-
 pub fn run() {
     install_panic_hook();
     tauri::Builder::default()
@@ -226,9 +215,6 @@ pub fn run() {
                 sources::warm_hydralinks(hydra_handle).await;
             });
             build_tray(app)?;
-            if let Some(window) = app.get_webview_window("main") {
-                enable_smooth_scrolling(&window);
-            }
             {
                 let state: tauri::State<AppState> = app.state();
                 let start_minimized = state
@@ -274,14 +260,6 @@ pub fn run() {
                         }
                     }
                 });
-            }
-            #[cfg(target_os = "linux")]
-            if let Some(main) = app.get_webview_window("main") {
-                // No native set_enable_smooth_scrolling here: the renderer's
-                // wheel shim (wheel-smooth.ts, Linux-gated in main.tsx) owns
-                // smoothing; enabling the WebKitGTK flag on top made both
-                // animate the same deltas and fight each other.
-                let _ = main;
             }
 
             Ok(())
@@ -421,8 +399,6 @@ pub fn run() {
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
-                // The solver window closing (user dismissed the challenge)
-                // cancels the active solve; the poll loop notices and unwinds.
                 if window.label() == "resolver" {
                     resolver::note_window_closed();
                     return;

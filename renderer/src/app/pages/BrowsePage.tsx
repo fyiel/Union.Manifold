@@ -11,11 +11,6 @@ const PAGE = 48
 const MEMORY_REFRESH_MS = 90_000
 type ZoomedCover = { game: UnifiedSourceGame; candidates: string[] }
 
-// Mirrors the grid CSS below: repeat(auto-fill, minmax(168px, 1fr)) with an
-// 18px gap. An n-column layout fits iff n*168 + (n-1)*18 <= width, i.e.
-// n <= (width + 18) / 186 — keeping this arithmetic in one place (instead of
-// reading getComputedStyle().gridTemplateColumns) avoids forced layouts and
-// stays in lockstep with the stylesheet.
 export function browseColsForWidth(gridWidth: number): number {
   if (!Number.isFinite(gridWidth) || gridWidth <= 0) return 1
   return Math.max(1, Math.floor((gridWidth + 18) / 186))
@@ -63,11 +58,6 @@ export function BrowsePage() {
   const [cols, setCols] = useState(1)
   const [rowH, setRowH] = useState(350)
   const gridRef = useRef<HTMLDivElement | null>(null)
-  // One rAF-coalesced geometry pass for both scroller and grid. The
-  // ResizeObserver watches the scroller only: the grid box changes height on
-  // every windowing pad update, so observing it re-measured (with forced
-  // layout) on nearly every scroll frame. Width-only filtering keeps pure
-  // height changes of the scroller from churning cols/rowH during resizes.
   const measure = useCallback(() => {
     const el = scrollerRef.current
     if (!el) return
@@ -87,7 +77,6 @@ export function BrowsePage() {
     if (!el || typeof ResizeObserver === "undefined") return
     let raf: number | null = null
     const ro = new ResizeObserver((entries) => {
-      // Only width changes affect column count; height churn is noise.
       const widthChanged = entries.some((entry) => entry.contentRect.width !== lastScrollerWidth)
       if (!widthChanged) return
       lastScrollerWidth = entries[entries.length - 1].contentRect.width
@@ -111,9 +100,6 @@ export function BrowsePage() {
   }, [])
 
   const hasGames = games.length > 0
-  // Restore a cached scrollTop once per mount. A single rAF is enough now that
-  // geometry derives from scrollTop at event time; the old double rAF raced
-  // concurrent resizes and briefly computed endRow from a stale clientH.
   useEffect(() => {
     if (!restoreScroll.current) return
     const top = restoreScroll.current
@@ -122,10 +108,6 @@ export function BrowsePage() {
       if (scrollerRef.current) scrollerRef.current.scrollTop = top
     })
   }, [])
-  // Re-measure card height when the grid first paints (cards render after the
-  // scroller exists) and whenever the column count changes, since row height
-  // depends on card width. No observer on the grid itself: its box changes on
-  // every windowing pad update, which would re-measure per scroll frame.
   useEffect(() => {
     if (!hasGames) return
     measure()
@@ -358,9 +340,6 @@ export function BrowsePage() {
   const resultSummary = searching ? `${games.length} so far…` : `${games.length}${hasMore ? "+" : ""} titles · ${mirrors} mirrors`
   const sortLabel = sortModeLabel(sortMode, hasQuery)
 
-  // Scroll events fire per frame; coalesce the state update into one rAF so a
-  // burst of events (wheel shim, resize, momentum) re-renders at most once
-  // per frame instead of once per event.
   const scrollRaf = useRef<number | null>(null)
   const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget
@@ -489,8 +468,6 @@ export function BrowsePage() {
       </header>
 
       {}
-      {/* overflow-anchor:none keeps the browser from pinning to a card while
-          windowing pads resize, which would fight the JS virtualization. */}
       <div ref={scrollerRef} className="mf-scroll" onScroll={onScroll} style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowAnchor: "none", padding: "22px 36px 40px" }}>
         {(sourcesErrored || sourceError) && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)" }}>

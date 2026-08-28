@@ -242,15 +242,6 @@ jobs:
             changes="_Maintenance release: bug fixes and improvements._"
           fi
 
-          # Release page presentation. GitHub sorts release assets
-          # alphabetically and offers no way to reorder or pin them, and every
-          # asset name is frozen anyway: latest.json (referenced by
-          # src-tauri/tauri.conf.json) plus the per-platform manifest entries
-          # below point at exact filenames, so renaming anything to improve
-          # ordering would break auto-updates. Instead we keep the page clean
-          # by putting the user-facing downloads front and center in the notes
-          # body and folding everything else into a collapsed <details> block,
-          # which GitHub renders folded on release pages.
           asset_base="https://github.com/${{ github.repository }}/releases/download/$TAG"
           {
             printf 'Union.Manifold %s is ready! If the app is already installed, just restart it and accept the update prompt — otherwise grab the download for your operating system below.\n\n' "$VERSION"
@@ -290,9 +281,6 @@ jobs:
             printf '\n---\n\n## What changed in %s\n\n' "$VERSION"
             printf '%s\n' "$changes"
           } >> notes.md
-          # Plain-markdown copy for the updater manifest: the updater dialog
-          # renders notes as plain text, where the <details> HTML above would
-          # show up as literal markup.
           {
             printf 'Union.Manifold %s — see the release page for downloads.\n\n%s\n' \
               "$VERSION" "$changes"
@@ -302,21 +290,10 @@ jobs:
           # signature files: the matrix jobs' own latest.json uploads race
           # read-modify-write on the same asset, so a losing job's platform
           # silently drops out of the manifest.
-          #
-          # tauri-plugin-updater reads a single latest.json whose "platforms"
-          # map may contain any subset of platform keys, so we generate the
-          # manifest PER-PLATFORM: each platform that actually has a .sig file
-          # on the release gets an entry; platforms with a missing/flaky sig
-          # are skipped individually (with an ::error:: annotation so the
-          # failure is loud in CI) instead of dropping auto-update for every
-          # OS. The manifest only fails entirely when no signature at all
-          # could be collected.
           sigs=$(mktemp -d)
           gh release download "$TAG" --pattern "*.sig" --dir "$sigs" --clobber || true
           dl="https://github.com/${{ github.repository }}/releases/latest/download"
           missing=0
-          # One JSON object per present platform is appended to this file;
-          # they get merged into the final "platforms" map below.
           entries=$(mktemp)
           add_entry() {
             local key="$1" sig_name="$2" asset="$3"
@@ -329,8 +306,6 @@ jobs:
               missing=$((missing + 1))
             fi
           }
-          # Each logical updater platform plus its tauri target alias share one
-          # signature file, so emit both keys per signature.
           for spec in \
             "linux-x86_64|Union.Manifold_${VERSION}_amd64.AppImage.sig|Union.Manifold_${VERSION}_amd64.AppImage" \
             "linux-x86_64-appimage|Union.Manifold_${VERSION}_amd64.AppImage.sig|Union.Manifold_${VERSION}_amd64.AppImage" \

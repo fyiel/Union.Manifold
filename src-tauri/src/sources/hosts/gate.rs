@@ -58,9 +58,6 @@ pub async fn resolve(url: &str) -> ResolveResult {
     resolve_inner(url, None).await
 }
 
-/// Slipgate first (its recipes parse these pages unattended), then the
-/// in-app webview solver for setups without a Slipgate URL or when the
-/// recipe fails.
 pub async fn resolve_via(app: &AppHandle, url: &str) -> ResolveResult {
     resolve_inner(url, Some(app)).await
 }
@@ -112,8 +109,6 @@ async fn resolve_inner(url: &str, app: Option<&AppHandle>) -> ResolveResult {
                     ..Default::default()
                 };
             }
-            // Clearance without a captured download: replay the page once
-            // with the solved session and look for an exposed direct link.
             if let Ok(resp) = crate::http::fetch(
                 url,
                 &crate::http::FetchOpts {
