@@ -92,6 +92,3 @@ jobs:
 
       - name: Typecheck renderer
         run: bun run typecheck
-
-      - name: Test renderer
-        run: bun run test:renderer

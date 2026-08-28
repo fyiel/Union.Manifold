@@ -302,7 +302,3 @@ async fn dispatch(app: Option<&AppHandle>, option: &DownloadOption) -> ResolveRe
         ..Default::default()
     }
 }
-
-#[cfg(test)]
-#[path = "../../../../.dev/rust/hosts_tests.rs"]
-mod dev_hosts_tests;

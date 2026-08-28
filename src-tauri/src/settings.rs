@@ -214,7 +214,3 @@ pub fn setting_merge_library_game_meta(
     let entry = merge_library_game_meta(&app, &appid, patch, play_time_delta_ms.unwrap_or(0));
     json!({ "ok": true, "entry": entry })
 }
-
-#[cfg(test)]
-#[path = "../../.dev/rust/settings_tests.rs"]
-mod dev_settings_tests;

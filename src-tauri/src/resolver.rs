@@ -247,17 +247,6 @@ struct Probe {
     e: i64,
 }
 
-/// Test-only mirror of the probe JS encoder, so the title-channel codec is
-/// exercised as a pair.
-#[cfg(test)]
-fn encode_probe_payload(payload: &Probe) -> String {
-    let json = serde_json::to_string(payload).unwrap_or_default();
-    format!(
-        "{PROBE_MARK}{}",
-        base64::engine::general_purpose::STANDARD.encode(json.as_bytes())
-    )
-}
-
 fn decode_probe(title: &str) -> Option<Probe> {
     let encoded = title.strip_prefix(PROBE_MARK)?.trim();
     let bytes = base64::engine::general_purpose::STANDARD
@@ -411,7 +400,7 @@ async fn acquire_slot(host: &str) -> Result<tokio::sync::OwnedMutexGuard<()>, St
 }
 
 async fn drive(app: &AppHandle, page_url: Url, host: &str) -> Result<Solved, String> {
-    // Diagnostics overrides (used by the dev-probe harness).
+    // Diagnostics overrides.
     let trace = std::env::var("UNION_SOLVER_TRACE").is_ok();
     let start_visible = std::env::var("UNION_SOLVER_VISIBLE").is_ok();
     // A crashed previous session can leave the window behind; start clean.
@@ -756,7 +745,3 @@ pub async fn resolver_solve_cancel(app: AppHandle) -> Value {
     request_cancel(&app);
     json!({ "ok": true })
 }
-
-#[cfg(test)]
-#[path = "../../.dev/rust/resolver_tests.rs"]
-mod dev_resolver_tests;

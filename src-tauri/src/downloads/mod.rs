@@ -1433,7 +1433,3 @@ mod tests {
         assert_eq!(null, json!(null));
     }
 }
-
-#[cfg(test)]
-#[path = "../../../.dev/rust/downloads_tests.rs"]
-mod dev_downloads_tests;

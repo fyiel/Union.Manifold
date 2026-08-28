@@ -159,28 +159,6 @@ pub(crate) fn browse_url(
     )
 }
 
-/// First item id on a title's public workshop listing; used by the probe
-/// harness to pick a real download target at runtime.
-#[cfg(feature = "dev-probes")]
-pub(crate) async fn first_workshop_item(steam_appid: u64) -> Option<String> {
-    let url = browse_url(steam_appid, "textsearch", None, 1, "");
-    let html = http::get_text(&url).await.ok()?;
-    if html.contains(r#"class="workshopItem""#) {
-        let items = parse_browse(&html);
-        return items
-            .first()
-            .and_then(|i| i.get("remoteId"))
-            .and_then(|v| v.as_str())
-            .map(String::from);
-    }
-    let items = parse_browse_new(&html);
-    items
-        .first()
-        .and_then(|i| i.get("remoteId"))
-        .and_then(|v| v.as_str())
-        .map(String::from)
-}
-
 #[tauri::command]
 pub async fn workshop_browse(
     steam_appid: u64,

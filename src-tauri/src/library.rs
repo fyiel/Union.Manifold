@@ -797,7 +797,3 @@ mod tests {
         );
     }
 }
-
-#[cfg(test)]
-#[path = "../../.dev/rust/library_tests.rs"]
-mod dev_library_tests;

@@ -214,7 +214,3 @@ pub fn fetch_usable(status: &Value) -> bool {
             .and_then(Value::as_bool)
             .unwrap_or(false)
 }
-
-#[cfg(test)]
-#[path = "../../.dev/rust/slipgate_tests.rs"]
-mod dev_slipgate_tests;

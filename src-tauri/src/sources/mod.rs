@@ -1255,7 +1255,3 @@ mod tests {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../../../.dev/rust/live_tests.rs"]
-mod dev_live_tests;

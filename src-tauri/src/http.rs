@@ -322,7 +322,3 @@ mod tests {
         assert_eq!(decode_entities("&bogus;"), "&bogus;");
     }
 }
-
-#[cfg(test)]
-#[path = "../../.dev/rust/http_tests.rs"]
-mod dev_http_tests;

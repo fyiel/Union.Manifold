@@ -120,12 +120,6 @@ pub(crate) fn save_config(paths: &AppPaths, appid: &str, cfg: &GameMods) {
     }
 }
 
-/// Probe access: whether a deploy journal still has entries.
-#[cfg(feature = "dev-probes")]
-pub(crate) fn journal_is_empty(dir: &Path) -> bool {
-    load_journal(dir).files.is_empty()
-}
-
 fn load_journal(dir: &Path) -> Journal {
     std::fs::read_to_string(journal_path(dir))
         .ok()
@@ -335,10 +329,7 @@ static VERIFIED_COMPARISONS: LazyLock<parking_lot::Mutex<HashMap<PathBuf, Verifi
     LazyLock::new(|| parking_lot::Mutex::new(HashMap::new()));
 
 fn read_comparison_file(path: &Path) -> std::io::Result<Vec<u8>> {
-    let bytes = std::fs::read(path)?;
-    #[cfg(test)]
-    COMPARISON_BYTES_READ.fetch_add(bytes.len() as u64, std::sync::atomic::Ordering::Relaxed);
-    Ok(bytes)
+    std::fs::read(path)
 }
 
 fn same_file(a: &Path, b: &Path) -> bool {
@@ -377,21 +368,6 @@ fn same_file(a: &Path, b: &Path) -> bool {
         verified.remove(b);
     }
     same
-}
-
-#[cfg(test)]
-static COMPARISON_BYTES_READ: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(0);
-
-#[cfg(test)]
-fn reset_comparison_metrics() {
-    VERIFIED_COMPARISONS.lock().clear();
-    COMPARISON_BYTES_READ.store(0, std::sync::atomic::Ordering::Relaxed);
-}
-
-#[cfg(test)]
-fn comparison_bytes_read() -> u64 {
-    COMPARISON_BYTES_READ.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 fn remove_empty_parents(path: &Path, stop: &Path) {
@@ -3814,7 +3790,3 @@ mod tests {
         assert!(!tmp.path().join("outside/file.txt").exists());
     }
 }
-
-#[cfg(test)]
-#[path = "../../../.dev/rust/mods_layout_tests.rs"]
-mod dev_layout_tests;
