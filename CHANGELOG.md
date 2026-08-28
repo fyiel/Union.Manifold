@@ -42,11 +42,9 @@ All notable changes to Union.Manifold. This project is a fork of
   progress, so a reinstalled or re-imported game starts with a clean
   achievements state instead of resurrecting unlocks from the deleted entry.
 
-- Browse scroll windowing and wheel smoothing work again. The
-  scroll-window virtualization and the inertial wheel handler had drifted
-  out of sync with the live grid, producing misaligned rows and jerky
-  scrolling; the window geometry and wheel velocity handling are repaired
-  and the native WebKitGTK smoothing path is wired back up.
+- Browse scroll windowing works again. The scroll-window virtualization had
+  drifted out of sync with the live grid, producing misaligned rows; the
+  window geometry is repaired.
 
 - Game cards and library menu rows are keyboard accessible: focus lands
   on the card itself and menu rows activate with Enter and Space instead
@@ -78,6 +76,25 @@ All notable changes to Union.Manifold. This project is a fork of
 - Timers started by the downloads, settings, and source game pages are
   cleared when the page unmounts, so status updates no longer fire into
   unmounted pages after navigation.
+
+- The in-app gate solver is harder to trip up: hosts that reject
+  referer-less visits (megadb) now solve fully on their own after a
+  same-origin re-navigation, hidden decoy buttons no longer swallow the
+  download click, and a harvested Cloudflare clearance no longer keeps the
+  window hidden when an interactive challenge still needs a human click.
+
+- GameBounty works again after the site moved its API to a v1 namespace on
+  the main domain, and ZeiGames search works again after the forum's result
+  markup changed.
+
+- Fileditch links resolve again: the site now hands out signed
+  goonditch.com URLs with exp/sig parameters alongside the classic
+  md5/expires form, and both are accepted.
+
+- Downloads no longer die at the first second on networks whose DNS
+  forwarder refuses aria2's async lookups: hostnames now resolve through
+  the operating system's resolver, which also honors /etc/hosts and local
+  name services.
 
 - Download rows no longer carry statuses the queue can never produce
   again; the renderer only recognizes statuses the backend actually
