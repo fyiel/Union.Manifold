@@ -129,6 +129,7 @@ impl Aria2Manager {
             "--connect-timeout=30".to_string(),
             "--timeout=60".to_string(),
             "--disable-ipv6=true".to_string(),
+            "--async-dns=false".to_string(),
             format!("--stop-with-process={}", std::process::id()),
             format!("--max-overall-download-limit={}", limit_arg(limit_kbps)),
         ];
