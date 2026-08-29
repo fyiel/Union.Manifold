@@ -3,6 +3,16 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.7.1
+
+### Fixed
+
+- Downloads work again on Windows: the aria2 build bundled for Windows
+  rejects the async-DNS flag introduced in 3.7.0 and refused to start at
+  all, so every download failed with a misleading "aria2 unavailable"
+  message. The system-resolver flag now applies only on Linux, where it is
+  both needed and supported.
+
 ## 3.7.0
 
 ### Added
