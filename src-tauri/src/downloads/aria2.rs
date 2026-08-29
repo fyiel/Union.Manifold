@@ -114,7 +114,6 @@ impl Aria2Manager {
             "--enable-rpc".to_string(),
             "--rpc-listen-all=false".to_string(),
             format!("--rpc-listen-port={port}"),
-            format!("--rpc-secret={}", self.secret),
             "--continue=true".to_string(),
             "--auto-file-renaming=false".to_string(),
             "--allow-overwrite=true".to_string(),
@@ -130,25 +129,26 @@ impl Aria2Manager {
             "--connect-timeout=30".to_string(),
             "--timeout=60".to_string(),
             "--disable-ipv6=true".to_string(),
+            "--async-dns=false".to_string(),
             format!("--stop-with-process={}", std::process::id()),
             format!("--max-overall-download-limit={}", limit_arg(limit_kbps)),
         ];
         let proxy = self.proxy.lock().clone();
-        let mut conf_path: Option<PathBuf> = None;
-        if let Some(p) = proxy {
-            // Credentials embedded in the proxy URL must not be visible in
-            // the process list; aria2 reads them from a 0600 config file
-            // instead. The file is parsed once at daemon startup and removed
-            // when the daemon stops.
+        let conf_path;
+        {
             let conf = std::env::temp_dir().join(format!(
                 "union-manifold-aria2-{}-{}.conf",
                 std::process::id(),
                 port
             ));
-            if std::fs::write(&conf, format!("all-proxy={p}\n")).is_err() {
+            let mut conf_body = format!("rpc-secret={}\n", self.secret);
+            if let Some(p) = &proxy {
+                conf_body.push_str(&format!("all-proxy={p}\n"));
+            }
+            if std::fs::write(&conf, conf_body).is_err() {
                 crate::logging::write_line(
                     "warn",
-                    "aria2 proxy config could not be written; refusing to start with proxy on argv",
+                    "aria2 config could not be written; refusing to start with secrets on argv",
                 );
                 return false;
             }

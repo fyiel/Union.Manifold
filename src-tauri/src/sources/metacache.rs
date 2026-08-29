@@ -111,7 +111,3 @@ impl<V: Clone + Serialize + DeserializeOwned + Send + Sync> Flush for WriteBehin
         save(self.name, &snapshot);
     }
 }
-
-#[cfg(test)]
-#[path = "../../../.dev/rust/metacache_tests.rs"]
-mod dev_metacache_tests;

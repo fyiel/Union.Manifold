@@ -116,10 +116,10 @@ export function GameMenu({ game, anchor, handlers, onClose }: { game: MenuGame; 
 
 function MenuRow({ icon: Icon, label, onClick, danger, iconColor }: { icon: typeof Play; label: string; onClick: () => void; danger?: boolean; iconColor?: string }) {
   return (
-    <div onClick={onClick} className={danger ? "mfrow mfrow-danger" : "mfrow"} style={{ display: "flex", alignItems: "center", gap: 11, padding: "7px 10px", borderRadius: 8, fontSize: 13, color: danger ? "var(--destructive)" : "var(--mf-t2)", cursor: "pointer" }}>
+    <button type="button" onClick={onClick} className={danger ? "mfrow mfrow-danger" : "mfrow"} style={{ display: "flex", alignItems: "center", width: "100%", gap: 11, padding: "7px 10px", borderRadius: 8, fontSize: 13, textAlign: "left", color: danger ? "var(--destructive)" : "var(--mf-t2)", background: "none", border: "none", cursor: "pointer" }}>
       <Icon size={14} strokeWidth={2} color={danger ? "currentColor" : iconColor || "var(--mf-t4)"} style={{ flexShrink: 0 }} />
       <span>{label}</span>
-    </div>
+    </button>
   )
 }
 
@@ -321,7 +321,7 @@ function ImageWell({ label, value, aspect, onPick, onClear }: { label: string; v
       <label style={{ ...FIELD_LABEL, fontSize: 9.5, letterSpacing: "0.12em" }}>{label}</label>
       <button type="button" onClick={onPick} style={{ ...WELL, position: "relative", width: "100%", aspectRatio: aspect, borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", cursor: "pointer", padding: 0 }}>
         {value ? <img src={proxyImageUrl(value)} alt={label} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <ImageIcon size={20} strokeWidth={1.5} color="var(--mf-t4)" />}
-        {value ? <span onClick={(e) => { e.stopPropagation(); onClear() }} title="clear" style={{ position: "absolute", top: 4, right: 4, display: "flex", width: 18, height: 18, alignItems: "center", justifyContent: "center", borderRadius: 5, background: "rgba(0,0,0,0.6)", color: "var(--mf-t2)" }}><X size={11} /></span> : null}
+        {value ? <span role="button" tabIndex={0} aria-label="Clear image" title="Clear" onClick={(e) => { e.stopPropagation(); onClear() }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); onClear() } }} style={{ position: "absolute", top: 4, right: 4, display: "flex", width: 18, height: 18, alignItems: "center", justifyContent: "center", borderRadius: 5, background: "rgba(0,0,0,0.6)", color: "var(--mf-t2)", cursor: "pointer" }}><X size={11} /></span> : null}
       </button>
     </div>
   )
@@ -412,10 +412,10 @@ export function LinuxConfigDialog({ appid, gameName, onClose }: { appid: string;
           {modeOpen ? (
             <div style={{ position: "absolute", top: 44, left: 0, right: 0, zIndex: 2, borderRadius: 10, border: "1px solid var(--mf-line-2)", background: "rgba(20,20,20,0.99)", padding: 4, boxShadow: "0 16px 40px rgba(0,0,0,0.5)" }}>
               {(["inherit", "auto", "proton", "wine", "umu", "native"] as const).map((m) => (
-                <div key={m} className="mfrow" onClick={() => { update({ launchMode: m }); setModeOpen(false) }} style={{ display: "flex", alignItems: "center", padding: "7px 10px", borderRadius: 7, fontSize: 13, color: "var(--mf-t2)", cursor: "pointer" }}>
+                <button key={m} type="button" className="mfrow" onClick={() => { update({ launchMode: m }); setModeOpen(false) }} style={{ display: "flex", alignItems: "center", width: "100%", padding: "7px 10px", borderRadius: 7, fontSize: 13, textAlign: "left", color: "var(--mf-t2)", background: "none", border: "none", cursor: "pointer" }}>
                   <span style={{ flex: 1 }}>{LAUNCH_MODE_LABELS[m]}</span>
                   {presetActive === m ? <Check size={14} color="var(--mf-t1)" /> : null}
-                </div>
+                </button>
               ))}
             </div>
           ) : null}

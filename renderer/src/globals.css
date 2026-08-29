@@ -1,7 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* GameVault — kyun-refined dark theme (charcoal + white-glow accent, no color).
+/* Union Manifold — kyun-refined dark theme (charcoal + white-glow accent, no color).
    Derived from kyun.sh's palette but with readable type + subtle rounding.
    Token names kept shadcn-compatible so existing components recolor cleanly. */
 
@@ -918,7 +918,7 @@ html[data-uc-gamepad] [data-uc-focusable]:focus {
   }
 }
 
-/* ── GameVault (kyun-refined) shell helpers ───────────────────────────────── */
+/* ── Union Manifold (kyun-refined) shell helpers ─────────────────────────── */
 
 /* White-glow accent — kyun's "brand" is a drop-shadow on grayscale, not color. */
 .gv-glow {

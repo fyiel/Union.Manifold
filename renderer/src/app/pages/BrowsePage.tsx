@@ -16,15 +16,6 @@ export function browseColsForWidth(gridWidth: number): number {
   return Math.max(1, Math.floor((gridWidth + 18) / 186))
 }
 
-export function browseColumnCount(grid: HTMLElement): number {
-  const tracks = getComputedStyle(grid).gridTemplateColumns
-  if (tracks && !tracks.includes("repeat")) {
-    const n = tracks.split(" ").filter(Boolean).length
-    if (n > 0) return n
-  }
-  return browseColsForWidth(grid.clientWidth)
-}
-
 const sortForDisplay = (list: UnifiedSourceGame[], mode: SourceSortMode, query: string) =>
   sortUnifiedGames(list, mode, { query })
 
@@ -67,53 +58,60 @@ export function BrowsePage() {
   const [cols, setCols] = useState(1)
   const [rowH, setRowH] = useState(350)
   const gridRef = useRef<HTMLDivElement | null>(null)
-  const measureScroller = useCallback(() => {
+  const measure = useCallback(() => {
     const el = scrollerRef.current
     if (!el) return
-    const h = el.clientHeight || 1
-    setClientH((prev) => (prev === h ? prev : h))
-  }, [])
-  const measureGrid = useCallback(() => {
-    const grid = gridRef.current
-    if (!grid) return
-    const nextCols = browseColumnCount(grid)
+    setClientH((prev) => {
+      const h = el.clientHeight || 1
+      return prev === h ? prev : h
+    })
+    const nextCols = browseColsForWidth(el.clientWidth - 72) // minus L/R padding
     setCols((prev) => (prev === nextCols ? prev : nextCols))
-    const card = grid.querySelector(".mf-card")
+    const card = gridRef.current?.querySelector(".mf-card")
     const h = card instanceof HTMLElement ? card.offsetHeight : 0
     if (h > 0) setRowH((prev) => (Math.abs(h + 18 - prev) > 1 ? h + 18 : prev))
   }, [])
+  useEffect(() => {
+    measure()
+    const el = scrollerRef.current
+    if (!el || typeof ResizeObserver === "undefined") return
+    let raf: number | null = null
+    const ro = new ResizeObserver((entries) => {
+      const widthChanged = entries.some((entry) => entry.contentRect.width !== lastScrollerWidth)
+      if (!widthChanged) return
+      lastScrollerWidth = entries[entries.length - 1].contentRect.width
+      if (raf !== null) cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => {
+        raf = null
+        measure()
+      })
+    })
+    let lastScrollerWidth = el.getBoundingClientRect().width
+    ro.observe(el)
+    return () => {
+      if (raf !== null) cancelAnimationFrame(raf)
+      ro.disconnect()
+    }
+  }, [measure])
 
   const resetViewToTop = useCallback(() => {
     setViewTop(0)
     if (scrollerRef.current) scrollerRef.current.scrollTop = 0
   }, [])
 
-  useEffect(() => {
-    measureScroller()
-    const el = scrollerRef.current
-    if (!el) return
-    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => measureScroller()) : null
-    ro?.observe(el)
-    if (restoreScroll.current) {
-      const top = restoreScroll.current
-      restoreScroll.current = 0
-      requestAnimationFrame(() => {
-        if (scrollerRef.current) scrollerRef.current.scrollTop = top
-      })
-    }
-    return () => ro?.disconnect()
-  }, [measureScroller])
-
   const hasGames = games.length > 0
   useEffect(() => {
+    if (!restoreScroll.current) return
+    const top = restoreScroll.current
+    restoreScroll.current = 0
+    requestAnimationFrame(() => {
+      if (scrollerRef.current) scrollerRef.current.scrollTop = top
+    })
+  }, [])
+  useEffect(() => {
     if (!hasGames) return
-    measureGrid()
-    const grid = gridRef.current
-    if (!grid || typeof ResizeObserver === "undefined") return
-    const ro = new ResizeObserver(measureGrid)
-    ro.observe(grid)
-    return () => ro.disconnect()
-  }, [hasGames, measureGrid])
+    measure()
+  }, [hasGames, cols, measure])
   const loadingMoreRef = useRef(false)
   const appendReqRef = useRef<number | null>(null)
   const available = sourcesAvailable()
@@ -342,14 +340,22 @@ export function BrowsePage() {
   const resultSummary = searching ? `${games.length} so far…` : `${games.length}${hasMore ? "+" : ""} titles · ${mirrors} mirrors`
   const sortLabel = sortModeLabel(sortMode, hasQuery)
 
+  const scrollRaf = useRef<number | null>(null)
   const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget
     setBrowseScroll(el.scrollTop)
-    setViewTop(el.scrollTop)
-    if (hasMore && !loadingMoreRef.current && !searching && el.scrollHeight - el.scrollTop - el.clientHeight < 700) {
-      void loadMore()
-    }
+    if (scrollRaf.current !== null) cancelAnimationFrame(scrollRaf.current)
+    scrollRaf.current = requestAnimationFrame(() => {
+      scrollRaf.current = null
+      setViewTop(el.scrollTop)
+      if (hasMore && !loadingMoreRef.current && !searching && el.scrollHeight - el.scrollTop - el.clientHeight < 700) {
+        void loadMore()
+      }
+    })
   }
+  useEffect(() => () => {
+    if (scrollRaf.current !== null) cancelAnimationFrame(scrollRaf.current)
+  }, [])
 
   return (
     <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
@@ -391,7 +397,7 @@ export function BrowsePage() {
               {query.length > 0 && !searching && (
                 <button
                   type="button"
-                  title="clear"
+                  title="Clear"
                   onClick={() => onQueryChange("")}
                   className="mf-iconbtn"
                   style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", display: "flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: 6, border: "none", background: "color-mix(in srgb, var(--mf-t0) 7%, transparent)", color: "var(--mf-t3)", cursor: "pointer" }}
@@ -434,11 +440,11 @@ export function BrowsePage() {
                   opacity: s.enabled ? 1 : 0.45,
                 }}
               >
-                <span className={isSearching ? "uc-pulse" : ""} style={{ width: 6, height: 6, borderRadius: 99, background: isFailed ? "#7a4a4a" : isSearching ? "var(--mf-t4)" : "var(--mf-t3)", flexShrink: 0 }} />
+                <span className={isSearching ? "uc-pulse" : ""} style={{ width: 6, height: 6, borderRadius: 99, background: isFailed ? "var(--mf-danger-faint)" : isSearching ? "var(--mf-t4)" : "var(--mf-t3)", flexShrink: 0 }} />
                 <span style={{ fontSize: 11.5, fontWeight: 500, color: isFailed ? "var(--mf-t4)" : "var(--mf-t2)" }}>{s.name}</span>
                 {isSearching && <Spinner size={11} stroke="var(--mf-t4)" />}
                 {isFailed && (
-                  <span onClick={() => void runQuery(committed)} style={{ fontFamily: MONO, fontSize: 10, color: "#c98080", cursor: "pointer", textDecoration: "underline" }}>retry</span>
+                  <button type="button" onClick={() => void runQuery(committed)} style={{ fontFamily: MONO, fontSize: 10, color: "var(--mf-danger-dim)", cursor: "pointer", textDecoration: "underline", background: "none", border: "none", padding: 0 }}>retry</button>
                 )}
                 {!isSearching && !isFailed && (
                   <span style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t4)" }}>{sourceCounts[s.id] ?? 0}</span>
@@ -462,12 +468,12 @@ export function BrowsePage() {
       </header>
 
       {}
-      <div ref={scrollerRef} className="mf-scroll" onScroll={onScroll} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "22px 36px 40px" }}>
+      <div ref={scrollerRef} className="mf-scroll" onScroll={onScroll} style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowAnchor: "none", padding: "22px 36px 40px" }}>
         {(sourcesErrored || sourceError) && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)" }}>
-            <span style={{ width: 6, height: 6, borderRadius: 99, background: "#7a4a4a", flexShrink: 0 }} />
+            <span style={{ width: 6, height: 6, borderRadius: 99, background: "var(--mf-danger-faint)", flexShrink: 0 }} />
             {sourceError || "Some sources unavailable"}
-            <button type="button" onClick={() => void runQuery(committed)} style={{ fontFamily: MONO, fontSize: 10, color: "#c98080", cursor: "pointer", textDecoration: "underline", background: "none", border: "none", padding: 0 }}>retry</button>
+            <button type="button" onClick={() => void runQuery(committed)} style={{ fontFamily: MONO, fontSize: 10, color: "var(--mf-danger-dim)", cursor: "pointer", textDecoration: "underline", background: "none", border: "none", padding: 0 }}>retry</button>
           </div>
         )}
         {!available ? (

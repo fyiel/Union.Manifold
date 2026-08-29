@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { fmtBytes, GameExecutable, getExecutableRelativePath, rankGameExecutables } from "@/lib/utils"
+import { downloadLogger } from "@/lib/logger"
 import { Folder, Search, Sparkles } from "@/components/icons"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom"
@@ -87,7 +88,7 @@ export function ExePickerModal({ open, title, message, exes, gameName, baseFolde
         }
       }
     } catch (err) {
-      console.error("[UC] Browse for exe failed", err)
+      downloadLogger.error("Browse for exe failed", { data: err })
     } finally {
       setBrowsing(false)
     }

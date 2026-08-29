@@ -56,7 +56,7 @@ static ROW_COVER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"data-tthumb-(?:large|small)=([^\s>]+)").unwrap());
 static ROW_DATE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"datetime='([^']+)'").unwrap());
 static SEARCH_ROW: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?s)<li class="ipsStreamItem.*?href="(https://zeigames\.com/topic/\d+-[^"?]+)/?\?do=findComment[^"]*"[^>]*data-linktype="link"[^>]*>(.*?)</a>"#).unwrap()
+    Regex::new(r#"(?s)<h3[^>]*data-ips-hook="commentTitle"[^>]*>.*?href="(https://zeigames\.com/topic/\d+-[^"?]+/)"[^>]*>(.*?)</a>"#).unwrap()
 });
 static TITLE_TAG: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?s)<title[^>]*>(.*?)</title>").unwrap());

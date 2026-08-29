@@ -542,6 +542,11 @@ declare global {
       launchSteam?: () => Promise<{ ok: boolean; method?: string; error?: string }>
       runSteamGame?: (appid: string, steamAppid: number, installPath: string) => Promise<{ ok: boolean; error?: string }>
     }
+    ucResolver?: {
+      solve: (url: string) => Promise<{ ok: boolean; url?: string | null; fileName?: string | null; headers?: Record<string, string>; error?: string }>
+      cancel: () => Promise<{ ok: boolean }>
+      onStatus?: (callback: (data: { state: "solving" | "interactive" | "captured" | "cleared" | "failed" | "cancelled"; host: string; reason?: string | null }) => void) => () => void
+    }
     ucPerf?: {
       enabled: () => Promise<boolean>
       dump: (payload: string) => Promise<unknown>

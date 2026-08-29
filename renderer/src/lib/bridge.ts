@@ -224,6 +224,12 @@ export function installBridge(): void {
     clear: () => call("assets_clear"),
   }
 
+  w.ucResolver = {
+    solve: (url: string) => call("resolver_solve_start", { url }),
+    cancel: () => call("resolver_solve_cancel"),
+    onStatus: (cb: Cb) => on("uc:resolver-status", cb),
+  }
+
   w.ucPresence = {
     onChanged: (cb: Cb) => on("uc:presence-changed", cb),
   }

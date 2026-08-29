@@ -14,9 +14,12 @@ pub mod mediafire;
 pub mod pixeldrain;
 pub mod rootz;
 
+use std::sync::LazyLock;
+
 use crate::sources::schema::DownloadOption;
 use crate::sources::ResolveResult;
 use serde_json::json;
+use tauri::AppHandle;
 
 fn hostname_of(url: &str) -> String {
     url::Url::parse(url)
@@ -135,7 +138,7 @@ pub fn is_resolvable(url: &str) -> bool {
         || datavaults::matches(url)
         || fileditch::matches(url)
         || filekeeper::matches(url)
-        || (gate::matches(url) && crate::slipgate::cfg().is_some())
+        || gate::matches(url)
 }
 
 pub async fn link_is_dead(url: &str) -> bool {
@@ -154,6 +157,24 @@ pub async fn link_is_dead(url: &str) -> bool {
 }
 
 pub async fn resolve_url(option: &DownloadOption) -> ResolveResult {
+    dispatch(None, option).await
+}
+
+pub async fn resolve_url_via(app: &AppHandle, option: &DownloadOption) -> ResolveResult {
+    dispatch(Some(app), option).await
+}
+
+pub(crate) fn scan_direct_link(html: &str) -> Option<String> {
+    static DIRECT_LINK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(
+            r#"(?i)https?://[^\s"'<>\\]+?\.(?:zip|rar|7z|001|iso|exe|tar\.gz|apk)(?:\?[^\s"'<>\\]*)?"#,
+        )
+        .unwrap()
+    });
+    DIRECT_LINK_RE.find(html).map(|m| m.as_str().to_string())
+}
+
+async fn dispatch(app: Option<&AppHandle>, option: &DownloadOption) -> ResolveResult {
     let url = option
         .url
         .as_deref()
@@ -192,17 +213,30 @@ pub async fn resolve_url(option: &DownloadOption) -> ResolveResult {
         return filekeeper::resolve(url).await;
     }
     if gate::matches(url) {
-        return gate::resolve(url).await;
+        return match app {
+            Some(app) => gate::resolve_via(app, url).await,
+            None => gate::resolve(url).await,
+        };
     }
 
-    // datanodes/datavaults: when the native resolver hits a Cloudflare gate or
-    // interactive captcha, hand the page to Slipgate (which drives it through
-    // FlareSolverr). Without a Slipgate URL configured, fall through to the
-    // browser with the native reason.
     if let Some(r) = result {
         if r.resolvable {
             return r;
         }
+
+        if let Some(app) = app {
+            if let Ok(solved) = crate::resolver::solve(app, url).await {
+                let merged = match slipgate_host(url) {
+                    Some("datanodes") => datanodes::with_solved(url, solved).await,
+                    Some("datavaults") => datavaults::with_solved(url, solved).await,
+                    _ => None,
+                };
+                if let Some(merged) = merged {
+                    return merged;
+                }
+            }
+        }
+
         if let Some(host) = slipgate_host(url) {
             match crate::slipgate::cfg() {
                 Some(cfg) => {
@@ -250,7 +284,3 @@ pub async fn resolve_url(option: &DownloadOption) -> ResolveResult {
         ..Default::default()
     }
 }
-
-#[cfg(test)]
-#[path = "../../../../.dev/rust/hosts_tests.rs"]
-mod dev_hosts_tests;

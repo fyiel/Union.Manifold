@@ -13,7 +13,7 @@ use crate::sources::{Capabilities, QueryParams};
 
 const ID: &str = "gamebounty";
 const ORIGIN: &str = "https://gamebounty.world";
-const API: &str = "https://api.gamebounty.world";
+const API: &str = "https://gamebounty.world/api/v1";
 const SLUG_SUFFIX: &str = "-free-pc-download";
 const PAGE_SIZE: usize = 100;
 const MAX_PAGES: usize = 80;
@@ -99,7 +99,7 @@ async fn catalog_snapshot() -> Option<Vec<Value>> {
         .get_or(|| async {
             let mut all: Vec<Value> = Vec::new();
             for page in 1..=MAX_PAGES {
-                let url = format!("{API}/api/posts?sort=newest&limit={PAGE_SIZE}&page={page}");
+                let url = format!("{API}/posts?sort=newest&limit={PAGE_SIZE}&page={page}");
                 let batch = match fetch_data(&url).await {
                     Some(Value::Array(arr)) => arr,
                     _ => break,
@@ -124,7 +124,9 @@ fn unwrap_link_url(url: String) -> String {
         return url;
     };
     let host = parsed.host_str().unwrap_or("");
-    if !host.eq_ignore_ascii_case("api.gamebounty.world") {
+    if !host.eq_ignore_ascii_case("api.gamebounty.world")
+        && !host.eq_ignore_ascii_case("gamebounty.world")
+    {
         return url;
     }
     let Some(rest) = parsed.path().strip_prefix("/api/dl/") else {
@@ -158,7 +160,8 @@ fn mirrors_to_options(container: Option<&Value>) -> Vec<DownloadOption> {
         .filter(|d| value_truthy(d))
         .unwrap_or(container);
 
-    let data_size_human = get_str(data, "size_human");
+    let data_size_human =
+        get_str(data, "size_human").or_else(|| get_str(data, "sizeHuman"));
     let data_size_bytes = data
         .get("size_bytes")
         .and_then(value_to_u64)
@@ -294,7 +297,9 @@ fn post_to_game(post: &Value) -> Option<SourceGame> {
     let version = get_str(post, "version").or_else(|| get_str(post, "build_id"));
 
     let cdata = post.get("container").and_then(|c| c.get("data"));
-    let size_human = cdata.and_then(|d| get_str(d, "size_human"));
+    let size_human = cdata
+        .and_then(|d| get_str(d, "size_human").or_else(|| get_str(d, "sizeHuman")))
+        .or_else(|| get_str(post, "size_human"));
     let size_bytes = size_human
         .as_deref()
         .and_then(schema::parse_size_to_bytes)
@@ -427,7 +432,7 @@ pub async fn get_detail(slug: &str) -> Option<SourceGame> {
     let key = slug.clone();
     DETAIL_CACHE
         .get_or(&key, || async move {
-            let url = format!("{API}/api/posts/{slug}");
+            let url = format!("{API}/posts/{slug}");
             let data = fetch_data(&url).await?;
             if !data.is_object() {
                 return None;

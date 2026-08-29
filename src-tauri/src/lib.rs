@@ -17,6 +17,7 @@ mod notify;
 mod paths;
 mod perf;
 mod repair;
+mod resolver;
 mod settings;
 mod shortcuts;
 mod slipgate;
@@ -103,23 +104,6 @@ fn install_panic_hook() {
         default_hook(info);
     }));
 }
-
-// WebKitGTK wheel scrolling is discrete by default: each notch is one jump,
-// which reads as "chunky". enable-smooth-scrolling animates scroll deltas.
-// webkit2gtk is a Linux-only dependency, so the helper is a no-op elsewhere
-// (Windows/macOS use the JS shim in renderer/src/lib/wheel-smooth.ts).
-#[cfg(target_os = "linux")]
-pub(crate) fn enable_smooth_scrolling(window: &tauri::WebviewWindow) {
-    let _ = window.with_webview(|webview| {
-        use webkit2gtk::{SettingsExt, WebViewExt};
-        if let Some(settings) = webview.inner().settings() {
-            settings.set_enable_smooth_scrolling(true);
-        }
-    });
-}
-
-#[cfg(not(target_os = "linux"))]
-pub(crate) fn enable_smooth_scrolling(_window: &tauri::WebviewWindow) {}
 
 pub fn run() {
     install_panic_hook();
@@ -231,9 +215,6 @@ pub fn run() {
                 sources::warm_hydralinks(hydra_handle).await;
             });
             build_tray(app)?;
-            if let Some(window) = app.get_webview_window("main") {
-                enable_smooth_scrolling(&window);
-            }
             {
                 let state: tauri::State<AppState> = app.state();
                 let start_minimized = state
@@ -280,29 +261,17 @@ pub fn run() {
                     }
                 });
             }
-            #[cfg(target_os = "linux")]
-            if let Some(main) = app.get_webview_window("main") {
-                main.with_webview(|webview| {
-                    use webkit2gtk::{SettingsExt, WebViewExt};
-                    let wv = webview.inner();
-                    if let Some(settings) = WebViewExt::settings(&wv) {
-                        settings.set_enable_smooth_scrolling(true);
-                    }
-                })
-                .ok();
-            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             settings::setting_get,
             settings::setting_set,
             settings::setting_merge_library_game_meta,
-
             logging::log,
             window_cmds::window_minimize,
             window_cmds::window_maximize,
             window_cmds::window_close,
-
             window_cmds::app_close_response,
             system::system_open_external,
             system::system_launch_steam,
@@ -313,7 +282,6 @@ pub fn run() {
             import::steam_library_scan,
             import::steam_library_import,
             system::download_open,
-
             achievements::achievements_list,
             achievements::achievements_toast_hide,
             achievements::achievements_toast_pull,
@@ -349,7 +317,6 @@ pub fn run() {
             downloads::catalog_state_load,
             downloads::catalog_state_save,
             downloads::download_path_get,
-
             install::install_from_archive,
             install::install_downloaded_archive,
             install::delete_archive_files,
@@ -360,13 +327,11 @@ pub fn run() {
             library::installed_appids,
             library::installed_get,
             library::installing_list,
-
             library::installed_save,
             library::installed_update_metadata,
             library::installing_status_set,
             library::installed_delete,
             library::installing_delete,
-
             launch::game_exe_list,
             launch::game_subfolder_find,
             launch::game_exe_preflight,
@@ -377,7 +342,6 @@ pub fn run() {
             launch::linux::game_linux_config_set,
             launch::linux::linux_detect_proton,
             storage::storage_precheck,
-
             assets::assets_size,
             assets::assets_clear,
             updater::check_for_updates,
@@ -396,11 +360,9 @@ pub fn run() {
             misc::theme_editor_close,
             misc::theme_preview,
             misc::theme_preview_end,
-
             misc::autostart_get,
             misc::autostart_set,
             dialogs::folder_pick,
-
             net::auth_fetch,
             mods::mods_game_get,
             mods::mods_game_set,
@@ -417,6 +379,8 @@ pub fn run() {
             mods::nexus::nexus_mod_files,
             mods::nexus::nexus_install,
             mods::nexus::slipgate_check,
+            resolver::resolver_solve_start,
+            resolver::resolver_solve_cancel,
             slipgate_managed::managed_slipgate_status,
             slipgate_managed::managed_slipgate_install,
             slipgate_managed::managed_slipgate_start,
@@ -426,7 +390,6 @@ pub fn run() {
             mods::workshop::workshop_browse,
             perf::perf_enabled,
             perf::perf_dump,
-
             mods::workshop::workshop_install,
             mods::workshop::workshop_status,
             mods::thunderstore::thunderstore_communities,
@@ -435,6 +398,12 @@ pub fn run() {
             mods::thunderstore::thunderstore_install,
         ])
         .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                if window.label() == "resolver" {
+                    resolver::note_window_closed();
+                    return;
+                }
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() != "main" {
                     return;

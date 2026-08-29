@@ -174,10 +174,7 @@ fn map_graphql_search(v: &Value, offset: u64) -> (Vec<Value>, bool) {
         .and_then(|n| n.as_array())
         .cloned()
         .unwrap_or_default();
-    let mods: Vec<Value> = nodes
-        .iter()
-        .filter_map(browse_mod_from_graphql)
-        .collect();
+    let mods: Vec<Value> = nodes.iter().filter_map(browse_mod_from_graphql).collect();
     let has_more = !mods.is_empty() && offset + (mods.len() as u64) < total;
     (mods, has_more)
 }
@@ -431,35 +428,76 @@ async fn native_free_download(
     for (n, v) in &pairs {
         jar.set(WWW_HOST, n, v);
     }
-    let session_ua = state
+    let mut effective_ua = state
         .settings
         .get_string("nexusUserAgent")
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
-    let with_ua = |mut h: HashMap<String, String>| {
-        if let Some(ua) = &session_ua {
+    let referer = format!("{}?tab=files", mod_page_url(domain, mod_id));
+    let with_ua = |mut h: HashMap<String, String>, ua: Option<&String>| {
+        if let Some(ua) = ua {
             h.insert("User-Agent".to_string(), ua.clone());
         }
         h
     };
-    let referer = format!("{}?tab=files", mod_page_url(domain, mod_id));
-    let page = http::fetch(
-        &referer,
-        &http::FetchOpts {
-            headers: with_ua(HashMap::from([(
-                "Accept".to_string(),
-                "text/html".to_string(),
-            )])),
-            jar: Some(jar.clone()),
-            ..Default::default()
-        },
-    )
-    .await
-    .map_err(|e| format!("nexus session probe: {e}"))?;
-    let page_status = page.status().as_u16();
-    let page_body = page.text().await.unwrap_or_default();
-    if is_cloudflare_challenge(page_status, &page_body) {
-        return Ok(FreeDownload::NeedsSession(Some(CLOUDFLARE_HINT.to_string())));
+
+    let mut cleared = false;
+    async fn clear_gate(
+        app: &AppHandle,
+        referer: &str,
+        jar: &http::Jar,
+        effective_ua: &mut Option<String>,
+        cleared: &mut bool,
+    ) -> bool {
+        if *cleared {
+            return false;
+        }
+        *cleared = true;
+        match crate::resolver::solve(app, referer).await {
+            Ok(solved) => {
+                if let Some(header) = &solved.cookie_header {
+                    for pair in header.split(';') {
+                        if let Some((name, value)) = pair.split_once('=') {
+                            jar.set(WWW_HOST, name.trim(), value.trim());
+                        }
+                    }
+                }
+                if effective_ua.is_none() {
+                    *effective_ua = solved.user_agent.filter(|u| !u.is_empty());
+                }
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    let page = loop {
+        let resp = http::fetch(
+            &referer,
+            &http::FetchOpts {
+                headers: with_ua(
+                    HashMap::from([("Accept".to_string(), "text/html".to_string())]),
+                    effective_ua.as_ref(),
+                ),
+                jar: Some(jar.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(|e| format!("nexus session probe: {e}"))?;
+        let status = resp.status().as_u16();
+        let body = resp.text().await.unwrap_or_default();
+        if is_cloudflare_challenge(status, &body)
+            && clear_gate(app, &referer, &jar, &mut effective_ua, &mut cleared).await
+        {
+            continue;
+        }
+        break (status, body);
+    };
+    if is_cloudflare_challenge(page.0, &page.1) {
+        return Ok(FreeDownload::NeedsSession(Some(
+            CLOUDFLARE_HINT.to_string(),
+        )));
     }
 
     let mut headers = HashMap::new();
@@ -472,22 +510,31 @@ async fn native_free_download(
         "Accept".to_string(),
         "application/json, text/javascript, */*; q=0.01".to_string(),
     );
-    headers.insert("Referer".to_string(), referer);
-    let headers = with_ua(headers);
-    let resp = http::fetch(
-        GENERATE_URL,
-        &http::FetchOpts {
-            method: Some("POST".to_string()),
-            headers,
-            body: Some(build_generate_form(file_id, game_id).into_bytes()),
-            jar: Some(jar),
-            ..Default::default()
-        },
-    )
-    .await
-    .map_err(|e| format!("nexus download generator: {e}"))?;
-    let status = resp.status().as_u16();
-    let body = resp.text().await.unwrap_or_default();
+    headers.insert("Referer".to_string(), referer.clone());
+    let generate = loop {
+        let resp = http::fetch(
+            GENERATE_URL,
+            &http::FetchOpts {
+                method: Some("POST".to_string()),
+                headers: with_ua(headers.clone(), effective_ua.as_ref()),
+                body: Some(build_generate_form(file_id, game_id).into_bytes()),
+                jar: Some(jar.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(|e| format!("nexus download generator: {e}"))?;
+        let status = resp.status().as_u16();
+        let body = resp.text().await.unwrap_or_default();
+        if is_cloudflare_challenge(status, &body)
+            && clear_gate(app, &referer, &jar, &mut effective_ua, &mut cleared).await
+        {
+            continue;
+        }
+        break (status, body);
+    };
+    let status = generate.0;
+    let body = generate.1;
     if is_cloudflare_challenge(status, &body) {
         return Ok(FreeDownload::NeedsSession(Some(
             CLOUDFLARE_HINT.to_string(),
@@ -514,7 +561,9 @@ async fn native_free_download(
 
 async fn premium_user(key: &str) -> Result<bool, String> {
     let v = api_json(key, &format!("{API}/v1/users/validate.json")).await?;
-    Ok(v.get("is_premium").and_then(|x| x.as_bool()).unwrap_or(false))
+    Ok(v.get("is_premium")
+        .and_then(|x| x.as_bool())
+        .unwrap_or(false))
 }
 
 #[tauri::command]
@@ -552,10 +601,7 @@ pub async fn nexus_browse(
             .and_then(|n| n.as_array())
             .cloned()
             .unwrap_or_default();
-        let mods: Vec<Value> = nodes
-            .iter()
-            .filter_map(browse_mod_from_graphql)
-            .collect();
+        let mods: Vec<Value> = nodes.iter().filter_map(browse_mod_from_graphql).collect();
         crate::logging::write_line(
             "info",
             &format!(
@@ -699,9 +745,7 @@ pub async fn nexus_install(
                     match native_free_download(&app, &state, &key, &appid, &domain, mid, file_id)
                         .await?
                     {
-                        FreeDownload::Started => {
-                            return Ok(json!({ "ok": true, "started": true }))
-                        }
+                        FreeDownload::Started => return Ok(json!({ "ok": true, "started": true })),
                         FreeDownload::NeedsSession(r) => r,
                     }
                 }

@@ -2,7 +2,6 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { installBridge } from './lib/bridge'
 import { initPerf, mark } from './lib/perf'
-import { initWheelSmoothing } from './lib/wheel-smooth'
 import './fonts.css'
 import App from './app/App'
 import { applyCachedStartPageRoute } from './app/route-loaders'
@@ -16,7 +15,6 @@ installBridge()
 applyCachedStartPageRoute()
 mark('main:pre-render')
 void initPerf()
-initWheelSmoothing()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

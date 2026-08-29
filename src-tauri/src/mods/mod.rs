@@ -329,10 +329,7 @@ static VERIFIED_COMPARISONS: LazyLock<parking_lot::Mutex<HashMap<PathBuf, Verifi
     LazyLock::new(|| parking_lot::Mutex::new(HashMap::new()));
 
 fn read_comparison_file(path: &Path) -> std::io::Result<Vec<u8>> {
-    let bytes = std::fs::read(path)?;
-    #[cfg(test)]
-    COMPARISON_BYTES_READ.fetch_add(bytes.len() as u64, std::sync::atomic::Ordering::Relaxed);
-    Ok(bytes)
+    std::fs::read(path)
 }
 
 fn same_file(a: &Path, b: &Path) -> bool {
@@ -371,21 +368,6 @@ fn same_file(a: &Path, b: &Path) -> bool {
         verified.remove(b);
     }
     same
-}
-
-#[cfg(test)]
-static COMPARISON_BYTES_READ: std::sync::atomic::AtomicU64 =
-    std::sync::atomic::AtomicU64::new(0);
-
-#[cfg(test)]
-fn reset_comparison_metrics() {
-    VERIFIED_COMPARISONS.lock().clear();
-    COMPARISON_BYTES_READ.store(0, std::sync::atomic::Ordering::Relaxed);
-}
-
-#[cfg(test)]
-fn comparison_bytes_read() -> u64 {
-    COMPARISON_BYTES_READ.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 fn remove_empty_parents(path: &Path, stop: &Path) {
@@ -971,7 +953,7 @@ fn is_game_dir(dir: &Path) -> bool {
     false
 }
 
-fn resolve_game_root(base: &Path) -> PathBuf {
+pub(crate) fn resolve_game_root(base: &Path) -> PathBuf {
     if is_game_dir(base) {
         return base.to_path_buf();
     }
@@ -3808,7 +3790,3 @@ mod tests {
         assert!(!tmp.path().join("outside/file.txt").exists());
     }
 }
-
-#[cfg(test)]
-#[path = "../../../.dev/rust/mods_layout_tests.rs"]
-mod dev_layout_tests;

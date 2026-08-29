@@ -375,7 +375,10 @@ async fn adapter_detail(id: &str, slug: &str) -> Option<SourceGame> {
 /// All parts must resolve — a partial set of archives cannot extract, so the
 /// option falls back to the browser unless the whole mirror comes through.
 /// Parts of one mirror share a host, so the first part's headers apply to all.
-async fn resolve_mirror_parts(option: &schema::DownloadOption) -> ResolveResult {
+async fn resolve_mirror_parts(
+    app: Option<&AppHandle>,
+    option: &schema::DownloadOption,
+) -> ResolveResult {
     let urls: Vec<String> = std::iter::once(option.url.clone().unwrap_or_default())
         .chain(option.parts.iter().cloned())
         .filter(|u| !u.is_empty())
@@ -394,7 +397,10 @@ async fn resolve_mirror_parts(option: &schema::DownloadOption) -> ResolveResult 
             url: Some(url.clone()),
             ..Default::default()
         };
-        let res = hosts::resolve_url(&part).await;
+        let res = match app {
+            Some(app) => hosts::resolve_url_via(app, &part).await,
+            None => hosts::resolve_url(&part).await,
+        };
         if !res.resolvable {
             let reason = res.reason.unwrap_or_default();
             let suffix = if reason.is_empty() {
@@ -449,11 +455,18 @@ async fn resolve_mirror_parts(option: &schema::DownloadOption) -> ResolveResult 
     }
 }
 
-pub(crate) async fn adapter_resolve(id: &str, option: &schema::DownloadOption) -> ResolveResult {
+pub(crate) async fn adapter_resolve_with(
+    app: Option<&AppHandle>,
+    id: &str,
+    option: &schema::DownloadOption,
+) -> ResolveResult {
     match id {
         "unioncrax" => adapters::unioncrax::resolve_download(option).await,
-        _ if option.parts.is_empty() => hosts::resolve_url(option).await,
-        _ => resolve_mirror_parts(option).await,
+        _ if option.parts.is_empty() => match app {
+            Some(app) => hosts::resolve_url_via(app, option).await,
+            None => hosts::resolve_url(option).await,
+        },
+        _ => resolve_mirror_parts(app, option).await,
     }
 }
 
@@ -981,15 +994,12 @@ pub async fn sources_detail(_state: State<'_, AppState>, sources: Vec<Value>) ->
 
 #[tauri::command]
 pub async fn sources_resolve(
-    _app: AppHandle,
+    app: AppHandle,
     _state: State<'_, AppState>,
     source_id: String,
     option: schema::DownloadOption,
 ) -> Result<Value> {
-    // Non-unioncrax sources resolve through hosts::resolve_url (with a
-    // Slipgate fallback for gated hosts); multi-part mirrors resolve every
-    // part and merge the files so the renderer enqueues the whole set.
-    let result = adapter_resolve(&source_id, &option).await;
+    let result = adapter_resolve_with(Some(&app), &source_id, &option).await;
     Ok(json!({ "ok": true, "result": result }))
 }
 
@@ -1241,7 +1251,3 @@ mod tests {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "../../../.dev/rust/live_tests.rs"]
-mod dev_live_tests;

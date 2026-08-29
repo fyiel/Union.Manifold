@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Terminal, FolderOpen, Palette, Library as LibraryIcon, Plus, X, Pencil, Puzzle, Eye, EyeOff } from "lucide-react"
 import { PRESET_THEMES } from "@/lib/themes/presets"
 import type { ThemeDef } from "@/lib/themes/types"
@@ -418,6 +418,8 @@ function ProxyRow() {
 }
 
 function SourcesTab() {
+  const refreshRowsTimerRef = useRef<number | null>(null)
+  useEffect(() => () => { if (refreshRowsTimerRef.current !== null) window.clearTimeout(refreshRowsTimerRef.current) }, [])
   const [sources, setSources] = useState<SourceInfo[]>([])
   const [enabled, setEnabled] = useState<Record<string, boolean>>({})
   const [caps, setCaps] = useState<Record<string, SourceCapabilityFlags>>({})
@@ -531,7 +533,8 @@ function SourcesTab() {
     setRefreshEta(0)
     await loadSources()
     setRefreshing(false)
-    window.setTimeout(() => setRefreshRows(null), 5000)
+    if (refreshRowsTimerRef.current !== null) window.clearTimeout(refreshRowsTimerRef.current)
+    refreshRowsTimerRef.current = window.setTimeout(() => { refreshRowsTimerRef.current = null; setRefreshRows(null) }, 5000)
   }
 
   const detailFor = (id: string): string => {
@@ -1020,6 +1023,8 @@ function AboutTab() {
 }
 
 function ModsTab({ onJumpToSources }: { onJumpToSources: () => void }) {
+  const savedKeyTimerRef = useRef<number | null>(null)
+  useEffect(() => () => { if (savedKeyTimerRef.current !== null) window.clearTimeout(savedKeyTimerRef.current) }, [])
   const [apiKey, setApiKey] = useState("")
   const [reveal, setReveal] = useState(false)
   const [savedKey, setSavedKey] = useState<string | null>(null)
@@ -1055,7 +1060,8 @@ function ModsTab({ onJumpToSources }: { onJumpToSources: () => void }) {
     try {
       await window.ucSettings?.set?.(key, value.trim() || null)
       setSavedKey(key)
-      window.setTimeout(() => setSavedKey(null), 1600)
+      if (savedKeyTimerRef.current !== null) window.clearTimeout(savedKeyTimerRef.current)
+      savedKeyTimerRef.current = window.setTimeout(() => { savedKeyTimerRef.current = null; setSavedKey(null) }, 1600)
     } catch {  }
   }
 
@@ -1087,7 +1093,7 @@ function ModsTab({ onJumpToSources }: { onJumpToSources: () => void }) {
             spellCheck={false}
             style={{ ...MONO_INPUT, flex: 1 }}
           />
-          <RevealButton shown={reveal} onToggle={() => setReveal((v) => !v)} title="key" />
+          <RevealButton shown={reveal} onToggle={() => setReveal((v) => !v)} title="Key" />
           <button type="button" className="mf-ghost" disabled={validating || !apiKey.trim()} onClick={() => void validate()} style={{ display: "flex", alignItems: "center", gap: 7, padding: "0 15px", height: 38, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: !apiKey.trim() ? "var(--mf-t4)" : "var(--mf-t1)", fontSize: 12, fontWeight: 600, cursor: validating || !apiKey.trim() ? "default" : "pointer", opacity: validating ? 0.6 : 1, flexShrink: 0 }}>
             {validating ? "Validating…" : "Validate"}
           </button>
@@ -1135,7 +1141,7 @@ function ModsTab({ onJumpToSources }: { onJumpToSources: () => void }) {
             spellCheck={false}
             style={{ ...MONO_INPUT, flex: 1 }}
           />
-          <RevealButton shown={sessionRevealed} onToggle={() => setSessionRevealed((v) => !v)} title="cookie" />
+          <RevealButton shown={sessionRevealed} onToggle={() => setSessionRevealed((v) => !v)} title="Cookie" />
         </div>
         <div style={{ fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t4)", marginTop: 12, lineHeight: 1.5 }}>
           Browser User-Agent (required when using cf_clearance): in the SAME browser's devtools console run <code>navigator.userAgent</code> and paste the result here. A cf_clearance cookie only validates against the exact User-Agent that created it.{savedKey === "nexusUserAgent" ? " (saved)" : ""}

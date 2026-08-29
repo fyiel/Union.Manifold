@@ -6,7 +6,7 @@ import { GameCard } from "@/app/manifold/GameCard"
 import { MONO, SearchIcon, Spinner, CenterState } from "@/app/manifold/ui"
 
 type AdvSort = SourceSortMode
-const SIZE_MIN = 0, SIZE_MAX = 130, YEAR_MIN = 2010, YEAR_MAX = 2026
+const SIZE_MIN = 0, SIZE_MAX = 130, YEAR_MIN = 2010, YEAR_MAX = new Date().getFullYear() + 1
 const ADV_PAGE = 60
 const MEMORY_REFRESH_MS = 90_000
 
@@ -343,8 +343,8 @@ export function AdvancedSearchPage() {
                   <span style={{ fontSize: 12.5, fontWeight: 500, color: on ? "var(--mf-t1)" : "var(--mf-t4)" }}>{s.name}</span>
                   {unsupported && (
                     <span title={`${s.name} can't order by ${SORT_NOUNS[sort]} — results from this source fall back to relevance`} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", borderRadius: 6, background: "rgba(190,90,90,0.13)", border: "1px solid rgba(200,120,120,0.32)" }}>
-                      <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="#dd8a8a" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round"><path d="M8 1.8 1.5 13.5h13L8 1.8z" /><line x1="8" y1="6.5" x2="8" y2="9.5" /><circle cx="8" cy="11.4" r="0.6" fill="#dd8a8a" stroke="none" /></svg>
-                      <span style={{ fontFamily: MONO, fontSize: 8.5, letterSpacing: "0.04em", color: "#dd8a8a", whiteSpace: "nowrap" }}>no {SORT_NOUNS[sort]}</span>
+                      <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="var(--mf-danger)" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round"><path d="M8 1.8 1.5 13.5h13L8 1.8z" /><line x1="8" y1="6.5" x2="8" y2="9.5" /><circle cx="8" cy="11.4" r="0.6" fill="var(--mf-danger)" stroke="none" /></svg>
+                      <span style={{ fontFamily: MONO, fontSize: 8.5, letterSpacing: "0.04em", color: "var(--mf-danger)", whiteSpace: "nowrap" }}>no {SORT_NOUNS[sort]}</span>
                     </span>
                   )}
                   <span style={{ flex: 1 }} />
@@ -432,9 +432,9 @@ export function AdvancedSearchPage() {
         <div className="mf-scroll" onScroll={onScroll} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "24px 36px 40px" }}>
           {sourceNotice && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16, fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)" }}>
-              <span style={{ width: 6, height: 6, borderRadius: 99, background: "#7a4a4a", flexShrink: 0 }} />
+              <span style={{ width: 6, height: 6, borderRadius: 99, background: "var(--mf-danger-faint)", flexShrink: 0 }} />
               {sourceNotice === "partial" ? "Some sources unavailable" : "Sources unavailable — showing previous results"}
-              <button type="button" onClick={() => setRetryToken((value) => value + 1)} style={{ fontFamily: MONO, fontSize: 10, color: "#c98080", cursor: "pointer", textDecoration: "underline", background: "none", border: "none", padding: 0 }}>retry</button>
+              <button type="button" onClick={() => setRetryToken((value) => value + 1)} style={{ fontFamily: MONO, fontSize: 10, color: "var(--mf-danger-dim)", cursor: "pointer", textDecoration: "underline", background: "none", border: "none", padding: 0 }}>retry</button>
             </div>
           )}
           {!available ? (

@@ -15,7 +15,7 @@ static HOST_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 static SIGNED_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r#"(?i)https?://[a-z0-9.-]*fileditch[a-z0-9.-]*/[^\s"'<>]+?\.(?:zip|rar|7z|exe|bin|iso)\?md5=[^\s"'<>&]+(?:&(?:amp;)?expires=\d+)?"#,
+        r#"(?i)https?://[a-z0-9.-]*(?:fileditch|goonditch)[a-z0-9.-]*/[^\s"'<>]+?\.(?:zip|rar|7z|exe|bin|iso)\?(?:md5|exp|sig)=[^\s"'<>&]+(?:&(?:amp;)?(?:expires|exp|sig|md5)=[^\s"'<>&]+)*"#,
     )
     .unwrap()
 });
@@ -122,7 +122,10 @@ fn resolved(url: String, original_url: &str, headers: HashMap<String, String>) -
     ResolveResult {
         resolvable: true,
         file_name: file_name(&url).or_else(|| file_name(original_url)),
-        ephemeral: url.contains("md5=") || url.contains("expires="),
+        ephemeral: url.contains("md5=")
+            || url.contains("expires=")
+            || url.contains("exp=")
+            || url.contains("sig="),
         url: Some(url),
         headers: Some(headers),
         ..Default::default()
@@ -258,6 +261,22 @@ mod tests {
             Some(
                 "https://betaup.freakingfileditch.me/beta16/abc/game.rar?md5=x&expires=1784620053"
             )
+        );
+    }
+
+    #[test]
+    fn extracts_goonditch_exp_sig_link() {
+        // Live variant observed 2026-08-28: post-PoW pages can point at
+        // goonditch.com signed with exp/sig instead of md5/expires.
+        let html = r#"<script>var d = ["https:\/\/goonditch.com\/balpha9\/abc\/game.zip?exp=1788093798","&sig=SQnfgGv8-FU1LWI3"].join("");</script>"#;
+        assert_eq!(
+            signed_url(html).as_deref(),
+            Some("https://goonditch.com/balpha9/abc/game.zip?exp=1788093798&sig=SQnfgGv8-FU1LWI3")
+        );
+        let html = r#"<a href="https://goonditch.com/balpha9/abc/game.zip?exp=1788093798&amp;sig=SQnfgGv8-FU1LWI3">dl</a>"#;
+        assert_eq!(
+            signed_url(html).as_deref(),
+            Some("https://goonditch.com/balpha9/abc/game.zip?exp=1788093798&sig=SQnfgGv8-FU1LWI3")
         );
     }
 

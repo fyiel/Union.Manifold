@@ -174,7 +174,13 @@ pub(crate) fn steam_roots() -> Vec<PathBuf> {
             }
         }
     }
-    #[cfg(unix)]
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(home) = dirs::home_dir() {
+            roots.push(home.join("Library/Application Support/Steam"));
+        }
+    }
+    #[cfg(target_os = "linux")]
     {
         if let Some(home) = dirs::home_dir() {
             roots.push(home.join(".steam/steam"));

@@ -25,29 +25,29 @@ const CACHE_TTL: Duration = Duration::from_secs(3 * 60 * 60);
 
 #[derive(Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
-struct TsVersion {
-    version: String,
-    downloads: u64,
-    size_bytes: u64,
-    uploaded_at: i64,
-    dependencies: Vec<String>,
-    description: String,
+pub(crate) struct TsVersion {
+    pub(crate) version: String,
+    pub(crate) downloads: u64,
+    pub(crate) size_bytes: u64,
+    pub(crate) uploaded_at: i64,
+    pub(crate) dependencies: Vec<String>,
+    pub(crate) description: String,
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
-struct TsPackage {
-    full_name: String,
-    name: String,
-    owner: String,
+pub(crate) struct TsPackage {
+    pub(crate) full_name: String,
+    pub(crate) name: String,
+    pub(crate) owner: String,
     package_url: String,
     updated_at: i64,
     created_at: i64,
     rating: i64,
-    deprecated: bool,
+    pub(crate) deprecated: bool,
     icon: String,
-    latest: usize,
-    versions: Vec<TsVersion>,
+    pub(crate) latest: usize,
+    pub(crate) versions: Vec<TsVersion>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -262,7 +262,7 @@ async fn fetch_dump(community: &str) -> Result<Vec<TsPackage>, String> {
     Ok(raw.into_iter().filter_map(compact).collect())
 }
 
-async fn load_packages(paths: &AppPaths, community: &str) -> Result<Arc<Vec<TsPackage>>, String> {
+pub(crate) async fn load_packages(paths: &AppPaths, community: &str) -> Result<Arc<Vec<TsPackage>>, String> {
     let community = community.trim();
     if community.is_empty() {
         return Err("no Thunderstore community set for this game".to_string());
@@ -492,7 +492,7 @@ async fn versions_for(
     Ok(vec![version_json_from_value(latest)])
 }
 
-struct ResolvedMod {
+pub(crate) struct ResolvedMod {
     full_name: String,
     version: String,
     download_url: String,
@@ -602,7 +602,7 @@ async fn resolve_node(
     ))
 }
 
-async fn resolve_install(
+pub(crate) async fn resolve_install(
     paths: &AppPaths,
     community: &str,
     full_name: &str,
@@ -633,7 +633,7 @@ async fn resolve_install(
     Ok(out)
 }
 
-async fn install_batch(
+pub(crate) async fn install_batch(
     app: &AppHandle,
     appid: &str,
     root_mod_id: &str,

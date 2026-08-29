@@ -11,6 +11,8 @@ import { hasInstalledVersionUpdate, proxyImageUrl } from "@/lib/utils"
 import { rememberGames, rememberGameAs, getRememberedGame, resolveInstalledGame, getDownloadArt, hydrateDownloadArt, steamCoverUrl, forgetRememberedGame } from "@/lib/sources"
 import { MONO, COVER_LINES, gbLabel, SearchIcon, CenterState, SmartImage, gameImageCandidates } from "@/app/manifold/ui"
 import { GameMenu, LaunchOptionsDialog, EditDetailsDialog, LinuxConfigDialog, AddGamesDialog, SteamIdDialog, type MenuGame } from "@/app/manifold/library-overlays"
+import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { WandTrainerModal } from "@/components/WandTrainerModal"
 import { preloadGameModsPage, preloadSourceGamePage } from "@/app/route-loaders"
 
@@ -181,7 +183,7 @@ function InstallingStrip({ installingMeta, installedIds, filter, query }: { inst
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {installing.map((g) => (
           <div key={g.appid} style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", border: "1px solid var(--mf-line)", borderRadius: 11, background: "var(--mf-panel-2)" }}>
-            <div style={{ width: 38, height: 50, borderRadius: 6, flexShrink: 0, background: g.image ? "#0f0f0f" : COVER_LINES, overflow: "hidden" }}>
+            <div style={{ width: 38, height: 50, borderRadius: 6, flexShrink: 0, background: g.image ? "var(--mf-well)" : COVER_LINES, overflow: "hidden" }}>
               {g.image && <img src={proxyImageUrl(g.image)} alt="" loading="lazy" decoding="async" onError={(e) => { e.currentTarget.style.display = "none" }} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
             </div>
             <div style={{ minWidth: 0, flex: 1 }}>
@@ -222,6 +224,8 @@ export function LibraryPage() {
   const [editFor, setEditFor] = useState<MenuGame | null>(null)
   const [linuxFor, setLinuxFor] = useState<{ appid: string; name: string } | null>(null)
   const [wandFor, setWandFor] = useState<LibGame | null>(null)
+  const [deleteFor, setDeleteFor] = useState<LibGame | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [repair, setRepair] = useState<{ appid: string; name: string; phase: RepairProgress["phase"]; percent: number } | null>(null)
   const [onlineFixReady, setOnlineFixReady] = useState(false)
@@ -472,14 +476,21 @@ export function LibraryPage() {
 
   const isFavorite = (appid: string) => (meta[appid]?.collections || []).some((c) => c.toLowerCase() === "favorites")
 
+  const favoriteInFlightRef = useRef<Set<string>>(new Set())
   const toggleFavorite = async (appid: string) => {
-    const fav = isFavorite(appid)
-    const cols = (meta[appid]?.collections || []).filter((c) => c.toLowerCase() !== "favorites")
-    if (!fav) cols.push("Favorites")
-    const result = await window.ucSettings?.mergeLibraryGameMeta?.(appid, { collections: cols })
-    if (!result?.ok) return
-    setMeta((current) => ({ ...current, [appid]: result.entry as LibraryGameMeta }))
-    setInstalled((prev) => prev.map((g) => g.appid !== appid ? g : { ...g, collections: fav ? g.collections.filter((c) => c.toLowerCase() !== "favorites") : [...g.collections, "Favorites"] }))
+    if (favoriteInFlightRef.current.has(appid)) return
+    favoriteInFlightRef.current.add(appid)
+    try {
+      const fav = isFavorite(appid)
+      const cols = (meta[appid]?.collections || []).filter((c) => c.toLowerCase() !== "favorites")
+      if (!fav) cols.push("Favorites")
+      const result = await window.ucSettings?.mergeLibraryGameMeta?.(appid, { collections: cols })
+      if (!result?.ok) return
+      setMeta((current) => ({ ...current, [appid]: result.entry as LibraryGameMeta }))
+      setInstalled((prev) => prev.map((g) => g.appid !== appid ? g : { ...g, collections: (result.entry as LibraryGameMeta | undefined)?.collections || [] }))
+    } finally {
+      favoriteInFlightRef.current.delete(appid)
+    }
   }
 
   const getSavedExe = async (appid: string): Promise<string | null> => {
@@ -522,11 +533,21 @@ export function LibraryPage() {
   }
 
   const deleteGame = async (g: LibGame) => {
+    setDeleting(true)
     setInstalled((prev) => prev.filter((x) => x.appid !== g.appid))
     try {
       await window.ucDownloads?.deleteInstalled?.(g.appid)
       await window.ucDownloads?.deleteDesktopShortcut?.(g.name)
     } catch {  }
+    finally {
+      setDeleting(false)
+      setDeleteFor(null)
+    }
+  }
+
+  const runDelete = async () => {
+    if (!deleteFor || deleting) return
+    await deleteGame(deleteFor)
   }
 
   useEffect(() => {
@@ -597,10 +618,10 @@ export function LibraryPage() {
               {SORT_LABEL[sort]}
             </button>
             <div style={{ display: "flex", gap: 2, padding: 3, borderRadius: 9, border: "1px solid color-mix(in srgb, var(--mf-t0) 9%, transparent)", background: "var(--mf-panel-2)" }}>
-              <ViewBtn active={view === "grid"} onClick={() => setView("grid")} title="grid">
+              <ViewBtn active={view === "grid"} onClick={() => setView("grid")} title="Grid">
                 <LayoutGrid size={14} strokeWidth={1.6} />
               </ViewBtn>
-              <ViewBtn active={view === "list"} onClick={() => setView("list")} title="list">
+              <ViewBtn active={view === "list"} onClick={() => setView("list")} title="List">
                 <List size={14} strokeWidth={1.6} />
               </ViewBtn>
             </div>
@@ -628,7 +649,7 @@ export function LibraryPage() {
             </span>
           </CenterState>
         ) : view === "grid" ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(168px, 1fr))", gap: 18, alignContent: "start" }}>
+          <div className="library-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(168px, 1fr))", gap: 18, alignContent: "start" }}>
             {rendered.map((g) => (
               <LibCard key={g.appid} game={g} hasUpdate={updates.has(g.appid)} onOpen={openDetail} onContextMenu={openRowMenuAt} onPlay={play} onStop={onStop} onMenu={openMenu} />
             ))}
@@ -679,7 +700,7 @@ export function LibraryPage() {
             onEditDetails: () => setEditFor(menu.game),
             onRefreshMetadata: () => { const g = installed.find((x) => x.appid === menu.game.appid); if (g) void refreshMetadata(g) },
             onToggleFavorite: () => toggleFavorite(menu.game.appid),
-            onDelete: () => { const g = installed.find((x) => x.appid === menu.game.appid); if (g) void deleteGame(g) },
+            onDelete: () => { const g = installed.find((x) => x.appid === menu.game.appid); if (g) { setMenu(null); setDeleteFor(g) } },
             onSetSteamId: () => { const g = installed.find((x) => x.appid === menu.game.appid); setSteamIdFor({ appid: menu.game.appid, name: menu.game.name, current: g?.steamAppId }) },
             onMods: () => navigate(`/g/${encodeURIComponent(menu.game.appid)}/mods`, { state: { game: menu.game } }),
             onWand: IS_WINDOWS || IS_LINUX ? () => { const game = installed.find((item) => item.appid === menu.game.appid); if (game) setWandFor(game) } : undefined,
@@ -689,6 +710,22 @@ export function LibraryPage() {
         />
       )}
       {launchFor && <LaunchOptionsDialog appid={launchFor.appid} gameName={launchFor.name} onClose={() => setLaunchFor(null)} />}
+      {deleteFor && (
+        <Dialog open onOpenChange={(open) => { if (!open && !deleting) setDeleteFor(null) }}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Delete {deleteFor.name}?</DialogTitle>
+              <DialogDescription>
+                This permanently deletes the game's installed folder from disk and removes its desktop shortcut. This cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" disabled={deleting} onClick={() => setDeleteFor(null)}>Cancel</Button>
+              <Button variant="destructive" disabled={deleting} onClick={() => void runDelete()}>{deleting ? "Deleting…" : "Delete"}</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
       {addOpen && <AddGamesDialog onClose={() => setAddOpen(false)} />}
       {editFor && (
         <EditDetailsDialog
@@ -757,11 +794,11 @@ type LibRowProps = {
 
 const LibCard = memo(function LibCard({ game: g, hasUpdate, onOpen, onContextMenu, onPlay, onStop, onMenu }: LibRowProps) {
   return (
-    <div onClick={() => onOpen(g)} onContextMenu={(e) => { e.preventDefault(); onContextMenu(g, e.clientX, e.clientY) }} className="mf-card" style={{ display: "flex", flexDirection: "column", border: "1px solid color-mix(in srgb, var(--mf-t0) 7%, transparent)", borderRadius: 10, overflow: "hidden", background: "var(--mf-panel)", cursor: "pointer", contentVisibility: "auto", containIntrinsicSize: "auto 300px" }}>
-      <div style={{ position: "relative", aspectRatio: "3 / 4", background: g.image ? "#0f0f0f" : COVER_LINES, display: "flex", alignItems: "flex-end", padding: 12 }}>
+    <div onClick={() => onOpen(g)} onContextMenu={(e) => { e.preventDefault(); onContextMenu(g, e.clientX, e.clientY) }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(g) } }} role="button" tabIndex={0} aria-label={`Open ${g.name}`} className="mf-card" style={{ display: "flex", flexDirection: "column", border: "1px solid color-mix(in srgb, var(--mf-t0) 7%, transparent)", borderRadius: 10, overflow: "hidden", background: "var(--mf-panel)", cursor: "pointer", contentVisibility: "auto", containIntrinsicSize: "auto 300px" }}>
+      <div style={{ position: "relative", aspectRatio: "3 / 4", background: g.image ? "var(--mf-well)" : COVER_LINES, display: "flex", alignItems: "flex-end", padding: 12 }}>
         {g.image && <SmartImage candidates={g.covers || []} steamAppId={g.steamAppId} name={g.name} alt={g.name} lazy style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />}
         {hasUpdate && (
-          <span title="update available" style={{ position: "absolute", top: 10, right: 10, padding: "3px 8px", borderRadius: 99, background: "rgba(0,0,0,0.6)", border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--mf-t1)" }}>update</span>
+          <span title="Update Available" style={{ position: "absolute", top: 10, right: 10, padding: "3px 8px", borderRadius: 99, background: "rgba(0,0,0,0.6)", border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--mf-t1)" }}>update</span>
         )}
         {!g.image && <span style={{ fontFamily: MONO, fontSize: 11, lineHeight: 1.35, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--mf-t2)" }}>{g.name}</span>}
       </div>
@@ -786,8 +823,8 @@ const LibCard = memo(function LibCard({ game: g, hasUpdate, onOpen, onContextMen
 
 const LibRow = memo(function LibRow({ game: g, hasUpdate, onOpen, onContextMenu, onPlay, onStop, onMenu }: LibRowProps) {
   return (
-    <div onClick={() => onOpen(g)} onContextMenu={(e) => { e.preventDefault(); onContextMenu(g, e.clientX, e.clientY) }} className="mf-listrow" style={{ display: "grid", gridTemplateColumns: "44px minmax(0,1fr) 150px 120px 140px", gap: 14, alignItems: "center", padding: "8px 14px", borderRadius: 8, cursor: "pointer", contentVisibility: "auto", containIntrinsicSize: "auto 64px" }}>
-      <div style={{ width: 40, height: 50, borderRadius: 5, overflow: "hidden", background: g.image ? "#0f0f0f" : COVER_LINES }}>
+    <div onClick={() => onOpen(g)} onContextMenu={(e) => { e.preventDefault(); onContextMenu(g, e.clientX, e.clientY) }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(g) } }} role="button" tabIndex={0} aria-label={`Open ${g.name}`} className="mf-listrow" style={{ display: "grid", gridTemplateColumns: "44px minmax(0,1fr) 150px 120px 140px", gap: 14, alignItems: "center", padding: "8px 14px", borderRadius: 8, cursor: "pointer", contentVisibility: "auto", containIntrinsicSize: "auto 64px" }}>
+      <div style={{ width: 40, height: 50, borderRadius: 5, overflow: "hidden", background: g.image ? "var(--mf-well)" : COVER_LINES }}>
         {g.image && <SmartImage candidates={g.covers || []} steamAppId={g.steamAppId} name={g.name} lazy style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
       </div>
       <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 9 }}>

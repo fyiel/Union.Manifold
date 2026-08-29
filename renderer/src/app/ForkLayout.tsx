@@ -157,7 +157,7 @@ function WindowButton({
       onClick={onClick}
       className={cn(
         "flex h-6 w-7 items-center justify-center rounded text-[var(--mf-t4)] transition-colors",
-        danger ? "hover:bg-[#7a2a2a] hover:text-white" : "hover:bg-white/10 hover:text-[var(--mf-t1)]"
+        danger ? "hover:bg-[color-mix(in_srgb,var(--destructive)_35%,black)] hover:text-white" : "hover:bg-white/10 hover:text-[var(--mf-t1)]"
       )}
     >
       {children}

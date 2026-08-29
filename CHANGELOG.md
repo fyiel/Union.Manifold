@@ -3,6 +3,134 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.7.0
+
+### Added
+
+- Gated download links now resolve in-app without Slipgate: when a host page
+  sits behind a Cloudflare gate or a JS-only download flow, Union.Manifold
+  opens its own hidden browser view (the same engine that renders the app),
+  lets the challenge pass the way it does for a normal browser, and hands the
+  captured download link or session cookies to the downloader. If a check
+  needs a human click, the same window appears for a second and hides again
+  once the download continues; without any interaction needed, nothing is
+  ever shown. Datanodes downloads use their new per-page token flow, and
+  gate-table hosts (1fichier, qiwi, megadb, filecrypt, vikingfile, akirabox,
+  fileq, mocha, zerofs) resolve in-app instead of only opening the browser.
+
+### Fixed
+
+- "Pre-Installed" editions deduplicate against the plain title again: the
+  hyphenless spelling produced by punctuation normalization slipped past the
+  edition-noise filter, so pre-installed releases showed up as separate
+  games.
+
+- Space-separated dates keep their time of day ("2024-03-01 10:00:00" no
+  longer collapses to midnight), so release timestamps sort correctly.
+
+- Verifications for different file hosts now run in parallel instead of
+  queueing behind one another, and a verification that needs your attention
+  can be cancelled straight from its toast. Long-running hidden sessions
+  announce themselves after a few seconds so a slow spinner is never
+  unexplained.
+
+- The aria2 downloader's RPC secret is passed through a private config file
+  instead of the process list, matching how proxy credentials were already
+  handled.
+
+- Deleting a game from the library now also drops its stored achievement
+  progress, so a reinstalled or re-imported game starts with a clean
+  achievements state instead of resurrecting unlocks from the deleted entry.
+
+- Browse scroll windowing works again. The scroll-window virtualization had
+  drifted out of sync with the live grid, producing misaligned rows; the
+  window geometry is repaired.
+
+- Game cards and library menu rows are keyboard accessible: focus lands
+  on the card itself and menu rows activate with Enter and Space instead
+  of responding only to mouse clicks.
+
+- Leftover console errors in the exe picker and controller hooks are
+  routed through the app logger instead of hitting the raw console, so
+  they show up in diagnostics like every other logged error.
+
+- Steam library detection on macOS checks the macOS Steam library roots,
+  so imported Steam games resolve on Mac installs. Log output redacts the
+  user's home path, keeping usernames out of shared diagnostics.
+
+- Arch pacman updates pick the right package again: the updater path
+  guessed x86_64 unconditionally, so ARM installs were handed the wrong
+  pacman package. Architecture is now detected the same way the install
+  script does it.
+
+- The install script detects architecture correctly, verifies downloads
+  against checksums before installing, and ships a proper icon, so a
+  corrupted or truncated download no longer gets installed as if it were
+  fine.
+
+- Deleting an installed game asks for confirmation first, and favorite
+  toggles ignore clicks while a favorite change is still in flight, so
+  double clicks can no longer delete a game by accident or flip a
+  favorite twice.
+
+- Timers started by the downloads, settings, and source game pages are
+  cleared when the page unmounts, so status updates no longer fire into
+  unmounted pages after navigation.
+
+- The in-app gate solver is harder to trip up: hosts that reject
+  referer-less visits (megadb) now solve fully on their own after a
+  same-origin re-navigation, hidden decoy buttons no longer swallow the
+  download click, and a harvested Cloudflare clearance no longer keeps the
+  window hidden when an interactive challenge still needs a human click.
+
+- GameBounty works again after the site moved its API to a v1 namespace on
+  the main domain, and ZeiGames search works again after the forum's result
+  markup changed.
+
+- Fileditch links resolve again: the site now hands out signed
+  goonditch.com URLs with exp/sig parameters alongside the classic
+  md5/expires form, and both are accepted.
+
+- Downloads no longer die at the first second on networks whose DNS
+  forwarder refuses aria2's async lookups: hostnames now resolve through
+  the operating system's resolver, which also honors /etc/hosts and local
+  name services.
+
+- Download rows no longer carry statuses the queue can never produce
+  again; the renderer only recognizes statuses the backend actually
+  emits, so nothing gets stuck rendering a state that will never
+  resolve.
+
+- Advanced Search's max year filter follows the current date instead of
+  a hardcoded year, so new releases stay reachable as time passes.
+
+- Games with broken install manifests are surfaced instead of silently
+  hidden from the library. A damaged manifest previously made the whole
+  entry vanish from the scan with no explanation; the entry now shows up
+  marked as broken so it can be repaired or removed.
+
+### Changed
+
+- Updater manifests are built once per platform with friendly release
+  notes attached, replacing the per-job manifest race fixed in 3.6.10
+  with a cleaner per-platform build step in the release workflow.
+
+- Hardcoded colors in the downloads, mods, and source game pages are
+  replaced with theme tokens, so those surfaces follow the active theme
+  and custom palettes like the rest of the app.
+
+- Settings tooltip titles are consistently capitalized.
+
+### Removed
+
+- Upstream telemetry and the legacy user-history cookie: the UC Plus
+  hook, cloud collection calls, and the old history cookie are gone, so
+  the app no longer phones anything home from the upstream fork.
+
+- The unused built-in asset protocol scope entry was dropped from the
+  Tauri config, keeping the asset protocol allowlist to what the app
+  actually serves.
+
 ## 3.6.10
 
 ### Fixed

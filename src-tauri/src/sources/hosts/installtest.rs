@@ -73,7 +73,7 @@ async fn detail_of(source: &str, slug: &str) -> Option<SourceGame> {
 }
 
 async fn resolve_any(source: &str, opt: &DownloadOption) -> ResolveResult {
-    crate::sources::adapter_resolve(source, opt).await
+    crate::sources::adapter_resolve_with(None, source, opt).await
 }
 
 async fn download_to(
