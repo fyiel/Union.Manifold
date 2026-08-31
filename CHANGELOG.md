@@ -3,6 +3,18 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.7.2
+
+### Fixed
+
+- The app no longer closes outright when a background task faults during an
+  active download: release builds previously aborted the entire process on
+  any background panic (on Windows this hit as soon as a download actually
+  started). Panics are now contained to the failing task, the download
+  surfaces an error instead, and the exact fault location is written to the
+  app log (`logs/app-logs.txt` in the app data folder) — if the app still
+  closes on you, that file tells us precisely where.
+
 ## 3.7.1
 
 ### Fixed
