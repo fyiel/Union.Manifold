@@ -14,6 +14,12 @@ All notable changes to Union.Manifold. This project is a fork of
 ### Fixed
 
 - Datanodes and numbered `.st` downloads.
+- RimWorld workshop mods deploy into per-mod folders under `Mods` instead of
+  being flattened into the `Mods` root, where the game could not load them.
+- Workshop downloads batch into one SteamCMD session per game instead of
+  paying a login per mod.
+- Mirror failure messages now show the direct host's real error instead of
+  only the resolver fallback's.
 
 ## 3.7.2
 
