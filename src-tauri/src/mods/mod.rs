@@ -1028,6 +1028,7 @@ pub(crate) enum ModLayout {
     MelonLoader,
     Fluffy,
     ModsFolder,
+    RimWorld,
     WuchangEnabler,
     WuchangPackage,
 }
@@ -1044,6 +1045,7 @@ const MOD_ENGINE_PROFILE: &str = ".union-manifold.me3";
 const MOD_ENGINE_DEPLOY_ROOT: &str = ".union-manifold-me3";
 const RESIDENT_EVIL_REQUIEM_STEAM_APPID: u64 = 3_764_200;
 const EVERYTHING_IS_CRAB_STEAM_APPID: u64 = 3_526_710;
+const RIMWORLD_STEAM_APPID: u64 = 294_100;
 const MEWGENICS_STEAM_APPID: u64 = 686_060;
 const MEWGENICS_DEPLOY_MARKER: &str = ".mewgenics-modpaths";
 const WUCHANG_STEAM_APPID: u64 = 2_277_560;
@@ -1492,6 +1494,53 @@ fn is_wuchang_enabler_identity(provider: &str, remote_id: &str, page_url: &str) 
     segments == ["wuchangfallenfeathers", "mods", "3"]
 }
 
+fn rimworld_about_at(dir: &Path) -> bool {
+    child_dir(dir, "about")
+        .map(|about| has_root_file(&about, "about.xml"))
+        .unwrap_or(false)
+}
+
+fn is_rimworld_mod_package(root: &Path) -> bool {
+    // classification_root descends into a lone wrapper directory, so the root
+    // can be the About folder itself.
+    let is_about_dir = root
+        .file_name()
+        .map(|n| n.to_string_lossy().eq_ignore_ascii_case("about"))
+        .unwrap_or(false);
+    if (is_about_dir && has_root_file(root, "about.xml")) || rimworld_about_at(root) {
+        return true;
+    }
+    // A tree already wrapped by the RimWorld staging layout: Mods/<name>/About/About.xml.
+    child_dir(root, "mods")
+        .map(|mods| {
+            std::fs::read_dir(mods)
+                .ok()
+                .into_iter()
+                .flatten()
+                .flatten()
+                .any(|entry| entry.path().is_dir() && rimworld_about_at(&entry.path()))
+        })
+        .unwrap_or(false)
+}
+
+fn is_rimworld_target(target: &Path) -> bool {
+    if !has_root_dir(target, &["Mods"]) {
+        return false;
+    }
+    std::fs::read_dir(target)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|entry| {
+            if !entry.path().is_dir() {
+                return false;
+            }
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            name.starts_with("rimworld") && name.ends_with("_data")
+        })
+}
+
 fn infer_deployment_plan_for_entry(
     target: &Path,
     staged: &Path,
@@ -1569,6 +1618,16 @@ fn infer_deployment_plan(target: &Path, staged: &Path, steam_appid: Option<u64>)
     }
     if let Some(layout) = game_layout(steam_appid) {
         return deployment_plan(layout, "", "matched the game-specific mod layout", "high");
+    }
+    if is_rimworld_mod_package(&root)
+        && (steam_appid == Some(RIMWORLD_STEAM_APPID) || is_rimworld_target(target))
+    {
+        return deployment_plan(
+            ModLayout::RimWorld,
+            "",
+            "the archive is a RimWorld mod package, which loads from a per-mod folder under Mods",
+            "high",
+        );
     }
     if has_root_file(&root, "modinfo.ini")
         && (fluffy_game(steam_appid).is_some() || is_fluffy_target(target))
@@ -1710,6 +1769,18 @@ fn infer_deployment_plan(target: &Path, staged: &Path, steam_appid: Option<u64>)
 }
 
 fn wrap_in_mods_folder(staged: &Path, fallback_name: &str) -> Result<(), String> {
+    wrap_in_named_mods_folder(staged, "mods", fallback_name)
+}
+
+fn apply_rimworld_layout(staged: &Path, fallback_name: &str) -> Result<(), String> {
+    wrap_in_named_mods_folder(staged, "Mods", fallback_name)
+}
+
+fn wrap_in_named_mods_folder(
+    staged: &Path,
+    dir_name: &str,
+    fallback_name: &str,
+) -> Result<(), String> {
     let entries: Vec<PathBuf> = std::fs::read_dir(staged)
         .map_err(|e| format!("stage read: {e}"))?
         .flatten()
@@ -1724,7 +1795,7 @@ fn wrap_in_mods_folder(staged: &Path, fallback_name: &str) -> Result<(), String>
     if entries.is_empty() || has_mods_dir {
         return Ok(());
     }
-    let mods_dir = staged.join("mods");
+    let mods_dir = staged.join(dir_name);
     std::fs::create_dir_all(&mods_dir).map_err(|e| format!("mods wrap: {e}"))?;
     if entries.len() == 1 && entries[0].is_dir() {
         let name = entries[0].file_name().unwrap().to_os_string();
@@ -2243,6 +2314,7 @@ fn apply_staging_layout(
         ModLayout::MelonLoader => Ok(()),
         ModLayout::Fluffy => apply_fluffy_layout(staged),
         ModLayout::ModsFolder => wrap_in_mods_folder(staged, fallback_name),
+        ModLayout::RimWorld => apply_rimworld_layout(staged, fallback_name),
         ModLayout::WuchangEnabler => apply_wuchang_enabler_layout(staged),
         ModLayout::WuchangPackage => apply_wuchang_package_layout(staged),
         ModLayout::BepInEx | ModLayout::RequiresInstaller => {
@@ -2531,7 +2603,7 @@ async fn flatten_tar(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-const DEPLOYMENT_PLAN_VERSION: u32 = 7;
+const DEPLOYMENT_PLAN_VERSION: u32 = 8;
 
 fn refresh_deployment_plans(state: &AppState, appid: &str, cfg: &mut GameMods) -> bool {
     let Ok(target) = deploy_target_dir(state, appid, cfg) else {
@@ -2577,6 +2649,7 @@ fn refresh_deployment_plans(state: &AppState, appid: &str, cfg: &mut GameMods) -
                 ModLayout::ModEngine3
                     | ModLayout::Lenny
                     | ModLayout::Fluffy
+                    | ModLayout::RimWorld
                     | ModLayout::WuchangEnabler
                     | ModLayout::WuchangPackage
             )
@@ -3708,6 +3781,84 @@ mod tests {
         assert_eq!(plan.layout, ModLayout::Raw);
         assert_eq!(plan.deploy_prefix, "Mods");
         assert_eq!(plan.confidence, "high");
+    }
+
+    #[test]
+    fn infers_rimworld_package_ahead_of_unity_dll_heuristic() {
+        let tmp = tempdir().unwrap();
+        let target = tmp.path().join("game");
+        let staged = tmp.path().join("archive");
+        std::fs::create_dir_all(target.join("Mods")).unwrap();
+        std::fs::create_dir_all(target.join("RimWorldWin64_Data")).unwrap();
+        write_file(&target.join("UnityPlayer.dll"), "x");
+        write_file(&staged.join("About/About.xml"), "<ModMetaData />");
+        write_file(&staged.join("1.6/Assemblies/Example.dll"), "x");
+
+        let plan = infer_deployment_plan(&target, &staged, Some(RIMWORLD_STEAM_APPID));
+
+        assert_eq!(plan.layout, ModLayout::RimWorld);
+        assert_eq!(plan.deploy_prefix, "");
+        assert_eq!(plan.confidence, "high");
+    }
+
+    #[test]
+    fn infers_rimworld_package_from_appid_alone() {
+        let tmp = tempdir().unwrap();
+        let target = tmp.path().join("game");
+        let staged = tmp.path().join("archive");
+        write_file(&staged.join("About/About.xml"), "<ModMetaData />");
+
+        let plan = infer_deployment_plan(&target, &staged, Some(RIMWORLD_STEAM_APPID));
+
+        assert_eq!(plan.layout, ModLayout::RimWorld);
+        assert_eq!(plan.deploy_prefix, "");
+    }
+
+    #[test]
+    fn rimworld_plan_ignores_unrelated_unity_game_without_appid() {
+        let tmp = tempdir().unwrap();
+        let target = tmp.path().join("game");
+        let staged = tmp.path().join("archive");
+        std::fs::create_dir_all(target.join("Mods")).unwrap();
+        write_file(&staged.join("About/About.xml"), "<ModMetaData />");
+
+        let plan = infer_deployment_plan(&target, &staged, None);
+
+        assert_ne!(plan.layout, ModLayout::RimWorld);
+    }
+
+    #[test]
+    fn rimworld_wrapped_tree_keeps_rimworld_plan() {
+        let tmp = tempdir().unwrap();
+        let target = tmp.path().join("game");
+        let staged = tmp.path().join("archive");
+        write_file(&staged.join("Mods/Example/About/About.xml"), "<ModMetaData />");
+
+        let plan = infer_deployment_plan(&target, &staged, Some(RIMWORLD_STEAM_APPID));
+
+        assert_eq!(plan.layout, ModLayout::RimWorld);
+        assert_eq!(plan.deploy_prefix, "");
+    }
+
+    #[test]
+    fn rimworld_layout_wraps_content_into_named_mod_folder() {
+        let tmp = tempdir().unwrap();
+        let staged = tmp.path().join("s");
+        write_file(&staged.join("About/About.xml"), "<ModMetaData />");
+        write_file(&staged.join("1.6/Assemblies/Example.dll"), "x");
+        apply_rimworld_layout(&staged, "Example Mod").unwrap();
+        let folder = safe_folder_name("Example Mod");
+        assert!(staged
+            .join("Mods")
+            .join(&folder)
+            .join("About/About.xml")
+            .is_file());
+        assert!(staged
+            .join("Mods")
+            .join(&folder)
+            .join("1.6/Assemblies/Example.dll")
+            .is_file());
+        assert!(!staged.join("About").exists());
     }
 
     #[test]
