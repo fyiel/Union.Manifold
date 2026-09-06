@@ -15,6 +15,10 @@ SLIPGATE_VERSION = "0.5.3"
 SLIPGATE_COMMIT = "e316640c35aabfbe83bc28f9ae1be9e8dbfbb7d0"
 FLARESOLVERR_VERSION = "3.5.0"
 FLARESOLVERR_COMMIT = "4ca91a24f87a73f963e1d6610cbf3b9f01c1cc1b"
+# Packaging revision: bump when the bundle layout changes without an upstream
+# version move, so already-installed runtimes see an update. r1 strips the
+# PyInstaller-bundled libreadline/libtinfo that broke FlareSolverr on Arch.
+RUNTIME_REV = "r1"
 FLARESOLVERR = {
     "linux-x86_64": {
         "name": "flaresolverr_linux_x64.tar.gz",
@@ -61,7 +65,7 @@ def main() -> None:
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     spec = FLARESOLVERR[args.platform]
-    runtime_version = f"{SLIPGATE_VERSION}-{FLARESOLVERR_VERSION}"
+    runtime_version = f"{SLIPGATE_VERSION}-{FLARESOLVERR_VERSION}-{RUNTIME_REV}"
     artifact_name = f"resolver-runtime-{args.platform}.zip"
     args.output.mkdir(parents=True, exist_ok=True)
 
@@ -141,6 +145,16 @@ def main() -> None:
         if args.platform == "linux-x86_64":
             for executable in [package / "slipgate" / "slipgate", package / "flaresolverr" / "flaresolverr"]:
                 executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+            # PyInstaller bundles libreadline/libtinfo, and exports them via
+            # LD_LIBRARY_PATH to every child process. On hosts where /bin/sh
+            # links readline (Arch and friends), the bundled older readline
+            # crashes the shell with a symbol error, which kills the bundled
+            # Chrome's version probe and FlareSolverr never starts. Same
+            # soname as the system lib, so dropping it is safe.
+            for bundled in package.rglob("libreadline.so.8"):
+                bundled.unlink()
+            for bundled in package.rglob("libtinfo.so.6"):
+                bundled.unlink()
 
         archive = args.output / artifact_name
         with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as output:
