@@ -244,7 +244,15 @@ async fn dispatch(_app: Option<&AppHandle>, option: &DownloadOption) -> ResolveR
                             ephemeral: true,
                             ..Default::default()
                         },
-                        Err(e) => not_resolvable(url, Some(&format!("Slipgate: {e}"))),
+                        Err(e) => not_resolvable(
+                            url,
+                            Some(&match r.reason.as_deref() {
+                                Some(reason) if !reason.is_empty() => {
+                                    format!("{reason}; Slipgate: {e}")
+                                }
+                                _ => format!("Slipgate: {e}"),
+                            }),
+                        ),
                     };
                 }
                 None => {
