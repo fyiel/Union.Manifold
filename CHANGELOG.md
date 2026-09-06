@@ -3,6 +3,18 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.8.0
+
+### Added
+
+- Built-in Slipgate and FlareSolverr runtime for Windows and Linux x64.
+- External Slipgate fallback.
+- Gamescope resolution controls.
+
+### Fixed
+
+- Datanodes and numbered `.st` downloads.
+
 ## 3.7.2
 
 ### Fixed
