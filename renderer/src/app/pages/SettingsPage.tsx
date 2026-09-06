@@ -1055,22 +1055,31 @@ function ModsTab({ onJumpToSources }: { onJumpToSources: () => void }) {
   const [sessionCookie, setSessionCookie] = useState("")
   const [sessionRevealed, setSessionRevealed] = useState(false)
   const [sessionUa, setSessionUa] = useState("")
+  const [steamUser, setSteamUser] = useState("")
+  const [steamPass, setSteamPass] = useState("")
+  const [steamSaved, setSteamSaved] = useState<string | null>(null)
+  const [steamPassRevealed, setSteamPassRevealed] = useState(false)
 
   useEffect(() => {
     let alive = true
     void (async () => {
       try {
-        const [k, sc, ua, ws] = await Promise.all([
+        const [k, sc, ua, ws, sa] = await Promise.all([
           window.ucSettings?.get?.("nexusApiKey"),
           window.ucSettings?.get?.("nexusSessionCookie"),
           window.ucSettings?.get?.("nexusUserAgent"),
           window.ucMods?.workshopStatus?.(),
+          window.ucMods?.workshopSteamAccount?.(),
         ])
         if (!alive) return
         if (typeof k === "string") setApiKey(k)
         if (typeof sc === "string") setSessionCookie(sc)
         if (typeof ua === "string") setSessionUa(ua)
         setSteamcmd(ws?.ok && ws.steamcmd ? ws.steamcmd : "absent")
+        if (sa?.ok && typeof sa.username === "string" && sa.username) {
+          setSteamSaved(sa.username)
+          setSteamUser(sa.username)
+        }
       } catch {  }
     })()
     return () => { alive = false }
@@ -1096,6 +1105,32 @@ function ModsTab({ onJumpToSources }: { onJumpToSources: () => void }) {
   }
 
   const steamcmdLabel = steamcmd === "ready" ? "ready" : steamcmd === "bootstrapping" ? "installing…" : "not installed"
+
+  const flashSaved = (key: string) => {
+    setSavedKey(key)
+    if (savedKeyTimerRef.current !== null) window.clearTimeout(savedKeyTimerRef.current)
+    savedKeyTimerRef.current = window.setTimeout(() => { savedKeyTimerRef.current = null; setSavedKey(null) }, 1600)
+  }
+
+  const saveSteamAccount = async () => {
+    const u = steamUser.trim()
+    if (!u || !steamPass) return
+    try {
+      await window.ucMods?.workshopSetSteamAccount?.(u, steamPass)
+      setSteamSaved(u)
+      setSteamPass("")
+      flashSaved("steamAccount")
+    } catch {  }
+  }
+
+  const clearSteamAccount = async () => {
+    try {
+      await window.ucMods?.workshopSetSteamAccount?.("", "")
+    } catch {  }
+    setSteamSaved(null)
+    setSteamUser("")
+    setSteamPass("")
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -1177,11 +1212,49 @@ function ModsTab({ onJumpToSources }: { onJumpToSources: () => void }) {
         />
       </div>
 
-      <Row title="Workshop downloader" desc="steamcmd fetches Workshop items — it installs itself automatically on your first Workshop mod install" last>
+      <Row title="Workshop downloader" desc="steamcmd fetches Workshop items — it installs itself automatically on your first Workshop mod install">
         <span style={{ padding: "3px 10px", borderRadius: 999, border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.09em", color: steamcmd === "ready" ? "var(--mf-t0)" : "var(--mf-t4)" }}>
           {steamcmd == null ? "…" : steamcmdLabel}
         </span>
       </Row>
+
+      <div style={SECTION}>
+        <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Steam account for owner-restricted Workshop items</div>
+        <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)", marginTop: 3, lineHeight: 1.5 }}>
+          Workshop mods download anonymously whenever the publisher allows it. When a game requires ownership, the installer signs in with this account instead — it must own the game. Stored locally like your other keys; the first sign-in asks for your Steam Guard code on the game's mods page.{savedKey === "steamAccount" ? " — saved" : ""}
+        </div>
+        <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+          <input
+            value={steamUser}
+            onChange={(e) => setSteamUser(e.target.value)}
+            placeholder="Steam username"
+            autoComplete="off"
+            spellCheck={false}
+            style={{ ...MONO_INPUT, flex: 1 }}
+          />
+          <input
+            type={steamPassRevealed ? "text" : "password"}
+            value={steamPass}
+            onChange={(e) => setSteamPass(e.target.value)}
+            placeholder={steamSaved ? "new password…" : "Steam password"}
+            autoComplete="off"
+            spellCheck={false}
+            style={{ ...MONO_INPUT, flex: 1 }}
+          />
+          <RevealButton shown={steamPassRevealed} onToggle={() => setSteamPassRevealed((v) => !v)} title="Password" />
+          <button type="button" className="mf-ghost" disabled={!steamUser.trim() || !steamPass} onClick={() => void saveSteamAccount()} style={{ display: "flex", alignItems: "center", gap: 7, padding: "0 15px", height: 38, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: !steamUser.trim() || !steamPass ? "var(--mf-t4)" : "var(--mf-t1)", fontSize: 12, fontWeight: 600, cursor: !steamUser.trim() || !steamPass ? "default" : "pointer", flexShrink: 0 }}>
+            Save
+          </button>
+          {steamSaved ? (
+            <button type="button" className="mf-ghost" onClick={() => void clearSteamAccount()} style={{ display: "flex", alignItems: "center", gap: 7, padding: "0 15px", height: 38, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t1)", fontSize: 12, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}>
+              Clear
+            </button>
+          ) : null}
+        </div>
+        <div style={{ marginTop: 10, fontFamily: MONO, fontSize: 11.5, color: steamSaved ? "var(--mf-t2)" : "var(--mf-t5)" }}>
+          {steamSaved ? `account ${steamSaved} saved — used only when anonymous download is refused` : "no account configured — anonymous downloads only"}
+        </div>
+      </div>
     </div>
   )
 }

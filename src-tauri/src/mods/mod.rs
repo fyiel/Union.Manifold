@@ -50,6 +50,9 @@ pub struct GameMods {
     pub nexus_domain_checked: bool,
     pub steam_appid: Option<u64>,
     pub workshop_supported: Option<bool>,
+    /// Set once an authenticated SteamCMD session rescues an item that
+    /// anonymous download refused; later installs skip the anonymous pass.
+    pub workshop_auth_required: bool,
     pub thunderstore_community: Option<String>,
     pub thunderstore_community_auto: bool,
     pub thunderstore_checked: bool,

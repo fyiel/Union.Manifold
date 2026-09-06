@@ -612,7 +612,10 @@ declare global {
       managedSlipgateUninstall?: () => Promise<ManagedSlipgateStatus>
       workshopBrowse?: (steamAppid: number, sort: string, period: string, page: number, query: string) => Promise<{ ok: boolean; items?: WorkshopBrowseItem[]; hasMore?: boolean; error?: string }>
       workshopInstall?: (appid: string, steamAppid: number, publishedFileId: string) => Promise<{ ok: boolean; started?: boolean; error?: string }>
-      workshopStatus?: () => Promise<{ ok: boolean; steamcmd?: "absent" | "bootstrapping" | "ready"; error?: string }>
+      workshopStatus?: () => Promise<{ ok: boolean; steamcmd?: "absent" | "bootstrapping" | "ready"; steamAccount?: string | null; error?: string }>
+      workshopSteamAccount?: () => Promise<{ ok: boolean; username?: string | null; error?: string }>
+      workshopSetSteamAccount?: (username: string, password: string) => Promise<{ ok: boolean; error?: string }>
+      workshopSteamGuardCode?: (code: string | null) => Promise<{ ok: boolean; error?: string }>
       thunderstoreCommunities?: () => Promise<{ ok: boolean; communities?: ThunderstoreCommunity[]; error?: string }>
       thunderstoreBrowse?: (community: string, sort: string, period: string, page: number, query: string) => Promise<{ ok: boolean; mods?: BrowseMod[]; hasMore?: boolean; error?: string }>
       thunderstoreVersions?: (community: string, fullName: string) => Promise<{ ok: boolean; versions?: ThunderstoreVersion[]; error?: string }>
@@ -620,6 +623,7 @@ declare global {
       onInstallProgress?: (callback: (data: ModInstallProgress) => void) => () => void
       onChanged?: (callback: (data: { appid: string }) => void) => () => void
       onNxmUnmatched?: (callback: (data: { domain: string; modId: string }) => void) => () => void
+      onSteamGuardRequired?: (callback: (data: { appid: string }) => void) => () => void
     }
   }
 }

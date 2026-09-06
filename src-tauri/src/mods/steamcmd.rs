@@ -190,36 +190,112 @@ async fn run_steamcmd_lines(
     Ok(format!("{collected}\n{err_text}"))
 }
 
+/// How steamcmd authenticates the session.
+#[derive(Clone, Default)]
+pub(crate) enum Login {
+    #[default]
+    Anonymous,
+    Account {
+        username: String,
+        password: String,
+        guard_code: Option<String>,
+    },
+}
+
+fn login_args(login: &Login) -> Vec<String> {
+    match login {
+        Login::Anonymous => vec!["+login".to_string(), "anonymous".to_string()],
+        Login::Account {
+            username,
+            password,
+            guard_code,
+        } => {
+            let mut args = Vec::new();
+            // The guard code flag must precede the login attempt it applies to.
+            if let Some(code) = guard_code {
+                args.push("+set_steam_guard_code".to_string());
+                args.push(code.clone());
+            }
+            args.push("+login".to_string());
+            args.push(username.clone());
+            args.push(password.clone());
+            args
+        }
+    }
+}
+
+/// How steamcmd's login attempt ended, classified from its output.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LoginVerdict {
+    Ok,
+    GuardRequired,
+    BadCredentials,
+    RateLimited,
+}
+
+fn classify_login(text: &str) -> LoginVerdict {
+    if text.contains("Invalid Password") || text.contains("Invalid password") {
+        return LoginVerdict::BadCredentials;
+    }
+    if text.contains("Steam Guard")
+        || text.contains("Account logon denied")
+        || text.contains("Account Logon Denied")
+        || text.contains("two-factor")
+        || text.contains("Two-factor")
+    {
+        return LoginVerdict::GuardRequired;
+    }
+    if text.contains("Rate Limit") || text.contains("rate limit") {
+        return LoginVerdict::RateLimited;
+    }
+    LoginVerdict::Ok
+}
+
+/// Per-item download failure inside a batched session.
+#[derive(Clone, Debug)]
+pub(crate) struct ItemFailure {
+    pub message: String,
+    /// True when the refusal smells like publisher ownership enforcement —
+    /// the only case an authenticated retry can fix.
+    pub ownership: bool,
+}
+
 /// One workshop item finished inside a batched steamcmd session.
 pub(crate) enum BatchEvent {
-    Item { fid: u64, result: Result<PathBuf, String> },
+    Item {
+        fid: u64,
+        result: Result<PathBuf, ItemFailure>,
+    },
 }
 
 /// Downloads several workshop items in a single steamcmd session: one
-/// process start and anonymous login covers every item. Each finished item
-/// (success or per-item failure) is reported through `events` as soon as
-/// steamcmd prints its result line.
+/// process start and login covers every item. Each finished item (success
+/// or per-item failure) is reported through `events` as soon as steamcmd
+/// prints its result line. Returns how the login itself went; when the
+/// login failed, per-item results are left to the caller.
 pub(crate) async fn run_workshop_download_batch(
     paths: &AppPaths,
+    login: &Login,
     steam_appid: u64,
     file_ids: &[u64],
     events: UnboundedSender<BatchEvent>,
-) -> Result<(), String> {
+) -> Result<LoginVerdict, String> {
     let _g = LOCK.lock().await;
     let exe = ensure_ready_locked(paths).await?;
     let d = dir(paths);
-    run_batch_in_dir(&d, &exe, steam_appid, file_ids, events).await
+    run_batch_in_dir(&d, &exe, login, steam_appid, file_ids, events).await
 }
 
 async fn run_batch_in_dir(
     d: &Path,
     exe: &Path,
+    login: &Login,
     steam_appid: u64,
     file_ids: &[u64],
     events: UnboundedSender<BatchEvent>,
-) -> Result<(), String> {
+) -> Result<LoginVerdict, String> {
     let appid_s = steam_appid.to_string();
-    let mut args: Vec<String> = vec!["+login".to_string(), "anonymous".to_string()];
+    let mut args: Vec<String> = login_args(login);
     for fid in file_ids {
         args.push("+workshop_download_item".to_string());
         args.push(appid_s.clone());
@@ -251,6 +327,11 @@ async fn run_batch_in_dir(
     })
     .await?;
 
+    let verdict = classify_login(&text);
+    if verdict != LoginVerdict::Ok {
+        return Ok(verdict);
+    }
+
     // Items steamcmd never reported on (e.g. the session died mid-batch):
     // trust the on-disk content dir, otherwise report a generic failure.
     for fid in file_ids {
@@ -268,7 +349,7 @@ async fn run_batch_in_dir(
         };
         events.send(BatchEvent::Item { fid: *fid, result }).ok();
     }
-    Ok(())
+    Ok(LoginVerdict::Ok)
 }
 
 fn parse_item_success(line: &str) -> Option<(u64, PathBuf)> {
@@ -296,34 +377,33 @@ fn parse_item_failure(line: &str) -> Option<(u64, String)> {
     (!reason.is_empty()).then_some((fid, reason))
 }
 
-fn item_error(reason: &str) -> String {
-    if reason.contains("No subscription")
+fn item_error(reason: &str) -> ItemFailure {
+    let ownership = reason.contains("No subscription")
         || reason.contains("Access Denied")
-        || reason.contains("Failure")
-    {
-        "This item requires a Steam account that owns this game — anonymous SteamCMD download was refused"
-            .to_string()
+        || reason.contains("Failure");
+    let message = if reason.contains("File Not Found") || reason.contains("No match") {
+        "this workshop item is gone or private — it cannot be downloaded".to_string()
     } else {
         format!("steamcmd download failed: {reason}")
-    }
+    };
+    ItemFailure { message, ownership }
 }
 
-fn download_error(text: &str) -> String {
-    if text.contains("No subscription")
-        || text.contains("Failure")
-        || text.contains("Access Denied")
-    {
-        return "This item requires a Steam account that owns this game — anonymous SteamCMD download was refused"
-            .to_string();
-    }
-    let tail: Vec<&str> = text
-        .lines()
-        .rev()
-        .filter(|l| !l.trim().is_empty())
-        .take(4)
-        .collect();
-    let tail: Vec<&str> = tail.into_iter().rev().collect();
-    format!("steamcmd download failed: {}", tail.join(" | "))
+fn download_error(text: &str) -> ItemFailure {
+    let ownership = text.contains("No subscription") || text.contains("Access Denied");
+    let message = if ownership {
+        "anonymous SteamCMD download was refused".to_string()
+    } else {
+        let tail: Vec<&str> = text
+            .lines()
+            .rev()
+            .filter(|l| !l.trim().is_empty())
+            .take(4)
+            .collect();
+        let tail: Vec<&str> = tail.into_iter().rev().collect();
+        format!("steamcmd download failed: {}", tail.join(" | "))
+    };
+    ItemFailure { message, ownership }
 }
 
 fn reported_content_dir(text: &str) -> Option<PathBuf> {
@@ -391,12 +471,57 @@ mod tests {
 
     #[test]
     fn maps_item_error_reasons() {
-        assert!(item_error("No subscription").contains("requires a Steam account"));
-        assert!(item_error("Access Denied").contains("requires a Steam account"));
+        assert!(item_error("No subscription").ownership);
+        assert!(item_error("Access Denied").ownership);
+        assert!(item_error("Failure").ownership);
+        assert!(!item_error("File Not Found").ownership);
         assert_eq!(
-            item_error("File Not Found"),
-            "steamcmd download failed: File Not Found"
+            item_error("File Not Found").message,
+            "this workshop item is gone or private — it cannot be downloaded"
         );
+        assert_eq!(
+            item_error("No match").message,
+            "this workshop item is gone or private — it cannot be downloaded"
+        );
+        assert_eq!(
+            item_error("IO Failure").message,
+            "steamcmd download failed: IO Failure"
+        );
+    }
+
+    #[test]
+    fn builds_login_args() {
+        assert_eq!(login_args(&Login::Anonymous), ["+login", "anonymous"]);
+        let no_guard = login_args(&Login::Account {
+            username: "user".to_string(),
+            password: "pass".to_string(),
+            guard_code: None,
+        });
+        assert_eq!(no_guard, ["+login", "user", "pass"]);
+        let guarded = login_args(&Login::Account {
+            username: "user".to_string(),
+            password: "pass".to_string(),
+            guard_code: Some("AB12C".to_string()),
+        });
+        assert_eq!(
+            guarded,
+            ["+set_steam_guard_code", "AB12C", "+login", "user", "pass"]
+        );
+    }
+
+    #[test]
+    fn classifies_login_outcome() {
+        // Captured from a live bogus-login probe.
+        let bad_pass = "Logging in user 'probe' [U:1:0] to Steam Public...\u{1b}[0mERROR (Invalid Password)";
+        assert_eq!(classify_login(bad_pass), LoginVerdict::BadCredentials);
+        let guard = "Logging in user 'probe' to Steam Public...FAILED (Account logon denied, need Steam Guard code)";
+        assert_eq!(classify_login(guard), LoginVerdict::GuardRequired);
+        let twofactor = "FAILED (Two-factor code mismatch)";
+        assert_eq!(classify_login(twofactor), LoginVerdict::GuardRequired);
+        let rate = "FAILED (Rate Limit Exceeded)";
+        assert_eq!(classify_login(rate), LoginVerdict::RateLimited);
+        let ok = "Connecting anonymously to Steam Public...\u{1b}[0mOK";
+        assert_eq!(classify_login(ok), LoginVerdict::Ok);
     }
 
     #[cfg(unix)]
@@ -413,6 +538,8 @@ while [ $# -gt 0 ]; do
     appid="$2"; fid="$3"
     if [ "$fid" = "999" ]; then
       printf 'ERROR! Download item %s failed (File Not Found).\n' "$fid"
+    elif [ "$fid" = "888" ]; then
+      printf 'ERROR! Download item %s failed (No subscription).\n' "$fid"
     else
       out="steamapps/workshop/content/$appid/$fid"
       mkdir -p "$out"
@@ -433,19 +560,58 @@ done
         }
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        run_batch_in_dir(&dir, &exe, 294100, &[111, 999, 222], tx)
+        let verdict = run_batch_in_dir(&dir, &exe, &Login::Anonymous, 294100, &[111, 999, 888, 222], tx)
             .await
             .unwrap();
+        assert_eq!(verdict, LoginVerdict::Ok);
 
         let mut outcomes = std::collections::HashMap::new();
         while let Ok(BatchEvent::Item { fid, result }) = rx.try_recv() {
             outcomes.insert(fid, result);
         }
-        assert_eq!(outcomes.len(), 3);
+        assert_eq!(outcomes.len(), 4);
         let ok111 = outcomes[&111].as_ref().unwrap();
         assert!(ok111.join("file.txt").is_file());
         assert!(outcomes[&222].as_ref().unwrap().join("file.txt").is_file());
         let err999 = outcomes[&999].as_ref().unwrap_err();
-        assert_eq!(err999, "steamcmd download failed: File Not Found");
+        assert!(!err999.ownership);
+        assert!(err999.message.contains("gone or private"));
+        let err888 = outcomes[&888].as_ref().unwrap_err();
+        assert!(err888.ownership);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn failed_login_skips_item_fallback() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("steamcmd");
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = r#"#!/bin/sh
+printf "Logging in user 'probe' [U:1:0] to Steam Public...ERROR (Invalid Password)\n"
+"#;
+        let exe = dir.join("fake-steamcmd.sh");
+        std::fs::write(&exe, script).unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let verdict = run_batch_in_dir(
+            &dir,
+            &exe,
+            &Login::Account {
+                username: "probe".to_string(),
+                password: "wrong".to_string(),
+                guard_code: None,
+            },
+            294100,
+            &[111, 222],
+            tx,
+        )
+        .await
+        .unwrap();
+        assert_eq!(verdict, LoginVerdict::BadCredentials);
+        assert!(rx.try_recv().is_err(), "no item events on login failure");
     }
 }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { CSSProperties, ReactNode } from "react"
 import { useLocation, useNavigate, useParams } from "react-router-dom"
 import {
-  ArrowDown, ArrowUp, Check, Download, FolderOpen, Globe, Package, Pencil, Puzzle, RefreshCw, Rocket, Trash2, Undo2, X,
+  ArrowDown, ArrowUp, Check, Download, FolderOpen, Globe, KeyRound, Package, Pencil, Puzzle, RefreshCw, Rocket, Trash2, Undo2, X,
 } from "lucide-react"
 import { CenterState, COVER_LINES, MONO, SearchIcon, Spinner, SELECT_BASE } from "@/app/manifold/ui"
 import { fmtBytes, formatNumber, proxyImageUrl } from "@/lib/utils"
@@ -314,6 +314,8 @@ export function GameModsPage() {
   const [progress, setProgress] = useState<Map<string, ModInstallProgress>>(new Map())
   const pendingProgress = useRef(new Map<string, ModInstallProgress>())
   const progressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [guardPrompt, setGuardPrompt] = useState(false)
+  const [guardCode, setGuardCode] = useState("")
   useEffect(() => {
     const offProgress = window.ucMods?.onInstallProgress?.((p) => {
       if (!p || p.appid !== appid) return
@@ -338,16 +340,34 @@ export function GameModsPage() {
         }, 100)
       }
     })
+    const offGuard = window.ucMods?.onSteamGuardRequired?.((d) => {
+      if (d?.appid !== appid) return
+      setGuardCode("")
+      setGuardPrompt(true)
+    })
     const offNxm = window.ucMods?.onNxmUnmatched?.((d) => {
       toast(`nxm link for “${d?.domain || "?"}” (mod ${d?.modId || "?"}) didn't match any installed game`, "error", 7000)
     })
     return () => {
-      offProgress?.(); offNxm?.()
+      offProgress?.(); offGuard?.(); offNxm?.()
       if (progressTimer.current) clearTimeout(progressTimer.current)
       progressTimer.current = null
       pendingProgress.current.clear()
     }
   }, [appid, toast])
+
+  const submitGuardCode = async () => {
+    const code = guardCode.trim()
+    setGuardPrompt(false)
+    setGuardCode("")
+    try { await window.ucMods?.workshopSteamGuardCode?.(code || null) } catch {  }
+  }
+
+  const cancelGuardCode = async () => {
+    setGuardPrompt(false)
+    setGuardCode("")
+    try { await window.ucMods?.workshopSteamGuardCode?.(null) } catch {  }
+  }
   const activeProgress = useMemo(() => [...progress.values()].sort((a, b) => a.modId.localeCompare(b.modId)), [progress])
 
   const mods = useMemo(() => [...(gs?.mods || [])].sort((a, b) => a.order - b.order), [gs])
@@ -757,6 +777,27 @@ const nexusDomain = gs?.nexusDomain || null
       </header>
 
       <div className="mf-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "18px 36px 48px" }}>
+
+        {guardPrompt ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 10, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", marginBottom: 12 }}>
+            <KeyRound size={15} strokeWidth={1.7} color="var(--mf-t3)" style={{ flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t2)" }}>Steam Guard code required</div>
+              <div style={{ fontFamily: MONO, fontSize: 10, color: "var(--mf-t5)", marginTop: 2, lineHeight: 1.5 }}>this Workshop item needs your Steam account — Steam sent you a code (email or mobile app). Usually asked once per machine.</div>
+            </div>
+            <input
+              value={guardCode}
+              onChange={(e) => setGuardCode(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") void submitGuardCode() }}
+              placeholder="code"
+              autoComplete="off"
+              spellCheck={false}
+              style={{ width: 90, height: 32, padding: "0 10px", borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t1)", fontFamily: MONO, fontSize: 12, outline: "none", flexShrink: 0 }}
+            />
+            <button type="button" className="mf-ghost" style={{ ...GHOST_BTN, opacity: guardCode.trim() ? 1 : 0.5, cursor: guardCode.trim() ? "pointer" : "default" }} disabled={!guardCode.trim()} onClick={() => void submitGuardCode()}>Submit</button>
+            <button type="button" className="mf-ghost" style={GHOST_BTN} onClick={() => void cancelGuardCode()}>Cancel</button>
+          </div>
+        ) : null}
 
         {activeProgress.map((p) => (
           <div key={p.modId} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 10, border: "1px solid var(--mf-line-2)", background: "var(--mf-panel)", marginBottom: 12 }}>

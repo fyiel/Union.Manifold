@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use regex::Regex;
 use serde_json::{json, Value};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::http;
 use crate::state::AppState;
@@ -394,19 +394,53 @@ async fn process_workshop_batch(app: &AppHandle, appid: &str, items: Vec<Pending
     }
 }
 
-async fn download_workshop_group(
-    app: &AppHandle,
-    appid: &str,
+#[derive(Default)]
+struct SessionOutcomes {
+    succeeded: HashSet<u64>,
+    failures: HashMap<u64, steamcmd::ItemFailure>,
+}
+
+fn override_failures(outcomes: &mut SessionOutcomes, fids: &[u64], message: &str) {
+    for fid in fids {
+        outcomes.failures.insert(
+            *fid,
+            steamcmd::ItemFailure {
+                message: message.to_string(),
+                ownership: false,
+            },
+        );
+    }
+}
+
+struct SessionCtx<'a> {
+    app: &'a AppHandle,
+    appid: &'a str,
+    names: &'a HashMap<u64, String>,
+    details: &'a [Value],
+}
+
+/// Runs one steamcmd session over `fids`, finalizing items as their
+/// downloads complete. Per-item failures are collected in `outcomes` for
+/// the caller to retry or report; the login verdict decides retries.
+async fn run_session(
+    ctx: &SessionCtx<'_>,
+    login: &steamcmd::Login,
     steam_appid: u64,
     fids: &[u64],
-    names: &HashMap<u64, String>,
-    details: &[Value],
-) {
+    outcomes: &mut SessionOutcomes,
+) -> steamcmd::LoginVerdict {
+    let SessionCtx {
+        app,
+        appid,
+        names,
+        details,
+    } = *ctx;
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let paths = app.state::<AppState>().paths.clone();
     let fids_owned = fids.to_vec();
+    let login = login.clone();
     let download = tauri::async_runtime::spawn(async move {
-        steamcmd::run_workshop_download_batch(&paths, steam_appid, &fids_owned, tx).await
+        steamcmd::run_workshop_download_batch(&paths, &login, steam_appid, &fids_owned, tx).await
     });
     let mut finished: HashSet<u64> = HashSet::new();
     while let Some(steamcmd::BatchEvent::Item { fid, result }) = rx.recv().await {
@@ -415,6 +449,8 @@ async fn download_workshop_group(
         let mod_id = format!("workshop-{fid}");
         match result {
             Ok(content) => {
+                outcomes.succeeded.insert(fid);
+                outcomes.failures.remove(&fid);
                 let detail = details
                     .iter()
                     .find(|d| {
@@ -429,20 +465,173 @@ async fn download_workshop_group(
                     }
                 }
             }
-            Err(e) => {
-                emit_progress(app, appid, &mod_id, name, "error", None, Some(&e));
+            Err(failure) => {
+                outcomes.failures.insert(fid, failure);
             }
         }
     }
-    let catastrophic = download
+    match download
         .await
         .map_err(|e| format!("steamcmd task failed: {e}"))
-        .and_then(|r| r);
-    if let Err(e) = catastrophic {
-        for fid in fids {
-            if finished.contains(fid) {
-                continue;
+        .and_then(|r| r)
+    {
+        Ok(verdict) => verdict,
+        Err(e) => {
+            for fid in fids {
+                if !finished.contains(fid) {
+                    outcomes.failures.entry(*fid).or_insert_with(|| {
+                        steamcmd::ItemFailure {
+                            message: e.clone(),
+                            ownership: false,
+                        }
+                    });
+                }
             }
+            steamcmd::LoginVerdict::Ok
+        }
+    }
+}
+
+async fn download_workshop_group(
+    app: &AppHandle,
+    appid: &str,
+    steam_appid: u64,
+    fids: &[u64],
+    names: &HashMap<u64, String>,
+    details: &[Value],
+) {
+    let state = app.state::<AppState>();
+    let mut outcomes = SessionOutcomes::default();
+    let ctx = SessionCtx {
+        app,
+        appid,
+        names,
+        details,
+    };
+
+    let known_auth_required = load_config(&state.paths, appid).workshop_auth_required;
+    if !known_auth_required {
+        run_session(
+            &ctx,
+            &steamcmd::Login::Anonymous,
+            steam_appid,
+            fids,
+            &mut outcomes,
+        )
+        .await;
+    }
+
+    // Anonymous first; only ownership refusals earn an authenticated retry.
+    let mut pending: Vec<u64> = if known_auth_required {
+        fids.to_vec()
+    } else {
+        fids.iter()
+            .copied()
+            .filter(|f| {
+                !outcomes.succeeded.contains(f)
+                    && outcomes
+                        .failures
+                        .get(f)
+                        .map(|x| x.ownership)
+                        .unwrap_or(false)
+            })
+            .collect()
+    };
+
+    let account = steam_account(&state);
+    if !pending.is_empty() {
+        if let Some((username, password)) = account.clone() {
+        let retried = pending.clone();
+        let mut guard_code: Option<String> = None;
+        for attempt in 0..3 {
+            for fid in &pending {
+                outcomes.failures.remove(fid);
+                emit_progress(
+                    app,
+                    appid,
+                    &format!("workshop-{fid}"),
+                    &names[fid],
+                    "downloading",
+                    None,
+                    None,
+                );
+            }
+            let login = steamcmd::Login::Account {
+                username: username.clone(),
+                password: password.clone(),
+                guard_code: guard_code.clone(),
+            };
+            let verdict = run_session(&ctx, &login, steam_appid, &pending, &mut outcomes).await;
+            pending.retain(|f| !outcomes.succeeded.contains(f));
+            if pending.is_empty() {
+                break;
+            }
+            match verdict {
+                steamcmd::LoginVerdict::GuardRequired if attempt < 2 => {
+                    match request_guard_code(app, appid).await {
+                        Some(code) => guard_code = Some(code),
+                        None => {
+                            override_failures(
+                                &mut outcomes,
+                                &pending,
+                                "Steam Guard sign-in was cancelled — the item needs a Steam account that owns the game",
+                            );
+                            break;
+                        }
+                    }
+                }
+                steamcmd::LoginVerdict::GuardRequired => {
+                    override_failures(
+                        &mut outcomes,
+                        &pending,
+                        "the Steam Guard code was rejected — try installing again",
+                    );
+                    break;
+                }
+                steamcmd::LoginVerdict::BadCredentials => {
+                    override_failures(
+                        &mut outcomes,
+                        &pending,
+                        "the saved Steam password was rejected — update it under Settings → Mods",
+                    );
+                    break;
+                }
+                steamcmd::LoginVerdict::RateLimited => {
+                    override_failures(
+                        &mut outcomes,
+                        &pending,
+                        "Steam rate-limited the login — try again later",
+                    );
+                    break;
+                }
+                steamcmd::LoginVerdict::Ok => break,
+            }
+        }
+        // Once an account session rescues an item, this game is known to
+        // enforce ownership: skip the doomed anonymous pass from now on.
+        if !known_auth_required && retried.iter().any(|f| outcomes.succeeded.contains(f)) {
+            let mut cfg = load_config(&state.paths, appid);
+            cfg.workshop_auth_required = true;
+            save_config(&state.paths, appid, &cfg);
+        }
+        }
+    }
+
+    let has_account = account.is_some();
+    for fid in fids {
+        if outcomes.succeeded.contains(fid) {
+            continue;
+        }
+        if let Some(failure) = outcomes.failures.get(fid) {
+            let message = if failure.ownership {
+                if has_account {
+                    "your Steam account could not download this item — the account may not own the game, or the publisher blocks SteamCMD downloads".to_string()
+                } else {
+                    "this item requires a Steam account that owns the game — add yours under Settings → Mods".to_string()
+                }
+            } else {
+                failure.message.clone()
+            };
             emit_progress(
                 app,
                 appid,
@@ -450,7 +639,7 @@ async fn download_workshop_group(
                 &names[fid],
                 "error",
                 None,
-                Some(&e),
+                Some(&message),
             );
         }
     }
@@ -494,9 +683,87 @@ async fn finalize_workshop_item(
     Ok(())
 }
 
+fn steam_account(state: &AppState) -> Option<(String, String)> {
+    let username = state.settings.get_string("steamUsername")?;
+    let username = username.trim().to_string();
+    let password = state.settings.get_string("steamPassword")?;
+    if username.is_empty() || password.is_empty() {
+        return None;
+    }
+    Some((username, password))
+}
+
+static GUARD_PROMPT: LazyLock<
+    tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<Option<String>>>>,
+> = LazyLock::new(|| tokio::sync::Mutex::new(None));
+
+/// Surfaces a Steam Guard code request to the UI and waits for the code.
+/// steamcmd caches the resulting login token in its own config dir, so this
+/// prompt normally appears once per machine.
+async fn request_guard_code(app: &AppHandle, appid: &str) -> Option<String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    {
+        let mut slot = GUARD_PROMPT.lock().await;
+        *slot = Some(tx);
+    }
+    app.emit("mods:steam-guard-required", json!({ "appid": appid }))
+        .ok();
+    tokio::time::timeout(Duration::from_secs(5 * 60), rx)
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+        .flatten()
+}
+
+#[tauri::command(async)]
+pub fn workshop_steam_account(state: State<'_, AppState>) -> Value {
+    let username = state
+        .settings
+        .get_string("steamUsername")
+        .map(|u| u.trim().to_string())
+        .filter(|u| !u.is_empty());
+    json!({ "ok": true, "username": username })
+}
+
+#[tauri::command(async)]
+pub fn workshop_set_steam_account(
+    state: State<'_, AppState>,
+    username: String,
+    password: String,
+) -> Value {
+    let username = username.trim().to_string();
+    if username.is_empty() {
+        state.settings.set("steamUsername", Value::Null);
+        state.settings.set("steamPassword", Value::Null);
+    } else {
+        state.settings.set("steamUsername", json!(username));
+        state.settings.set("steamPassword", json!(password));
+    }
+    json!({ "ok": true })
+}
+
+#[tauri::command]
+pub async fn workshop_steam_guard_code(code: Option<String>) -> Value {
+    let mut slot = GUARD_PROMPT.lock().await;
+    if let Some(tx) = slot.take() {
+        tx.send(code.map(|c| c.trim().to_string()).filter(|c| !c.is_empty()))
+            .ok();
+    }
+    json!({ "ok": true })
+}
+
 #[tauri::command(async)]
 pub fn workshop_status(state: State<'_, AppState>) -> Value {
-    json!({ "ok": true, "steamcmd": steamcmd::status(&state.paths) })
+    let username = state
+        .settings
+        .get_string("steamUsername")
+        .map(|u| u.trim().to_string())
+        .filter(|u| !u.is_empty());
+    json!({
+        "ok": true,
+        "steamcmd": steamcmd::status(&state.paths),
+        "steamAccount": username,
+    })
 }
 
 #[cfg(test)]
