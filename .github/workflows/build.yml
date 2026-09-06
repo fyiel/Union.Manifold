@@ -278,6 +278,10 @@ jobs:
                 "windows-x86_64": {url: $windowsUrl, sha256: $windowsSha, size: $windowsSize}
               }}' > resolver-runtime/resolver-runtime.json
           bunx @tauri-apps/cli signer sign resolver-runtime/resolver-runtime.json
+          # the tauri cli emits the minisign file base64-wrapped; the app
+          # verifies the standard text format, so unwrap before uploading
+          base64 -d resolver-runtime/resolver-runtime.json.sig > resolver-runtime/resolver-runtime.json.minisign
+          mv resolver-runtime/resolver-runtime.json.minisig resolver-runtime/resolver-runtime.json.sig
           gh release upload "$TAG" \
             resolver-runtime/resolver-runtime-linux-x86_64.zip \
             resolver-runtime/resolver-runtime-windows-x86_64.zip \
