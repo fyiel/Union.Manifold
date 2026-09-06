@@ -20,8 +20,8 @@ bun run dev
 ```
 `bun run fetch-sidecars` grabs the aria2c and 7z binaries the app shells out to. `bun run build` produces a packaged app.
 
-### local Slipgate resolver
-Slipgate-dependent sources can run locally without changing the app installer size. Install Docker Desktop or Docker Engine with Compose, then open Settings, Sources and choose **Install with Docker**. Union.Manifold builds Slipgate from its pinned public release commit, pulls the pinned FlareSolverr image, binds the resolver to loopback with a generated key and manages start, stop, update and removal. A remote Slipgate URL remains supported.
+### built-in Slipgate resolver
+Slipgate-dependent sources run locally without Docker or a separately managed app. On supported Windows and Linux x64 systems, Union.Manifold downloads its verified resolver runtime in the background, binds it to loopback with a generated key, and manages startup, shutdown, updates and removal. A remote Slipgate URL remains available under the advanced settings.
 
 ### automatic mod deployment
 Nexus, Workshop and Thunderstore installs share a per-mod deployment planner. It recognizes game-relative archive trees, BepInEx, Mod Engine 3, Lenny's Mod Loader, MelonLoader, Bethesda Data folders, Unreal Engine Paks, structured Mods folders, REFramework autorun scripts and Fluffy packages. The Mods page reports compatible loaders from official Steam title IDs and installed game files: Mod Engine 3 is limited to its five supported FromSoftware titles, Lenny's Mod Loader to Grand Theft Auto V Legacy and Red Dead Redemption 2, MelonLoader to detected Windows Unity games, and Fluffy to known titles or RE Engine/MT Framework layouts.
