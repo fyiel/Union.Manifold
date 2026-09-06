@@ -209,13 +209,89 @@ jobs:
           fi
           gh release upload "${{ needs.check.outputs.tag }}" union-manifold-*x86_64.pkg.tar.zst* --clobber
 
+  resolver-runtime:
+    needs: check
+    if: needs.check.outputs.release == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux-x86_64
+          - os: windows-latest
+            platform: windows-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install runtime builder
+        run: python -m pip install pyinstaller==6.20.0
+      - name: Build resolver runtime
+        run: python renderer/scripts/build-resolver-runtime.py --platform ${{ matrix.platform }} --output resolver-runtime
+      - uses: actions/upload-artifact@v4
+        with:
+          name: resolver-runtime-${{ matrix.platform }}
+          path: resolver-runtime/*
+          if-no-files-found: error
+          retention-days: 3
+
+  resolver-runtime-publish:
+    needs: [check, resolver-runtime]
+    if: needs.check.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: resolver-runtime-*
+          path: resolver-runtime
+          merge-multiple: true
+      - name: Publish resolver runtime and manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.check.outputs.tag }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          version=$(jq -r .version resolver-runtime/resolver-runtime-linux-x86_64.json)
+          slipgate=$(jq -r .slipgateVersion resolver-runtime/resolver-runtime-linux-x86_64.json)
+          flaresolverr=$(jq -r .flaresolverrVersion resolver-runtime/resolver-runtime-linux-x86_64.json)
+          jq -n \
+            --arg version "$version" \
+            --arg slipgate "$slipgate" \
+            --arg flaresolverr "$flaresolverr" \
+            --arg linuxUrl "https://github.com/${{ github.repository }}/releases/download/$TAG/resolver-runtime-linux-x86_64.zip" \
+            --arg linuxSha "$(jq -r .sha256 resolver-runtime/resolver-runtime-linux-x86_64.json)" \
+            --argjson linuxSize "$(jq -r .size resolver-runtime/resolver-runtime-linux-x86_64.json)" \
+            --arg windowsUrl "https://github.com/${{ github.repository }}/releases/download/$TAG/resolver-runtime-windows-x86_64.zip" \
+            --arg windowsSha "$(jq -r .sha256 resolver-runtime/resolver-runtime-windows-x86_64.json)" \
+            --argjson windowsSize "$(jq -r .size resolver-runtime/resolver-runtime-windows-x86_64.json)" \
+            '{version: $version, slipgateVersion: $slipgate, flaresolverrVersion: $flaresolverr,
+              platforms: {
+                "linux-x86_64": {url: $linuxUrl, sha256: $linuxSha, size: $linuxSize},
+                "windows-x86_64": {url: $windowsUrl, sha256: $windowsSha, size: $windowsSize}
+              }}' > resolver-runtime/resolver-runtime.json
+          bunx tauri signer sign resolver-runtime/resolver-runtime.json
+          gh release upload "$TAG" \
+            resolver-runtime/resolver-runtime-linux-x86_64.zip \
+            resolver-runtime/resolver-runtime-windows-x86_64.zip \
+            resolver-runtime/resolver-runtime.json \
+            resolver-runtime/resolver-runtime.json.sig \
+            --clobber
+
   # Everything above builds into a DRAFT release (created once in the check
   # job) so no platform asset or signature is ever public half-uploaded. This
   # job runs only after every matrix build AND the pacman upload succeeded,
   # fills the release notes from the matching CHANGELOG.md section, and
   # publishes it, so a release ships automatically with no manual click.
   publish:
-    needs: [check, build]
+    needs: [check, build, resolver-runtime-publish]
     if: needs.check.outputs.release == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -238,52 +314,26 @@ jobs:
           # Strip leading and trailing blank lines.
           changes=$(printf '%s\n' "$changes" | awk 'NF {f=1} f' | tac | awk 'NF {f=1} f' | tac)
           if [ -z "$changes" ]; then
-            echo "::warning::no CHANGELOG.md section for $VERSION, using a placeholder"
-            changes="_Maintenance release: bug fixes and improvements._"
+            changes="No changelog provided."
           fi
+          changes=$(printf '%s\n' "$changes" | perl -CSDA -pe 's/\x{2014}|\x{2013}/-/g')
 
           asset_base="https://github.com/${{ github.repository }}/releases/download/$TAG"
           {
-            printf 'Union.Manifold %s is ready! If the app is already installed, just restart it and accept the update prompt — otherwise grab the download for your operating system below.\n\n' "$VERSION"
-            printf '## 📦 Downloads\n\n'
-            printf -- '- 🪟 **Windows 10/11** — [Download the installer](%s/Union.Manifold_%s_x64-setup.exe)\n' "$asset_base" "$VERSION"
-            printf -- '- 🍎 **Mac (Apple Silicon / M-series)** — [Download the disk image](%s/Union.Manifold_%s_aarch64.dmg)\n' "$asset_base" "$VERSION"
-            printf -- '- 🍎 **Mac (Intel)** — [Download the disk image](%s/Union.Manifold_%s_x64.dmg)\n' "$asset_base" "$VERSION"
-            printf -- '- 🐧 **Linux** — [Download the AppImage](%s/Union.Manifold_%s_amd64.AppImage)\n\n' "$asset_base" "$VERSION"
-            printf 'That is all most people need. Prefer a native Linux package? A .deb, .rpm, and Arch package are attached too — expand the section below.\n'
+            printf '# Union.Manifold %s\n\n' "$VERSION"
+            printf '## Downloads\n\n'
+            printf -- '- [Windows installer](%s/Union.Manifold_%s_x64-setup.exe)\n' "$asset_base" "$VERSION"
+            printf -- '- [macOS Apple Silicon](%s/Union.Manifold_%s_aarch64.dmg)\n' "$asset_base" "$VERSION"
+            printf -- '- [macOS Intel](%s/Union.Manifold_%s_x64.dmg)\n' "$asset_base" "$VERSION"
+            printf -- '- [Linux AppImage](%s/Union.Manifold_%s_amd64.AppImage)\n' "$asset_base" "$VERSION"
+            printf -- '- [Linux deb](%s/Union.Manifold_%s_amd64.deb)\n' "$asset_base" "$VERSION"
+            printf -- '- [Linux rpm](%s/Union.Manifold-%s-1.x86_64.rpm)\n' "$asset_base" "$VERSION"
+            printf -- '- [Linux Arch package](%s/union-manifold-x86_64.pkg.tar.zst)\n' "$asset_base"
+            printf '\n## Changes\n\n'
+            printf '%s\n' "$changes"
           } > notes.md
           {
-            printf '%s\n' \
-              '' \
-              '<details>' \
-              '<summary><b>Other downloads & technical files (for advanced users)</b></summary>' \
-              '' \
-              'Everything else attached to this release lives here. Safe to ignore unless you know you need it.' \
-              '' \
-              '**Other ways to install on Linux**' \
-              '' \
-              '- Debian / Ubuntu: the .deb package attached to this release' \
-              '- Fedora / openSUSE: the .rpm package attached to this release (stable-named copy: union-manifold-x86_64.rpm)' \
-              '- Arch Linux: union-manifold-x86_64.pkg.tar.zst plus its detached PGP signature - import its signing key (union-manifold-signing-key.asc in the repository) once, then pacman -U accepts the download URL' \
-              '' \
-              '**Files that power automatic updates**' \
-              '' \
-              '- latest.json - a small index file installed apps check to discover that a new version exists.' \
-              '- *.sig files - short digital signatures that let the app verify each download really came from this project.' \
-              '' \
-              '**macOS app archives**' \
-              '' \
-              '- Union.Manifold_aarch64.app.tar.gz and Union.Manifold_x64.app.tar.gz (used internally by the updater)' \
-              '' \
-              '</details>'
-          } >> notes.md
-          {
-            printf '\n---\n\n## What changed in %s\n\n' "$VERSION"
-            printf '%s\n' "$changes"
-          } >> notes.md
-          {
-            printf 'Union.Manifold %s — see the release page for downloads.\n\n%s\n' \
-              "$VERSION" "$changes"
+            printf 'Union.Manifold %s\n\n%s\n' "$VERSION" "$changes"
           } > updater-notes.md
           echo "----- release notes -----"; cat notes.md; echo "-------------------------"
           # Build the updater manifest once, here, from the release's own
@@ -302,7 +352,7 @@ jobs:
                 --arg url "$dl/$asset" \
                 '{ ($key): { signature: $signature, url: $url } }' >> "$entries"
             else
-              echo "::error::updater signature missing for $key ($sig_name) — this platform will not receive auto-updates for v$VERSION"
+              echo "::error::updater signature missing for $key ($sig_name) - this platform will not receive auto-updates for v$VERSION"
               missing=$((missing + 1))
             fi
           }
@@ -330,10 +380,10 @@ jobs:
                  platforms: ($plats | add) }' > latest.json
             gh release upload "$TAG" latest.json --clobber
           else
-            echo "::error::no updater signatures found on release $TAG at all — not uploading any updater manifest"
+            echo "::error::no updater signatures found on release $TAG at all - not uploading any updater manifest"
           fi
           rm -f "$entries"
           if [ "$missing" -gt 0 ]; then
-            echo "::error::$missing updater platform(s) skipped due to missing signatures — fix the flaky upload before relying on auto-update"
+            echo "::error::$missing updater platform(s) skipped due to missing signatures - fix the flaky upload before relying on auto-update"
           fi
           gh release edit "$TAG" --notes-file notes.md --draft=false --latest
