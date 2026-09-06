@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
+use std::time::Duration;
 
 use regex::Regex;
 use serde_json::{json, Value};
@@ -251,6 +252,26 @@ pub(crate) async fn fetch_details(ids: &[String]) -> Result<Vec<Value>, String> 
         .collect())
 }
 
+struct PendingWorkshop {
+    app: AppHandle,
+    steam_appid: u64,
+    fid: u64,
+}
+
+#[derive(Default)]
+struct WorkshopQueue {
+    pending: Vec<PendingWorkshop>,
+    running: bool,
+}
+
+static WORKSHOP_QUEUES: LazyLock<tokio::sync::Mutex<HashMap<String, WorkshopQueue>>> =
+    LazyLock::new(|| tokio::sync::Mutex::new(HashMap::new()));
+
+// Installs clicked in quick succession are folded into one steamcmd session:
+// the worker waits for the queue to go quiet (bounded) before draining it.
+const BATCH_QUIET: Duration = Duration::from_millis(600);
+const BATCH_MAX_WAIT: Duration = Duration::from_secs(4);
+
 #[tauri::command]
 pub async fn workshop_install(
     app: AppHandle,
@@ -273,51 +294,177 @@ pub async fn workshop_install(
                 save_config(&state.paths, &appid, &cfg);
             }
         }
-        tauri::async_runtime::spawn(run_workshop_install(
-            app.clone(),
-            appid.clone(),
-            steam_appid,
-            fid,
-        ));
+        {
+            let mut map = WORKSHOP_QUEUES.lock().await;
+            let queue = map.entry(appid.clone()).or_default();
+            if !queue.pending.iter().any(|p| p.fid == fid) {
+                queue.pending.push(PendingWorkshop {
+                    app: app.clone(),
+                    steam_appid,
+                    fid,
+                });
+            }
+            if !queue.running {
+                queue.running = true;
+                tauri::async_runtime::spawn(workshop_queue_worker(appid.clone()));
+            }
+        }
         Ok(json!({ "ok": true, "started": true }))
     }
     .await;
     Ok(fold(res))
 }
 
-async fn run_workshop_install(app: AppHandle, appid: String, steam_appid: u64, fid: u64) {
-    let detail = fetch_details(&[fid.to_string()])
-        .await
-        .ok()
-        .and_then(|items| items.into_iter().next());
-    let name = detail
-        .as_ref()
-        .and_then(|d| d.get("name").and_then(|n| n.as_str()).map(String::from))
-        .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| format!("Workshop item {fid}"));
-
-    let mod_id = format!("workshop-{fid}");
-    if let Err(e) =
-        workshop_install_inner(&app, &appid, steam_appid, fid, &name, detail.as_ref()).await
-    {
-        emit_progress(&app, &appid, &mod_id, &name, "error", None, Some(&e));
+async fn collect_workshop_batch(appid: &str) -> Vec<PendingWorkshop> {
+    let begin = std::time::Instant::now();
+    let mut last = 0usize;
+    loop {
+        tokio::time::sleep(BATCH_QUIET).await;
+        let mut map = WORKSHOP_QUEUES.lock().await;
+        let Some(queue) = map.get_mut(appid) else {
+            return Vec::new();
+        };
+        let len = queue.pending.len();
+        if len == 0 {
+            queue.running = false;
+            return Vec::new();
+        }
+        if len == last || begin.elapsed() >= BATCH_MAX_WAIT {
+            return std::mem::take(&mut queue.pending);
+        }
+        last = len;
     }
 }
 
-async fn workshop_install_inner(
+async fn workshop_queue_worker(appid: String) {
+    loop {
+        let batch = collect_workshop_batch(&appid).await;
+        if batch.is_empty() {
+            return;
+        }
+        let app = batch[0].app.clone();
+        process_workshop_batch(&app, &appid, batch).await;
+    }
+}
+
+async fn process_workshop_batch(app: &AppHandle, appid: &str, items: Vec<PendingWorkshop>) {
+    let id_strings: Vec<String> = items.iter().map(|i| i.fid.to_string()).collect();
+    let details = fetch_details(&id_strings).await.unwrap_or_default();
+    let detail_of = |fid: u64| {
+        details
+            .iter()
+            .find(|d| d.get("remoteId").and_then(|v| v.as_str()) == Some(fid.to_string().as_str()))
+    };
+    let names: HashMap<u64, String> = items
+        .iter()
+        .map(|i| {
+            let name = detail_of(i.fid)
+                .and_then(|d| d.get("name").and_then(|n| n.as_str()))
+                .filter(|n| !n.is_empty())
+                .map(String::from)
+                .unwrap_or_else(|| format!("Workshop item {}", i.fid));
+            (i.fid, name)
+        })
+        .collect();
+
+    for item in &items {
+        emit_progress(
+            app,
+            appid,
+            &format!("workshop-{}", item.fid),
+            &names[&item.fid],
+            "downloading",
+            None,
+            None,
+        );
+    }
+
+    // One steamcmd session per Steam appid (in practice a single game means
+    // a single session covering the whole batch).
+    let mut groups: Vec<(u64, Vec<u64>)> = Vec::new();
+    for item in &items {
+        if let Some(group) = groups.iter_mut().find(|(a, _)| *a == item.steam_appid) {
+            group.1.push(item.fid);
+        } else {
+            groups.push((item.steam_appid, vec![item.fid]));
+        }
+    }
+    for (steam_appid, fids) in groups {
+        download_workshop_group(app, appid, steam_appid, &fids, &names, &details).await;
+    }
+}
+
+async fn download_workshop_group(
     app: &AppHandle,
     appid: &str,
     steam_appid: u64,
+    fids: &[u64],
+    names: &HashMap<u64, String>,
+    details: &[Value],
+) {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let paths = app.state::<AppState>().paths.clone();
+    let fids_owned = fids.to_vec();
+    let download = tauri::async_runtime::spawn(async move {
+        steamcmd::run_workshop_download_batch(&paths, steam_appid, &fids_owned, tx).await
+    });
+    let mut finished: HashSet<u64> = HashSet::new();
+    while let Some(steamcmd::BatchEvent::Item { fid, result }) = rx.recv().await {
+        finished.insert(fid);
+        let name = &names[&fid];
+        let mod_id = format!("workshop-{fid}");
+        match result {
+            Ok(content) => {
+                let detail = details
+                    .iter()
+                    .find(|d| {
+                        d.get("remoteId").and_then(|v| v.as_str()) == Some(fid.to_string().as_str())
+                    });
+                match finalize_workshop_item(app, appid, fid, name, detail, &content).await {
+                    Ok(()) => {
+                        std::fs::remove_dir_all(&content).ok();
+                    }
+                    Err(e) => {
+                        emit_progress(app, appid, &mod_id, name, "error", None, Some(&e));
+                    }
+                }
+            }
+            Err(e) => {
+                emit_progress(app, appid, &mod_id, name, "error", None, Some(&e));
+            }
+        }
+    }
+    let catastrophic = download
+        .await
+        .map_err(|e| format!("steamcmd task failed: {e}"))
+        .and_then(|r| r);
+    if let Err(e) = catastrophic {
+        for fid in fids {
+            if finished.contains(fid) {
+                continue;
+            }
+            emit_progress(
+                app,
+                appid,
+                &format!("workshop-{fid}"),
+                &names[fid],
+                "error",
+                None,
+                Some(&e),
+            );
+        }
+    }
+}
+
+async fn finalize_workshop_item(
+    app: &AppHandle,
+    appid: &str,
     fid: u64,
     name: &str,
     detail: Option<&Value>,
+    content: &std::path::Path,
 ) -> Result<(), String> {
-    let state = app.state::<AppState>();
     let mod_id = format!("workshop-{fid}");
-
-    emit_progress(app, appid, &mod_id, name, "downloading", None, None);
-    let content = steamcmd::run_workshop_download(&state.paths, steam_appid, fid).await?;
-
     emit_progress(app, appid, &mod_id, name, "installing", None, None);
     let summary = detail
         .and_then(|d| d.get("description").and_then(|s| s.as_str()))
@@ -342,8 +489,7 @@ async fn workshop_install_inner(
         summary,
         page_url: workshop_page_url(&fid.to_string()),
     };
-    finalize_install(app, &spec, &content, false).await?;
-    std::fs::remove_dir_all(&content).ok();
+    finalize_install(app, &spec, content, false).await?;
     emit_progress(app, appid, &mod_id, name, "done", Some(100), None);
     Ok(())
 }

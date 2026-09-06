@@ -3,6 +3,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::error::{AppError, Result};
 
+#[derive(Clone)]
 pub struct AppPaths {
     config_dir: PathBuf,
     pub data_dir: PathBuf,
