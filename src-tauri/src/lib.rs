@@ -17,7 +17,6 @@ mod notify;
 mod paths;
 mod perf;
 mod repair;
-mod resolver;
 mod settings;
 mod shortcuts;
 mod slipgate;
@@ -379,8 +378,6 @@ pub fn run() {
             mods::nexus::nexus_mod_files,
             mods::nexus::nexus_install,
             mods::nexus::slipgate_check,
-            resolver::resolver_solve_start,
-            resolver::resolver_solve_cancel,
             slipgate_managed::managed_slipgate_status,
             slipgate_managed::managed_slipgate_install,
             slipgate_managed::managed_slipgate_start,
@@ -398,12 +395,6 @@ pub fn run() {
             mods::thunderstore::thunderstore_install,
         ])
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
-                if window.label() == "resolver" {
-                    resolver::note_window_closed();
-                    return;
-                }
-            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() != "main" {
                     return;
@@ -441,6 +432,7 @@ pub fn run() {
                 if let Some(state) = app.try_state::<AppState>() {
                     achievements::stop_all(&state);
                     state.downloads.aria2().stop();
+                    slipgate_managed::shutdown();
                 }
             }
         });

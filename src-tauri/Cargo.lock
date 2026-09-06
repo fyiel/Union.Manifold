@@ -5015,6 +5015,7 @@ dependencies = [
  "futures",
  "hex",
  "image",
+ "minisign-verify",
  "parking_lot",
  "percent-encoding",
  "rand 0.8.6",

@@ -45,12 +45,14 @@ dirs = "5"
 tempfile = "3"
 walkdir = "2"
 fs4 = "0.12"
+minisign-verify = "0.2.5"
 tauri-plugin-autostart = "2.5.1"
 tauri-plugin-notification = "2.3.3"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
+    "Win32_Storage_FileSystem",
     "Win32_System_Registry",
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_Threading",
