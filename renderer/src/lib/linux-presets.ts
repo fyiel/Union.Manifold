@@ -18,6 +18,10 @@ export type LinuxGlobalSettings = {
   linuxExtraEnv: string
   linuxGamescope?: boolean
   linuxGamescopeFsr?: boolean
+  linuxGamescopeGameWidth?: string
+  linuxGamescopeGameHeight?: string
+  linuxGamescopeOutputWidth?: string
+  linuxGamescopeOutputHeight?: string
   linuxGamescopeFpsLimit?: string
   linuxGamescopeRefreshRate?: string
   linuxGamescopeSharpness?: string

@@ -302,6 +302,10 @@ pub(crate) struct GlobalLaunchOpts {
     pub proton_prefix: Option<String>,
     pub gamescope: bool,
     pub gamescope_fsr: bool,
+    pub gamescope_game_width: Option<String>,
+    pub gamescope_game_height: Option<String>,
+    pub gamescope_output_width: Option<String>,
+    pub gamescope_output_height: Option<String>,
     pub gamescope_fps_limit: Option<String>,
     pub gamescope_refresh_rate: Option<String>,
     pub gamescope_sharpness: Option<String>,
@@ -358,6 +362,22 @@ pub fn resolve_launch(state: &AppState, appid: &str, exe_path: &str) -> Result<L
             .get("linuxGamescopeFsr")
             .as_bool()
             .unwrap_or(false),
+        gamescope_game_width: state
+            .settings
+            .get_string("linuxGamescopeGameWidth")
+            .filter(|s| !s.trim().is_empty()),
+        gamescope_game_height: state
+            .settings
+            .get_string("linuxGamescopeGameHeight")
+            .filter(|s| !s.trim().is_empty()),
+        gamescope_output_width: state
+            .settings
+            .get_string("linuxGamescopeOutputWidth")
+            .filter(|s| !s.trim().is_empty()),
+        gamescope_output_height: state
+            .settings
+            .get_string("linuxGamescopeOutputHeight")
+            .filter(|s| !s.trim().is_empty()),
         gamescope_fps_limit: state
             .settings
             .get_string("linuxGamescopeFpsLimit")
@@ -481,6 +501,18 @@ fn gamescope_args(globals: &GlobalLaunchOpts) -> Vec<String> {
     let mut args = Vec::new();
     if globals.gamescope_fsr {
         args.push("-F".to_string());
+        args.push("fsr".to_string());
+    }
+    for (flag, value) in [
+        ("-w", &globals.gamescope_game_width),
+        ("-h", &globals.gamescope_game_height),
+        ("-W", &globals.gamescope_output_width),
+        ("-H", &globals.gamescope_output_height),
+    ] {
+        if let Some(value) = value.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            args.push(flag.to_string());
+            args.push(value.to_string());
+        }
     }
     if let Some(sharpness) = globals
         .gamescope_sharpness
@@ -497,7 +529,7 @@ fn gamescope_args(globals: &GlobalLaunchOpts) -> Vec<String> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
     {
-        args.push("--fps-limit".to_string());
+        args.push("--framerate-limit".to_string());
         args.push(limit.to_string());
     }
     if let Some(rate) = globals
@@ -506,7 +538,7 @@ fn gamescope_args(globals: &GlobalLaunchOpts) -> Vec<String> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
     {
-        args.push("--force-refresh-rate".to_string());
+        args.push("--nested-refresh".to_string());
         args.push(rate.to_string());
     }
     args
@@ -1183,6 +1215,10 @@ mod tests {
         let globals = GlobalLaunchOpts {
             gamescope: true,
             gamescope_fsr: true,
+            gamescope_game_width: Some("1280".into()),
+            gamescope_game_height: Some("720".into()),
+            gamescope_output_width: Some("1920".into()),
+            gamescope_output_height: Some("1080".into()),
             gamescope_fps_limit: Some("144".into()),
             gamescope_refresh_rate: Some("144".into()),
             gamescope_sharpness: Some("5".into()),
@@ -1192,11 +1228,20 @@ mod tests {
             gamescope_args(&globals),
             [
                 "-F",
+                "fsr",
+                "-w",
+                "1280",
+                "-h",
+                "720",
+                "-W",
+                "1920",
+                "-H",
+                "1080",
                 "--sharpness",
                 "5",
-                "--fps-limit",
+                "--framerate-limit",
                 "144",
-                "--force-refresh-rate",
+                "--nested-refresh",
                 "144",
             ]
         );
@@ -1239,7 +1284,15 @@ mod tests {
         );
         assert_eq!(
             plan.args,
-            ["-F", "--fps-limit", "144", "--", "gamemoderun", "game.exe"]
+            [
+                "-F",
+                "fsr",
+                "--framerate-limit",
+                "144",
+                "--",
+                "gamemoderun",
+                "game.exe"
+            ]
         );
         assert_eq!(plan.envs, [("GAMEID".into(), "umu-1".into())]);
     }

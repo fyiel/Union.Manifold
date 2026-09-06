@@ -794,6 +794,10 @@ function LinuxSettingsTab() {
   const [mangohud, setMangohud] = useState(false)
   const [gamescope, setGamescope] = useState(false)
   const [gamescopeFsr, setGamescopeFsr] = useState(false)
+  const [gamescopeGameWidth, setGamescopeGameWidth] = useState("")
+  const [gamescopeGameHeight, setGamescopeGameHeight] = useState("")
+  const [gamescopeOutputWidth, setGamescopeOutputWidth] = useState("")
+  const [gamescopeOutputHeight, setGamescopeOutputHeight] = useState("")
   const [gamescopeFps, setGamescopeFps] = useState("")
   const [gamescopeRefresh, setGamescopeRefresh] = useState("")
   const [gamescopeSharpness, setGamescopeSharpness] = useState("")
@@ -803,7 +807,7 @@ function LinuxSettingsTab() {
   useEffect(() => {
     let alive = true
     void (async () => {
-      const [lm, pp, ppfx, env, detect, gm, mh, gs, gsFsr, gsFps, gsRefresh, gsSharp, dll, fixes] = await Promise.all([
+      const [lm, pp, ppfx, env, detect, gm, mh, gs, gsFsr, gsGameW, gsGameH, gsOutputW, gsOutputH, gsFps, gsRefresh, gsSharp, dll, fixes] = await Promise.all([
         window.ucSettings?.get?.("linuxLaunchMode"),
         window.ucSettings?.get?.("linuxProtonPath"),
         window.ucSettings?.get?.("linuxProtonPrefix"),
@@ -813,6 +817,10 @@ function LinuxSettingsTab() {
         window.ucSettings?.get?.("linuxMangohud"),
         window.ucSettings?.get?.("linuxGamescope"),
         window.ucSettings?.get?.("linuxGamescopeFsr"),
+        window.ucSettings?.get?.("linuxGamescopeGameWidth"),
+        window.ucSettings?.get?.("linuxGamescopeGameHeight"),
+        window.ucSettings?.get?.("linuxGamescopeOutputWidth"),
+        window.ucSettings?.get?.("linuxGamescopeOutputHeight"),
         window.ucSettings?.get?.("linuxGamescopeFpsLimit"),
         window.ucSettings?.get?.("linuxGamescopeRefreshRate"),
         window.ucSettings?.get?.("linuxGamescopeSharpness"),
@@ -829,6 +837,10 @@ function LinuxSettingsTab() {
       setMangohud(mh === true)
       setGamescope(gs === true)
       setGamescopeFsr(gsFsr === true)
+      if (typeof gsGameW === "string") setGamescopeGameWidth(gsGameW)
+      if (typeof gsGameH === "string") setGamescopeGameHeight(gsGameH)
+      if (typeof gsOutputW === "string") setGamescopeOutputWidth(gsOutputW)
+      if (typeof gsOutputH === "string") setGamescopeOutputHeight(gsOutputH)
       if (typeof gsFps === "string") setGamescopeFps(gsFps)
       if (typeof gsRefresh === "string") setGamescopeRefresh(gsRefresh)
       if (typeof gsSharp === "string") setGamescopeSharpness(gsSharp)
@@ -887,8 +899,22 @@ function LinuxSettingsTab() {
       <ToggleRow title="Gamescope" desc="Run the session through Gamescope for FSR upscaling and framerate control, skipped when not installed" on={gamescope} onToggle={() => setBool("linuxGamescope", !gamescope, setGamescope)} />
       {gamescope ? (
         <>
-          <ToggleRow title="FSR upscaling" desc="gamescope -F — AMD FidelityFX Super Resolution" on={gamescopeFsr} onToggle={() => setBool("linuxGamescopeFsr", !gamescopeFsr, setGamescopeFsr)} />
-          <Row title="FSR sharpness" desc="gamescope --sharpness, 0-20, higher is sharper">
+          <ToggleRow title="FSR upscaling" desc="Gamescope FSR 1.0; set game resolution below output resolution to upscale" on={gamescopeFsr} onToggle={() => setBool("linuxGamescopeFsr", !gamescopeFsr, setGamescopeFsr)} />
+          <Row title="Game resolution" desc="Internal resolution exposed to the game, e.g. 1280 × 720">
+            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <input value={gamescopeGameWidth} onChange={(e) => setGamescopeGameWidth(e.target.value)} onBlur={() => persist("linuxGamescopeGameWidth", gamescopeGameWidth)} placeholder="1280" style={GAMESCOPE_NUM} />
+              <span style={{ color: "var(--mf-t4)" }}>×</span>
+              <input value={gamescopeGameHeight} onChange={(e) => setGamescopeGameHeight(e.target.value)} onBlur={() => persist("linuxGamescopeGameHeight", gamescopeGameHeight)} placeholder="720" style={GAMESCOPE_NUM} />
+            </div>
+          </Row>
+          <Row title="Output resolution" desc="Physical output resolution, e.g. 1920 × 1080">
+            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <input value={gamescopeOutputWidth} onChange={(e) => setGamescopeOutputWidth(e.target.value)} onBlur={() => persist("linuxGamescopeOutputWidth", gamescopeOutputWidth)} placeholder="1920" style={GAMESCOPE_NUM} />
+              <span style={{ color: "var(--mf-t4)" }}>×</span>
+              <input value={gamescopeOutputHeight} onChange={(e) => setGamescopeOutputHeight(e.target.value)} onBlur={() => persist("linuxGamescopeOutputHeight", gamescopeOutputHeight)} placeholder="1080" style={GAMESCOPE_NUM} />
+            </div>
+          </Row>
+          <Row title="FSR sharpness" desc="gamescope --sharpness, 0-20; 0 is sharpest">
             <input
               value={gamescopeSharpness}
               onChange={(e) => setGamescopeSharpness(e.target.value)}
@@ -897,7 +923,7 @@ function LinuxSettingsTab() {
               style={GAMESCOPE_NUM}
             />
           </Row>
-          <Row title="Frame rate limit (FPS)" desc="gamescope --fps-limit — caps the session frame rate, e.g. 144">
+          <Row title="Frame rate limit (FPS)" desc="gamescope --framerate-limit; use a divisor of refresh, e.g. 30 or 60">
             <input
               value={gamescopeFps}
               onChange={(e) => setGamescopeFps(e.target.value)}
@@ -906,7 +932,7 @@ function LinuxSettingsTab() {
               style={GAMESCOPE_NUM}
             />
           </Row>
-          <Row title="Force refresh rate (Hz)" desc="gamescope --force-refresh-rate — spoofs the refresh rate games detect, e.g. 144">
+          <Row title="Game refresh rate (Hz)" desc="gamescope --nested-refresh; refresh rate exposed to the game">
             <input
               value={gamescopeRefresh}
               onChange={(e) => setGamescopeRefresh(e.target.value)}
