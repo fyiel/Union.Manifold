@@ -487,7 +487,10 @@ function SourcesTab() {
   }, [])
 
   useEffect(() => {
-    return onSourcesChanged(() => { void loadSources() })
+    return onSourcesChanged(() => {
+      void loadSources()
+      void refreshManagedSlipgate()
+    })
   }, [])
 
   const toggle = async (id: string) => {
@@ -585,20 +588,19 @@ function SourcesTab() {
     }
   }
 
-  const managedSelected = Boolean(managedSlipgate?.url && managedSlipgate.url === slipgateUrl.trim())
   const managedStatusText = managedSlipgateLoading
-    ? "Checking Docker…"
-    : !managedSlipgate?.dockerAvailable
-      ? "Docker is unavailable"
-      : !managedSlipgate.composeAvailable
-        ? "Docker Compose is unavailable"
-        : !managedSlipgate.installed
-          ? "Ready to install"
-          : managedSlipgate.running && managedSlipgate.flaresolverrOk
-            ? `Running${managedSlipgate.version ? ` · Slipgate v${managedSlipgate.version}` : ""} · FlareSolverr ready`
-            : managedSlipgate.running
-              ? "Slipgate is running, FlareSolverr is not ready"
-              : "Installed and stopped"
+    ? "Checking built-in resolver…"
+    : !managedSlipgate?.supported
+      ? "Unsupported on this platform · use an external resolver below"
+      : !managedSlipgate.installed
+        ? managedSlipgate.enabled
+          ? "Downloading automatically in the background"
+          : "Removed · automatic installation disabled"
+        : managedSlipgate.running && managedSlipgate.flaresolverrOk
+          ? `Running${managedSlipgate.version ? ` · Slipgate v${managedSlipgate.version}` : ""} · FlareSolverr ready`
+          : managedSlipgate.running
+            ? "Slipgate is running, FlareSolverr is not ready"
+            : "Installed and stopped"
 
   return (
     <>
@@ -606,10 +608,10 @@ function SourcesTab() {
         Enable the catalog sources you trust. Disabled sources are hidden from Browse and search.
       </p>
 
-      <div style={{ ...PANEL, marginBottom: 18 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Slipgate resolver</div>
-        <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)", marginTop: 4, lineHeight: 1.5 }}>
-          Run Slipgate and FlareSolverr locally through Docker, or connect to a remote instance. Slipgate unlocks dependent sources and resolves browser-gated file hosts and free NexusMods files.
+        <div style={{ ...PANEL, marginBottom: 18 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)" }}>Slipgate resolver</div>
+          <div style={{ fontFamily: MONO, fontSize: 11, color: "var(--mf-t4)", marginTop: 4, lineHeight: 1.5 }}>
+          The built-in Slipgate runtime installs and starts automatically. It unlocks dependent sources and resolves browser-gated file hosts and free NexusMods files without Docker or a separately managed app.
         </div>
 
         <div style={{ marginTop: 14, padding: "12px 13px", borderRadius: 9, border: "1px solid var(--mf-line)", background: "var(--mf-panel)" }}>
@@ -625,14 +627,10 @@ function SourcesTab() {
             </button>
           </div>
 
-          {managedSlipgate?.installed ? (
+          {managedSlipgate?.runtimeVersion ? (
             <div style={{ marginTop: 8, fontFamily: MONO, fontSize: 9.5, lineHeight: 1.5, color: "var(--mf-t5)", wordBreak: "break-all" }}>
-              {managedSlipgate.slipgateImage}<br />{managedSlipgate.flaresolverrImage}
+              Runtime {managedSlipgate.runtimeVersion}
             </div>
-          ) : null}
-
-          {managedSlipgate?.running && !managedSelected ? (
-            <div style={{ marginTop: 8, fontFamily: MONO, fontSize: 10.5, color: "var(--mf-t4)" }}>The local resolver is running, but the remote URL below is selected.</div>
           ) : null}
 
           {managedSlipgate?.error ? (
@@ -640,21 +638,15 @@ function SourcesTab() {
           ) : null}
 
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 11 }}>
-            {!managedSlipgateLoading && managedSlipgate && !managedSlipgate.dockerAvailable ? (
-              <button type="button" className="mf-ghost" onClick={() => void window.ucSystem?.openExternal?.("https://docs.docker.com/get-docker/")} style={{ height: 32, padding: "0 12px", borderRadius: 7, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t1)", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Get Docker</button>
-            ) : null}
-            {managedSlipgate?.dockerAvailable && managedSlipgate.composeAvailable && !managedSlipgate.installed ? (
+            {managedSlipgate?.supported && !managedSlipgate.installed ? (
               <button type="button" className="mf-ghost" disabled={managedSlipgateAction !== null} onClick={() => void runManagedSlipgateAction("install")} style={{ ...SLIPGATE_ACTION, background: "var(--mf-t1)", color: "var(--mf-bg)", fontWeight: 700, cursor: managedSlipgateAction ? "default" : "pointer", opacity: managedSlipgateAction ? 0.65 : 1 }}>
-                {managedSlipgateAction === "install" ? "Installing…" : "Install with Docker"}
+                {managedSlipgateAction === "install" ? "Installing…" : "Install now"}
               </button>
             ) : null}
             {managedSlipgate?.installed && !managedSlipgate.running ? (
               <button type="button" className="mf-ghost" disabled={managedSlipgateAction !== null} onClick={() => void runManagedSlipgateAction("start")} style={{ ...SLIPGATE_ACTION, background: "var(--mf-t1)", color: "var(--mf-bg)", fontWeight: 700, cursor: managedSlipgateAction ? "default" : "pointer", opacity: managedSlipgateAction ? 0.65 : 1 }}>
                 {managedSlipgateAction === "start" ? "Starting…" : "Start"}
               </button>
-            ) : null}
-            {managedSlipgate?.installed && managedSlipgate.running && !managedSelected ? (
-              <button type="button" className="mf-ghost" disabled={managedSlipgateAction !== null} onClick={() => void runManagedSlipgateAction("start")} style={{ ...SLIPGATE_ACTION, background: "var(--mf-t1)", color: "var(--mf-bg)", fontWeight: 700, cursor: managedSlipgateAction ? "default" : "pointer", opacity: managedSlipgateAction ? 0.65 : 1 }}>Use local</button>
             ) : null}
             {managedSlipgate?.installed && managedSlipgate.running ? (
               <button type="button" className="mf-ghost" disabled={managedSlipgateAction !== null} onClick={() => void runManagedSlipgateAction("stop")} style={{ ...SLIPGATE_ACTION, background: "transparent", color: "var(--mf-t1)", fontWeight: 600, cursor: managedSlipgateAction ? "default" : "pointer", opacity: managedSlipgateAction ? 0.65 : 1 }}>
@@ -674,9 +666,10 @@ function SourcesTab() {
           </div>
         </div>
 
-        <div style={{ marginTop: 14, fontSize: 12.5, fontWeight: 600, color: "var(--mf-t1)" }}>Remote resolver</div>
-        <div style={{ marginTop: 3, fontFamily: MONO, fontSize: 10.5, lineHeight: 1.5, color: "var(--mf-t5)" }}>Enter a remote Slipgate URL, or leave these fields untouched when using the managed local resolver.</div>
-        <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+        <details style={{ marginTop: 14 }}>
+          <summary style={{ fontSize: 12.5, fontWeight: 600, color: "var(--mf-t1)", cursor: "pointer" }}>External resolver (advanced)</summary>
+          <div style={{ marginTop: 5, fontFamily: MONO, fontSize: 10.5, lineHeight: 1.5, color: "var(--mf-t5)" }}>Configure a remote Slipgate instance as a fallback after the built-in runtime.</div>
+          <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
           <input
             value={slipgateUrl}
             onChange={(e) => setSlipgateUrl(e.target.value)}
@@ -689,20 +682,21 @@ function SourcesTab() {
           <button type="button" className="mf-ghost" disabled={slipgateTesting || !slipgateUrl.trim()} onClick={() => void testSlipgate()} style={{ display: "flex", alignItems: "center", gap: 7, padding: "0 15px", height: 38, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: !slipgateUrl.trim() ? "var(--mf-t4)" : "var(--mf-t1)", fontSize: 12, fontWeight: 600, cursor: slipgateTesting || !slipgateUrl.trim() ? "default" : "pointer", opacity: slipgateTesting ? 0.6 : 1, flexShrink: 0 }}>
             {slipgateTesting ? "Testing…" : "Test"}
           </button>
-        </div>
-        <input
-          type="password"
-          value={slipgateKey}
-          onChange={(e) => setSlipgateKey(e.target.value)}
-          onBlur={() => void persistSlipgate("slipgateKey", slipgateKey)}
-          placeholder="X-Slipgate-Key (optional)"
-          autoComplete="off"
-          spellCheck={false}
-          style={{ ...MONO_INPUT, width: "100%", marginTop: 10, boxSizing: "border-box" }}
-        />
-        {slipgateStatus ? (
-          <div style={{ marginTop: 10, fontFamily: MONO, fontSize: 11.5, color: slipgateStatus.ok ? "var(--mf-t2)" : "var(--mf-danger)" }}>Slipgate {slipgateStatus.msg}</div>
-        ) : null}
+          </div>
+          <input
+            type="password"
+            value={slipgateKey}
+            onChange={(e) => setSlipgateKey(e.target.value)}
+            onBlur={() => void persistSlipgate("slipgateKey", slipgateKey)}
+            placeholder="X-Slipgate-Key (optional)"
+            autoComplete="off"
+            spellCheck={false}
+            style={{ ...MONO_INPUT, width: "100%", marginTop: 10, boxSizing: "border-box" }}
+          />
+          {slipgateStatus ? (
+            <div style={{ marginTop: 10, fontFamily: MONO, fontSize: 11.5, color: slipgateStatus.ok ? "var(--mf-t2)" : "var(--mf-danger)" }}>Slipgate {slipgateStatus.msg}</div>
+          ) : null}
+        </details>
       </div>
 
       <div style={{ ...PANEL, display: "flex", alignItems: "center", gap: 14, marginBottom: 10 }}>

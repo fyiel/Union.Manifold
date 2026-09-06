@@ -327,10 +327,8 @@ declare global {
 
   type ManagedSlipgateStatus = {
     ok: boolean
-    dockerAvailable: boolean
-    composeAvailable: boolean
-    dockerVersion?: string
-    composeVersion?: string
+    supported: boolean
+    enabled: boolean
     installed: boolean
     running: boolean
     healthy: boolean
@@ -338,8 +336,7 @@ declare global {
     version?: string
     flaresolverrOk: boolean
     recipes?: string[]
-    slipgateImage: string
-    flaresolverrImage: string
+    runtimeVersion?: string
     error?: string | null
   }
 
@@ -541,11 +538,6 @@ declare global {
       openExternal?: (target: string) => Promise<{ ok: boolean; error?: string }>
       launchSteam?: () => Promise<{ ok: boolean; method?: string; error?: string }>
       runSteamGame?: (appid: string, steamAppid: number, installPath: string) => Promise<{ ok: boolean; error?: string }>
-    }
-    ucResolver?: {
-      solve: (url: string) => Promise<{ ok: boolean; url?: string | null; fileName?: string | null; headers?: Record<string, string>; error?: string }>
-      cancel: () => Promise<{ ok: boolean }>
-      onStatus?: (callback: (data: { state: "solving" | "interactive" | "captured" | "cleared" | "failed" | "cancelled"; host: string; reason?: string | null }) => void) => () => void
     }
     ucPerf?: {
       enabled: () => Promise<boolean>
