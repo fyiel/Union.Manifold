@@ -153,7 +153,7 @@ fn probe_js_with(with_t: bool) -> String {
 }
 
 fn auto_click_js() -> String {
-    r#"(function(){try{var c=document.querySelectorAll('button,a,[role=button]');for(var i=0;i<c.length;i++){var el=c[i];if(el.offsetParent===null)continue;var t=(el.textContent||'').trim().toLowerCase();if(/^(start download|download|download now|free download|generate direct link|generate link|get link|create download link)$/.test(t)){el.click();return;}}}catch(e){}})()"#
+    r#"(function(){try{var c=document.querySelectorAll('button,a,[role=button]');for(var i=0;i<c.length;i++){var el=c[i];if(el.offsetParent===null||el.disabled)continue;var t=(el.textContent||'').trim().toLowerCase();if(/^(continue to download|start download|download|download now|free download|generate direct link|generate link|get link|create download link)$/.test(t)){el.click();return;}}}catch(e){}})()"#
         .to_string()
 }
 

@@ -58,10 +58,10 @@ pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
 }
 
 pub fn is_ready() -> bool {
-    let Some(cfg) = crate::slipgate::cfg() else {
+    let Some(ready) = READY_CFG.read().clone() else {
         return false;
     };
-    READY_CFG.read().as_ref() == Some(&cfg)
+    crate::slipgate::cfgs().iter().any(|cfg| cfg == &ready)
 }
 
 pub fn invalidate() {
@@ -71,21 +71,20 @@ pub fn invalidate() {
 async fn refresh_readiness() -> Option<usize> {
     let _guard = READINESS_REFRESH.lock().await;
     invalidate();
-    let cfg = crate::slipgate::cfg()?;
-    let key = cfg.key.as_deref().unwrap_or("");
-    let (catalog, health) =
-        tokio::join!(SRC.refresh_live(), crate::slipgate::health(&cfg.base, key),);
-    let ready = catalog.is_some()
-        && health
+    let catalog = SRC.refresh_live().await?;
+    for cfg in crate::slipgate::cfgs() {
+        let key = cfg.key.as_deref().unwrap_or("");
+        if crate::slipgate::health(&cfg.base, key)
+            .await
             .as_ref()
             .map(crate::slipgate::fetch_usable)
-            .unwrap_or(false);
-    if ready {
-        *READY_CFG.write() = Some(cfg);
-        catalog
-    } else {
-        None
+            .unwrap_or(false)
+        {
+            *READY_CFG.write() = Some(cfg);
+            return Some(catalog);
+        }
     }
+    None
 }
 
 pub async fn refresh() -> Option<usize> {
@@ -164,8 +163,8 @@ async fn fetch_page(url: &str) -> Option<String> {
             return Some(html);
         }
     }
-    let cfg = crate::slipgate::cfg()?;
-    crate::slipgate::fetch(&cfg, url, Duration::from_secs(60))
+    crate::slipgate::cfg()?;
+    crate::slipgate::fetch_configured(url, Duration::from_secs(60))
         .await
         .ok()
 }

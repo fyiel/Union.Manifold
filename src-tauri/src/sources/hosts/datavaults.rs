@@ -204,21 +204,6 @@ pub async fn resolve_with(url: &str, extra: &HashMap<String, String>) -> Resolve
     }
 }
 
-pub async fn with_solved(url: &str, solved: crate::resolver::Solved) -> Option<ResolveResult> {
-    if let Some(direct) = solved.url {
-        return Some(ResolveResult {
-            resolvable: true,
-            url: Some(direct),
-            file_name: solved.file_name,
-            ephemeral: true,
-            ..Default::default()
-        });
-    }
-    let extra = solved.headers(Some(url));
-    let retried = resolve_with(url, &extra).await;
-    retried.resolvable.then_some(retried)
-}
-
 fn ok(direct: &str, fname: &str) -> ResolveResult {
     ResolveResult {
         resolvable: true,

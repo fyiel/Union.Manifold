@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, LazyLock, OnceLock};
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -8,6 +8,8 @@ use crate::http;
 use crate::settings::SettingsStore;
 
 static SETTINGS: OnceLock<Arc<SettingsStore>> = OnceLock::new();
+static MANAGED: LazyLock<parking_lot::RwLock<Option<Cfg>>> =
+    LazyLock::new(|| parking_lot::RwLock::new(None));
 
 pub fn init(settings: Arc<SettingsStore>) {
     SETTINGS.set(settings).ok();
@@ -19,7 +21,25 @@ pub struct Cfg {
     pub key: Option<String>,
 }
 
+pub fn set_managed(cfg: Option<Cfg>) {
+    *MANAGED.write() = cfg;
+}
+
+pub fn cfgs() -> Vec<Cfg> {
+    let mut configs = MANAGED.read().clone().into_iter().collect::<Vec<_>>();
+    if let Some(external) = external_cfg() {
+        if !configs.iter().any(|cfg| cfg == &external) {
+            configs.push(external);
+        }
+    }
+    configs
+}
+
 pub fn cfg() -> Option<Cfg> {
+    cfgs().into_iter().next()
+}
+
+fn external_cfg() -> Option<Cfg> {
     let (url, key) = match SETTINGS.get() {
         Some(s) => (s.get_string("slipgateUrl"), s.get_string("slipgateKey")),
         None => (
@@ -78,6 +98,36 @@ pub async fn fetch(cfg: &Cfg, url: &str, timeout: Duration) -> Result<String, St
         .map(str::to_string)
         .filter(|s| !s.is_empty())
         .ok_or_else(|| "Slipgate fetch: empty body".to_string())
+}
+
+pub async fn fetch_configured(url: &str, timeout: Duration) -> Result<String, String> {
+    let configs = cfgs();
+    if configs.is_empty() {
+        return Err("Slipgate is not configured".to_string());
+    }
+    let mut errors = Vec::new();
+    let has_fallback = configs.len() > 1;
+    for (index, cfg) in configs.into_iter().enumerate() {
+        if index == 0 && has_fallback {
+            let key = cfg.key.as_deref().unwrap_or("");
+            match health(&cfg.base, key).await {
+                Ok(status) if fetch_usable(&status) => {}
+                Ok(_) => {
+                    errors.push("Built-in Slipgate is unhealthy".to_string());
+                    continue;
+                }
+                Err(error) => {
+                    errors.push(format!("Built-in Slipgate: {error}"));
+                    continue;
+                }
+            }
+        }
+        match fetch(&cfg, url, timeout).await {
+            Ok(body) => return Ok(body),
+            Err(error) => errors.push(error),
+        }
+    }
+    Err(errors.join("; "))
 }
 
 pub struct ResolvedLink {
@@ -172,6 +222,41 @@ pub async fn resolve(
         size_bytes,
         headers,
     })
+}
+
+pub async fn resolve_configured(
+    host: &str,
+    page_url: &str,
+    params: Value,
+    cookies: Value,
+) -> Result<ResolvedLink, String> {
+    let configs = cfgs();
+    if configs.is_empty() {
+        return Err("Slipgate is not configured".to_string());
+    }
+    let mut errors = Vec::new();
+    let has_fallback = configs.len() > 1;
+    for (index, cfg) in configs.into_iter().enumerate() {
+        if index == 0 && has_fallback {
+            let key = cfg.key.as_deref().unwrap_or("");
+            match health(&cfg.base, key).await {
+                Ok(status) if fetch_usable(&status) => {}
+                Ok(_) => {
+                    errors.push("Built-in Slipgate is unhealthy".to_string());
+                    continue;
+                }
+                Err(error) => {
+                    errors.push(format!("Built-in Slipgate: {error}"));
+                    continue;
+                }
+            }
+        }
+        match resolve(&cfg, host, page_url, params.clone(), cookies.clone()).await {
+            Ok(link) => return Ok(link),
+            Err(error) => errors.push(error),
+        }
+    }
+    Err(errors.join("; "))
 }
 
 pub async fn health(base: &str, key: &str) -> Result<Value, String> {

@@ -11,10 +11,10 @@ mod installtest;
 #[cfg(test)]
 mod livetest;
 pub mod mediafire;
+pub mod numbered_st;
 pub mod pixeldrain;
 pub mod rootz;
 
-use std::sync::LazyLock;
 
 use crate::sources::schema::DownloadOption;
 use crate::sources::ResolveResult;
@@ -36,6 +36,9 @@ fn slipgate_host(url: &str) -> Option<&'static str> {
     }
     if datavaults::matches(url) {
         return Some("datavaults");
+    }
+    if fileditch::matches(url) {
+        return Some("fileditch");
     }
     None
 }
@@ -111,6 +114,9 @@ pub fn detect_host_type(url: &str) -> String {
     if fileditch::matches(url) {
         return "fileditch".to_string();
     }
+    if numbered_st::matches(url) {
+        return "numbered-st".to_string();
+    }
     if filekeeper::matches(url) {
         return "filekeeper".to_string();
     }
@@ -138,12 +144,16 @@ pub fn is_resolvable(url: &str) -> bool {
         || datavaults::matches(url)
         || fileditch::matches(url)
         || filekeeper::matches(url)
+        || numbered_st::matches(url)
         || gate::matches(url)
 }
 
 pub async fn link_is_dead(url: &str) -> bool {
     if rootz::matches(url) {
         return rootz::is_dead(url).await;
+    }
+    if datanodes::matches(url) {
+        return datanodes::is_dead(url).await;
     }
     let opts = crate::http::FetchOpts {
         retries: Some(1),
@@ -164,17 +174,7 @@ pub async fn resolve_url_via(app: &AppHandle, option: &DownloadOption) -> Resolv
     dispatch(Some(app), option).await
 }
 
-pub(crate) fn scan_direct_link(html: &str) -> Option<String> {
-    static DIRECT_LINK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-        regex::Regex::new(
-            r#"(?i)https?://[^\s"'<>\\]+?\.(?:zip|rar|7z|001|iso|exe|tar\.gz|apk)(?:\?[^\s"'<>\\]*)?"#,
-        )
-        .unwrap()
-    });
-    DIRECT_LINK_RE.find(html).map(|m| m.as_str().to_string())
-}
-
-async fn dispatch(app: Option<&AppHandle>, option: &DownloadOption) -> ResolveResult {
+async fn dispatch(_app: Option<&AppHandle>, option: &DownloadOption) -> ResolveResult {
     let url = option
         .url
         .as_deref()
@@ -207,16 +207,16 @@ async fn dispatch(app: Option<&AppHandle>, option: &DownloadOption) -> ResolveRe
         result = Some(datavaults::resolve(url).await);
     }
     if fileditch::matches(url) {
-        return fileditch::resolve(url).await;
+        result = Some(fileditch::resolve(url).await);
+    }
+    if numbered_st::matches(url) {
+        return numbered_st::resolve(url).await;
     }
     if filekeeper::matches(url) {
         return filekeeper::resolve(url).await;
     }
     if gate::matches(url) {
-        return match app {
-            Some(app) => gate::resolve_via(app, url).await,
-            None => gate::resolve(url).await,
-        };
+        return gate::resolve(url).await;
     }
 
     if let Some(r) = result {
@@ -224,24 +224,16 @@ async fn dispatch(app: Option<&AppHandle>, option: &DownloadOption) -> ResolveRe
             return r;
         }
 
-        if let Some(app) = app {
-            if let Ok(solved) = crate::resolver::solve(app, url).await {
-                let merged = match slipgate_host(url) {
-                    Some("datanodes") => datanodes::with_solved(url, solved).await,
-                    Some("datavaults") => datavaults::with_solved(url, solved).await,
-                    _ => None,
-                };
-                if let Some(merged) = merged {
-                    return merged;
-                }
-            }
-        }
-
         if let Some(host) = slipgate_host(url) {
             match crate::slipgate::cfg() {
-                Some(cfg) => {
-                    return match crate::slipgate::resolve(&cfg, host, url, json!({}), json!([]))
-                        .await
+                Some(_) => {
+                    return match crate::slipgate::resolve_configured(
+                        host,
+                        url,
+                        json!({}),
+                        json!([]),
+                    )
+                    .await
                     {
                         Ok(link) => ResolveResult {
                             resolvable: true,
@@ -259,7 +251,7 @@ async fn dispatch(app: Option<&AppHandle>, option: &DownloadOption) -> ResolveRe
                     return not_resolvable(
                         url,
                         Some(&format!(
-                            "{} \u{2014} set a Slipgate URL in Settings to resolve in-app",
+                            "{} - the built-in resolver is unavailable",
                             r.reason.as_deref().unwrap_or("host could not be resolved")
                         )),
                     );

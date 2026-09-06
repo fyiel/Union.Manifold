@@ -289,8 +289,8 @@ impl HydraSource {
     }
 
     async fn fetch_source_body(&self) -> Option<String> {
-        if let Some(cfg) = slipgate::cfg() {
-            match slipgate::fetch(&cfg, self.source_json, Duration::from_secs(150)).await {
+        if slipgate::cfg().is_some() {
+            match slipgate::fetch_configured(self.source_json, Duration::from_secs(150)).await {
                 Ok(body) if !parse_source(&body).is_empty() => return Some(body),
                 Ok(body) => crate::logging::write_line(
                     "warn",

@@ -331,7 +331,6 @@ fn nexus_session_value(state: &AppState) -> Option<String> {
 
 async fn slipgate_resolve(
     state: &AppState,
-    cfg: &crate::slipgate::Cfg,
     key: &str,
     domain: &str,
     mod_id: u64,
@@ -349,7 +348,7 @@ async fn slipgate_resolve(
         "game_id": game_id.to_string(),
     });
     let cookies = json!([{ "name": "nexusmods_session", "value": session }]);
-    crate::slipgate::resolve(cfg, "nexusmods", "", params, cookies).await
+    crate::slipgate::resolve_configured("nexusmods", "", params, cookies).await
 }
 
 #[tauri::command]
@@ -428,7 +427,7 @@ async fn native_free_download(
     for (n, v) in &pairs {
         jar.set(WWW_HOST, n, v);
     }
-    let mut effective_ua = state
+    let effective_ua = state
         .settings
         .get_string("nexusUserAgent")
         .map(|s| s.trim().to_string())
@@ -441,37 +440,7 @@ async fn native_free_download(
         h
     };
 
-    let mut cleared = false;
-    async fn clear_gate(
-        app: &AppHandle,
-        referer: &str,
-        jar: &http::Jar,
-        effective_ua: &mut Option<String>,
-        cleared: &mut bool,
-    ) -> bool {
-        if *cleared {
-            return false;
-        }
-        *cleared = true;
-        match crate::resolver::solve(app, referer).await {
-            Ok(solved) => {
-                if let Some(header) = &solved.cookie_header {
-                    for pair in header.split(';') {
-                        if let Some((name, value)) = pair.split_once('=') {
-                            jar.set(WWW_HOST, name.trim(), value.trim());
-                        }
-                    }
-                }
-                if effective_ua.is_none() {
-                    *effective_ua = solved.user_agent.filter(|u| !u.is_empty());
-                }
-                true
-            }
-            Err(_) => false,
-        }
-    }
-
-    let page = loop {
+    let page = {
         let resp = http::fetch(
             &referer,
             &http::FetchOpts {
@@ -487,12 +456,7 @@ async fn native_free_download(
         .map_err(|e| format!("nexus session probe: {e}"))?;
         let status = resp.status().as_u16();
         let body = resp.text().await.unwrap_or_default();
-        if is_cloudflare_challenge(status, &body)
-            && clear_gate(app, &referer, &jar, &mut effective_ua, &mut cleared).await
-        {
-            continue;
-        }
-        break (status, body);
+        (status, body)
     };
     if is_cloudflare_challenge(page.0, &page.1) {
         return Ok(FreeDownload::NeedsSession(Some(
@@ -511,7 +475,7 @@ async fn native_free_download(
         "application/json, text/javascript, */*; q=0.01".to_string(),
     );
     headers.insert("Referer".to_string(), referer.clone());
-    let generate = loop {
+    let generate = {
         let resp = http::fetch(
             GENERATE_URL,
             &http::FetchOpts {
@@ -526,12 +490,7 @@ async fn native_free_download(
         .map_err(|e| format!("nexus download generator: {e}"))?;
         let status = resp.status().as_u16();
         let body = resp.text().await.unwrap_or_default();
-        if is_cloudflare_challenge(status, &body)
-            && clear_gate(app, &referer, &jar, &mut effective_ua, &mut cleared).await
-        {
-            continue;
-        }
-        break (status, body);
+        (status, body)
     };
     let status = generate.0;
     let body = generate.1;
@@ -716,8 +675,8 @@ pub async fn nexus_install(
                     FreeDownload::NeedsSession(reason) => session_failure = Some(reason),
                 }
             }
-            if let Some(sg) = crate::slipgate::cfg() {
-                match slipgate_resolve(&state, &sg, &key, &domain, mid, file_id).await {
+            if crate::slipgate::cfg().is_some() {
+                match slipgate_resolve(&state, &key, &domain, mid, file_id).await {
                     Ok(link) => {
                         let spec = fetch_spec(&key, &appid, &domain, mid, Some(file_id)).await?;
                         tauri::async_runtime::spawn(run_archive_install(

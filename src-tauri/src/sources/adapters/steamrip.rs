@@ -31,10 +31,10 @@ async fn fetch_json(url: &str) -> Result<Value, String> {
     match http::get_json(url).await {
         Ok(json) => Ok(json),
         Err(direct_error) => {
-            let Some(cfg) = slipgate::cfg() else {
+            if slipgate::cfg().is_none() {
                 return Err(direct_error.to_string());
-            };
-            let body = slipgate::fetch(&cfg, url, Duration::from_secs(60))
+            }
+            let body = slipgate::fetch_configured(url, Duration::from_secs(60))
                 .await
                 .map_err(|proxy_error| format!("{direct_error}; {proxy_error}"))?;
             serde_json::from_str(&body).map_err(|error| format!("invalid JSON: {error}"))
