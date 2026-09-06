@@ -277,7 +277,7 @@ jobs:
                 "linux-x86_64": {url: $linuxUrl, sha256: $linuxSha, size: $linuxSize},
                 "windows-x86_64": {url: $windowsUrl, sha256: $windowsSha, size: $windowsSize}
               }}' > resolver-runtime/resolver-runtime.json
-          bunx tauri signer sign resolver-runtime/resolver-runtime.json
+          bunx @tauri-apps/cli signer sign resolver-runtime/resolver-runtime.json
           gh release upload "$TAG" \
             resolver-runtime/resolver-runtime-linux-x86_64.zip \
             resolver-runtime/resolver-runtime-windows-x86_64.zip \
