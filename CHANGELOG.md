@@ -10,6 +10,8 @@ All notable changes to Union.Manifold. This project is a fork of
 - Built-in Slipgate and FlareSolverr runtime for Windows and Linux x64.
 - External Slipgate fallback.
 - Gamescope resolution controls.
+- Steam account fallback for owner-restricted workshop downloads, with an
+  in-app Steam Guard prompt.
 
 ### Fixed
 
