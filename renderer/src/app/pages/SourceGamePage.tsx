@@ -84,6 +84,7 @@ export function SourceGamePage() {
   const [heroFailed, setHeroFailed] = useState(false)
   const [coverFailed, setCoverFailed] = useState(false)
   const [zoomedScreenshot, setZoomedScreenshot] = useState<string | null>(null)
+  const screenshotsRef = useRef<HTMLDivElement | null>(null)
   const [priority, setPriority] = useState<string[]>(SOURCE_PRIORITY)
   const copiedTimerRef = useRef<number | null>(null)
   useEffect(() => () => { if (copiedTimerRef.current !== null) window.clearTimeout(copiedTimerRef.current) }, [])
@@ -184,6 +185,24 @@ export function SourceGamePage() {
       .catch(() => undefined)
     return () => { alive = false }
   }, [game?.steamAppId, loading])
+
+  useEffect(() => {
+    const rail = screenshotsRef.current
+    if (!rail) return
+    // React registers onWheel passively, so it cannot keep the page from
+    // scrolling while the strip takes the wheel.
+    const onWheel = (event: WheelEvent) => {
+      const limit = rail.scrollWidth - rail.clientWidth
+      if (limit < 1) return
+      const delta = event.deltaY * (event.deltaMode === 1 ? 40 : 1)
+      const next = Math.min(limit, Math.max(0, rail.scrollLeft + delta))
+      if (next === rail.scrollLeft) return
+      event.preventDefault()
+      rail.scrollLeft = next
+    }
+    rail.addEventListener("wheel", onWheel, { passive: false })
+    return () => rail.removeEventListener("wheel", onWheel)
+  }, [steamMeta])
 
   const [wand, setWand] = useState<WandLookupResult | null>(null)
   const [wandOpen, setWandOpen] = useState(false)
@@ -401,7 +420,7 @@ export function SourceGamePage() {
         )}
 
         {steamMeta && steamMeta.screenshots.length > 0 && (
-          <div className="mf-scroll" style={{ display: "flex", gap: 10, marginTop: 26, overflowX: "auto", paddingBottom: 8 }}>
+          <div ref={screenshotsRef} className="mf-scroll" style={{ display: "flex", gap: 10, marginTop: 26, overflowX: "auto", paddingBottom: 8 }}>
             {steamMeta.screenshots.slice(0, 12).map((src, index) => (
               <button key={src} type="button" aria-label={`Open screenshot ${index + 1}`} title="Open screenshot" onClick={() => setZoomedScreenshot(src)} style={{ position: "relative", height: 150, width: "auto", flexShrink: 0, padding: 0, borderRadius: 8, border: "1px solid var(--mf-line-2)", overflow: "hidden", background: "var(--mf-panel-2)", cursor: "zoom-in" }}>
                 <img src={src} alt={`${game?.title || "Game"} screenshot ${index + 1}`} loading="lazy" style={{ display: "block", height: "100%", width: "auto", objectFit: "cover" }} />
