@@ -3,6 +3,14 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.9.0
+
+### Added
+
+- Hovering the game-detail screenshots and using the wheel now moves the strip
+  sideways instead of scrolling the page past it, and the page takes the wheel
+  back once the strip ends.
+
 ## 3.8.0
 
 ### Added
