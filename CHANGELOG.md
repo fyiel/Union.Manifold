@@ -3,7 +3,7 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
-## Unreleased
+## 3.9.1
 
 ### Fixed
 
