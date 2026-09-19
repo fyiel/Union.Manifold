@@ -662,11 +662,12 @@ pub async fn game_exe_launch(
         if let Err(error) = linux::prepare_onlinefix_runtime(&mut plan, Path::new(&exe_path)) {
             return Ok(json!({ "ok": false, "error": error }));
         }
-        // SOVEREIGN-cracked releases belong to the "Steam compatibility fixes"
-        // toggle: staging the host Steam client runtime is what lets their
-        // online mode attach instead of failing with the emulator's popup.
+        // Part of the "Steam compatibility fixes" toggle: games that ship a
+        // Steam API library get the client runtime a Steam launch would have
+        // provided, so the game, or the emulator that replaced its API, can
+        // reach the Steam client instead of failing to initialise.
         if steam_compatibility_fixes_enabled(&state.settings) {
-            if let Err(error) = linux::prepare_sovereign_runtime(&mut plan, Path::new(&exe_path)) {
+            if let Err(error) = linux::prepare_steam_runtime(&mut plan, Path::new(&exe_path)) {
                 return Ok(json!({ "ok": false, "error": error }));
             }
         }

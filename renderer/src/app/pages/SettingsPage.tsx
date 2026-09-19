@@ -937,7 +937,7 @@ function LinuxSettingsTab() {
           </Row>
         </>
       ) : null}
-      <ToggleRow title="Steam compatibility fixes" desc="Repair known Steam API DLL issues, add local achievement files, and link the local Steam client runtime into the prefix for Steam emulators (OnlineFix, SOVEREIGN) before Proton or Wine launches" on={steamFixes} onToggle={() => setBool("linuxSteamCompatibilityFixes", !steamFixes, setSteamFixes)} />
+      <ToggleRow title="Steam compatibility fixes" desc="Fix a replaced Steam API DLL, add local achievement files, and link your Steam client into the prefix for games that use Steamworks, OnlineFix and SOVEREIGN builds included" on={steamFixes} onToggle={() => setBool("linuxSteamCompatibilityFixes", !steamFixes, setSteamFixes)} />
 
       <div style={SECTION}>
         <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--mf-t1)", marginBottom: 3 }}>Default WINEDLLOVERRIDES</div>

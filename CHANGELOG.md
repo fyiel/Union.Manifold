@@ -7,18 +7,18 @@ All notable changes to Union.Manifold. This project is a fork of
 
 ### Fixed
 
-- Releases cracked with the SOVEREIGN Steam emulator (their
-  `steam_api64.dll` is a wrapper around `SOVEREIGN64.dll` plus a
-  `SOVEREIGN.ini`) stopped at the emulator's *"Steam is running, but the game
-  can't talk to it"* popup on Linux: online mode attaches to a Steam client and
-  a Proton prefix advertises one in its registry without carrying the client
-  DLLs. With the "Steam compatibility fixes" toggle (Settings → Linux) on, a
-  launch now links `steamclient64.dll` and `GameOverlayRenderer64.dll` from the
-  local Steam installation into the prefix and points
-  `STEAM_COMPAT_CLIENT_INSTALL_PATH` at it, the same runtime OnlineFix builds
-  already get. Releases configured with `[Steamworks] Online=0` are left alone,
-  and a missing Steam installation is reported before launch with the ini path
-  and the offline alternative instead of failing inside the game.
+- Steamworks games now find a Steam client inside their prefix. When the
+  install ships a Steam API library (`steam_api64.dll` or `steam_api.dll`),
+  the launch links `steamclient*.dll` and `GameOverlayRenderer*.dll` from the
+  local Steam install into `C:\Program Files (x86)\Steam` and points
+  `STEAM_COMPAT_CLIENT_INSTALL_PATH` at it, which is the piece Steam adds when
+  it launches a game itself. Cracks wrap the same files, so SOVEREIGN releases
+  stop showing "Steam is running, but the game can't talk to it" and reach
+  Steam again. This follows the "Steam compatibility fixes" toggle in Settings
+  under Linux. Games set to `[Steamworks] Online=0` are left alone, and when no
+  Steam install exists only the emulator releases get a launch error, which
+  names the ini file and the offline setting. Everything else keeps the offline
+  behaviour it had before.
 - A mirror that holds only later volumes of a split archive no longer
   resolves as a download. GameBounty keeps servers with an incomplete upload
   in its API after hiding them on the page (The Blood of Dawnwalker ships one

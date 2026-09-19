@@ -213,9 +213,9 @@ fn link_runtime_file(source: &Path, destination: &Path) -> Result<(), String> {
     })
 }
 
-/// The Steam client files a Wine/Proton game loads to reach the running Steam
-/// client. Steam emulators (OnlineFix builds, the SOVEREIGN emulator) look for
-/// them under `C:\Program Files (x86)\Steam` inside the active prefix.
+/// Where Steam emulators look for the client: inside the prefix, under
+/// `C:\Program Files (x86)\Steam`. OnlineFix builds and SOVEREIGN both load
+/// the DLLs from there to reach the Steam client on the host.
 #[cfg(target_os = "linux")]
 const PREFIX_STEAM_DIR: &str = "drive_c/Program Files (x86)/Steam";
 
@@ -239,9 +239,10 @@ fn searched_steam_roots(steam_roots: &[PathBuf]) -> String {
     }
 }
 
-/// Links the local Steam client runtime into the active Wine/Proton prefix and
-/// points `STEAM_COMPAT_CLIENT_INSTALL_PATH` at that installation, which is how
-/// the in-prefix client DLLs reach the Steam client running on the host.
+/// Links the Steam client runtime into the active Wine/Proton prefix and
+/// points `STEAM_COMPAT_CLIENT_INSTALL_PATH` at the Steam install. That is
+/// what the client DLLs inside the prefix follow to find the Steam process on
+/// the host.
 #[cfg(target_os = "linux")]
 fn link_steam_client_runtime(
     plan: &mut LaunchPlan,
@@ -313,56 +314,68 @@ pub(crate) fn prepare_onlinefix_runtime(
     prepare_onlinefix_runtime_from(plan, exe_path, &crate::import::steam_roots())
 }
 
-/// Releases cracked with the SOVEREIGN emulator drop the emulator next to the
-/// game's `steam_api64.dll` — for Unity that is `<Game>_Data/Plugins/x86_64`,
-/// not the executable's directory — and configure it through the sibling
-/// `SOVEREIGN.ini`.
+/// A Steam API library in the game tells us it talks to Steam. Cracked builds
+/// wrap the same file, so repacks land here too, while GOG and offline builds
+/// have nothing to stage and are skipped. Each entry carries the client pair
+/// for its architecture.
+#[cfg(target_os = "linux")]
+const STEAM_API_LIBRARIES: [(&str, [&str; 2]); 2] = [
+    (
+        "steam_api64.dll",
+        ["steamclient64.dll", "GameOverlayRenderer64.dll"],
+    ),
+    ("steam_api.dll", ["steamclient.dll", "GameOverlayRenderer.dll"]),
+];
+#[cfg(target_os = "linux")]
+const STEAM_API_SCAN_DEPTH: usize = 4;
+#[cfg(target_os = "linux")]
+const STEAM_API_SCAN_DIRS: usize = 1024;
+
+/// SOVEREIGN releases keep the emulator next to the Steam API library and
+/// read their settings from the sibling `SOVEREIGN.ini`.
 #[cfg(target_os = "linux")]
 const SOVEREIGN_EMULATOR: &str = "SOVEREIGN64.dll";
 #[cfg(target_os = "linux")]
 const SOVEREIGN_CONFIG: &str = "SOVEREIGN.ini";
-#[cfg(target_os = "linux")]
-const SOVEREIGN_CLIENT_FILES: [&str; 2] = ["steamclient64.dll", "GameOverlayRenderer64.dll"];
-#[cfg(target_os = "linux")]
-const SOVEREIGN_SCAN_DEPTH: usize = 4;
-#[cfg(target_os = "linux")]
-const SOVEREIGN_SCAN_DIRS: usize = 1024;
 
-/// Directory holding `SOVEREIGN64.dll`, searched breadth-first so plugin
-/// folders are reached before deep asset trees, with a hard cap so an unusual
-/// layout cannot stall a launch.
+/// Finds the folder holding the game's Steam API library and returns it with
+/// the client pair to stage. Searched breadth first, so plugin folders like
+/// `<Game>_Data/Plugins/x86_64` or `Binaries/Win64` come up before deep asset
+/// trees, and capped so a strange layout cannot hang a launch.
 #[cfg(target_os = "linux")]
-fn sovereign_emulator_dir(game_dir: &Path) -> Option<PathBuf> {
+fn steam_api_dir(game_dir: &Path) -> Option<(PathBuf, [&'static str; 2])> {
     let mut queue = VecDeque::from([(game_dir.to_path_buf(), 0usize)]);
     let mut visited = 0usize;
     while let Some((dir, depth)) = queue.pop_front() {
         visited += 1;
-        if visited > SOVEREIGN_SCAN_DIRS {
+        if visited > STEAM_API_SCAN_DIRS {
             return None;
         }
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
         };
+        let mut files: Vec<String> = Vec::new();
         for entry in entries.flatten() {
             if entry.path().is_dir() {
-                if depth < SOVEREIGN_SCAN_DEPTH {
+                if depth < STEAM_API_SCAN_DEPTH {
                     queue.push_back((entry.path(), depth + 1));
                 }
-            } else if entry
-                .file_name()
-                .to_string_lossy()
-                .eq_ignore_ascii_case(SOVEREIGN_EMULATOR)
-            {
-                return Some(dir);
+            } else {
+                files.push(entry.file_name().to_string_lossy().to_ascii_lowercase());
+            }
+        }
+        for (api, client_files) in STEAM_API_LIBRARIES {
+            if files.iter().any(|name| name == api) {
+                return Some((dir, client_files));
             }
         }
     }
     None
 }
 
-/// `[Steamworks] Online` from `SOVEREIGN.ini`. `None` when the file or the key
-/// is missing: those releases ship online mode, and the emulator then fails
-/// against the host Steam client unless the runtime is staged.
+/// `[Steamworks] Online` from `SOVEREIGN.ini`, or `None` when the file or the
+/// key is missing. Missing counts as on, because those releases ship with
+/// online mode enabled, and that is the case that needs the client staged.
 #[cfg(target_os = "linux")]
 fn sovereign_online_mode(emulator_dir: &Path) -> Option<bool> {
     let text = std::fs::read_to_string(emulator_dir.join(SOVEREIGN_CONFIG)).ok()?;
@@ -390,8 +403,12 @@ fn sovereign_online_mode(emulator_dir: &Path) -> Option<bool> {
     None
 }
 
+/// Hands a Steamworks game the client runtime Steam would have put in its
+/// prefix, so the game, or the crack that replaced its Steam API, can reach
+/// the client running on the host. Games without a Steam install keep the
+/// offline behaviour they have today instead of failing to launch.
 #[cfg(target_os = "linux")]
-fn prepare_sovereign_runtime_from(
+fn prepare_steam_runtime_from(
     plan: &mut LaunchPlan,
     exe_path: &Path,
     steam_roots: &[PathBuf],
@@ -399,31 +416,35 @@ fn prepare_sovereign_runtime_from(
     let Some(game_dir) = exe_path.parent() else {
         return Ok(());
     };
-    let Some(emulator_dir) = sovereign_emulator_dir(game_dir) else {
+    let Some((api_dir, client_files)) = steam_api_dir(game_dir) else {
         return Ok(());
     };
-    // Offline mode never touches the Steam client, so leave the prefix alone.
-    if sovereign_online_mode(&emulator_dir) == Some(false) {
+    // A SOVEREIGN release set to offline never touches the Steam client.
+    let emulator = api_dir.join(SOVEREIGN_EMULATOR).is_file();
+    if emulator && sovereign_online_mode(&api_dir) == Some(false) {
         return Ok(());
     }
-    let steam_root = steam_client_root(steam_roots, SOVEREIGN_CLIENT_FILES).ok_or_else(|| {
-        format!(
-            "SOVEREIGN online mode ([Steamworks] Online=1 in {}) needs {} and {} from one local Steam installation. Searched: {}. Install or repair Steam, then launch again — or set [Steamworks] Online=0 in that file to play offline.",
-            emulator_dir.join(SOVEREIGN_CONFIG).display(),
-            SOVEREIGN_CLIENT_FILES[0],
-            SOVEREIGN_CLIENT_FILES[1],
+    let Some(steam_root) = steam_client_root(steam_roots, client_files) else {
+        // Best effort for everything else: a game without a usable Steam
+        // client looks like a Steam-less machine, which Steam games survive.
+        // The emulator families cannot, so they report what is missing.
+        if !emulator {
+            return Ok(());
+        }
+        return Err(format!(
+            "SOVEREIGN online mode ([Steamworks] Online=1 in {}) needs {} and {} from one local Steam installation. Searched: {}. Install or repair Steam, then launch again, or set [Steamworks] Online=0 in that file to play offline.",
+            api_dir.join(SOVEREIGN_CONFIG).display(),
+            client_files[0],
+            client_files[1],
             searched_steam_roots(steam_roots)
-        )
-    })?;
-    link_steam_client_runtime(plan, steam_root, SOVEREIGN_CLIENT_FILES)
+        ));
+    };
+    link_steam_client_runtime(plan, steam_root, client_files)
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) fn prepare_sovereign_runtime(
-    plan: &mut LaunchPlan,
-    exe_path: &Path,
-) -> Result<(), String> {
-    prepare_sovereign_runtime_from(plan, exe_path, &crate::import::steam_roots())
+pub(crate) fn prepare_steam_runtime(plan: &mut LaunchPlan, exe_path: &Path) -> Result<(), String> {
+    prepare_steam_runtime_from(plan, exe_path, &crate::import::steam_roots())
 }
 
 #[derive(Default)]
@@ -1287,7 +1308,7 @@ mod tests {
         let prefix = tmp.path().join("prefix");
         let mut plan = sovereign_plan(&prefix);
 
-        prepare_sovereign_runtime_from(&mut plan, &exe, std::slice::from_ref(&steam)).unwrap();
+        prepare_steam_runtime_from(&mut plan, &exe, std::slice::from_ref(&steam)).unwrap();
 
         let destination = prefix.join(PREFIX_STEAM_DIR);
         assert_eq!(
@@ -1322,7 +1343,7 @@ mod tests {
         let prefix = tmp.path().join("prefix");
         let mut plan = sovereign_plan(&prefix);
 
-        prepare_sovereign_runtime_from(&mut plan, &exe, std::slice::from_ref(&steam)).unwrap();
+        prepare_steam_runtime_from(&mut plan, &exe, std::slice::from_ref(&steam)).unwrap();
 
         assert!(!prefix.join(PREFIX_STEAM_DIR).exists());
         assert!(launch_env(&plan, "STEAM_COMPAT_CLIENT_INSTALL_PATH").is_none());
@@ -1336,7 +1357,7 @@ mod tests {
         let prefix = tmp.path().join("prefix");
         let mut plan = sovereign_plan(&prefix);
 
-        prepare_sovereign_runtime_from(&mut plan, &exe, std::slice::from_ref(&steam)).unwrap();
+        prepare_steam_runtime_from(&mut plan, &exe, std::slice::from_ref(&steam)).unwrap();
 
         assert!(prefix
             .join(PREFIX_STEAM_DIR)
@@ -1346,7 +1367,7 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn games_without_the_emulator_are_untouched() {
+    fn games_without_a_steam_api_are_untouched() {
         let tmp = tempfile::tempdir().unwrap();
         let game = tmp.path().join("game");
         std::fs::create_dir_all(game.join("Game_Data/Plugins/x86_64")).unwrap();
@@ -1358,10 +1379,83 @@ mod tests {
         let prefix = tmp.path().join("prefix");
         let mut plan = sovereign_plan(&prefix);
 
-        prepare_sovereign_runtime_from(&mut plan, &game.join("Game.exe"), std::slice::from_ref(&steam))
+        prepare_steam_runtime_from(&mut plan, &game.join("Game.exe"), std::slice::from_ref(&steam))
             .unwrap();
 
         assert!(!prefix.join(PREFIX_STEAM_DIR).exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_steamworks_game_gets_the_runtime_a_steam_launch_provides() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game = tmp.path().join("game");
+        let plugins = game.join("Game_Data/Plugins/x86_64");
+        std::fs::create_dir_all(&plugins).unwrap();
+        std::fs::write(game.join("Game.exe"), b"exe").unwrap();
+        std::fs::write(plugins.join("steam_api64.dll"), b"valve api").unwrap();
+        let steam = tmp.path().join("steam");
+        std::fs::create_dir_all(&steam).unwrap();
+        std::fs::write(steam.join("steamclient64.dll"), b"client").unwrap();
+        std::fs::write(steam.join("GameOverlayRenderer64.dll"), b"renderer").unwrap();
+        let prefix = tmp.path().join("prefix");
+        let mut plan = sovereign_plan(&prefix);
+
+        prepare_steam_runtime_from(&mut plan, &game.join("Game.exe"), std::slice::from_ref(&steam))
+            .unwrap();
+
+        let destination = prefix.join(PREFIX_STEAM_DIR);
+        assert_eq!(
+            std::fs::read_link(destination.join("steamclient64.dll")).unwrap(),
+            steam.join("steamclient64.dll")
+        );
+        assert_eq!(
+            launch_env(&plan, "STEAM_COMPAT_CLIENT_INSTALL_PATH"),
+            steam.to_str()
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_32bit_steam_api_gets_the_32bit_runtime() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game = tmp.path().join("game");
+        std::fs::create_dir_all(game.join("Plugins/x86")).unwrap();
+        std::fs::write(game.join("Game.exe"), b"exe").unwrap();
+        std::fs::write(game.join("Plugins/x86/steam_api.dll"), b"valve api").unwrap();
+        let steam = tmp.path().join("steam");
+        std::fs::create_dir_all(&steam).unwrap();
+        std::fs::write(steam.join("steamclient.dll"), b"client32").unwrap();
+        std::fs::write(steam.join("GameOverlayRenderer.dll"), b"renderer32").unwrap();
+        let prefix = tmp.path().join("prefix");
+        let mut plan = sovereign_plan(&prefix);
+
+        prepare_steam_runtime_from(&mut plan, &game.join("Game.exe"), std::slice::from_ref(&steam))
+            .unwrap();
+
+        let destination = prefix.join(PREFIX_STEAM_DIR);
+        assert_eq!(
+            std::fs::read_link(destination.join("steamclient.dll")).unwrap(),
+            steam.join("steamclient.dll")
+        );
+        assert!(!destination.join("steamclient64.dll").exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_steamworks_game_without_a_local_steam_install_still_launches() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game = tmp.path().join("game");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::write(game.join("Game.exe"), b"exe").unwrap();
+        std::fs::write(game.join("steam_api64.dll"), b"valve api").unwrap();
+        let prefix = tmp.path().join("prefix");
+        let mut plan = sovereign_plan(&prefix);
+
+        prepare_steam_runtime_from(&mut plan, &game.join("Game.exe"), &[]).unwrap();
+
+        assert!(!prefix.join(PREFIX_STEAM_DIR).exists());
+        assert!(launch_env(&plan, "STEAM_COMPAT_CLIENT_INSTALL_PATH").is_none());
     }
 
     #[cfg(target_os = "linux")]
@@ -1373,7 +1467,7 @@ mod tests {
         std::fs::create_dir_all(&steam).unwrap();
         let mut plan = sovereign_plan(&tmp.path().join("prefix"));
 
-        let error = prepare_sovereign_runtime_from(&mut plan, &exe, std::slice::from_ref(&steam))
+        let error = prepare_steam_runtime_from(&mut plan, &exe, std::slice::from_ref(&steam))
             .unwrap_err();
 
         assert!(error.contains("SOVEREIGN.ini"), "{error}");
