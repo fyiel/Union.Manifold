@@ -1,6 +1,6 @@
 use std::{
     cmp::Ordering,
-    collections::HashSet,
+    collections::{HashSet, VecDeque},
     path::{Path, PathBuf},
 };
 
@@ -168,7 +168,7 @@ fn set_launch_env(plan: &mut LaunchPlan, key: &str, value: String) {
 }
 
 #[cfg(target_os = "linux")]
-fn onlinefix_prefix(plan: &LaunchPlan) -> Option<PathBuf> {
+fn active_wine_prefix(plan: &LaunchPlan) -> Option<PathBuf> {
     launch_env(plan, "WINEPREFIX")
         .map(PathBuf::from)
         .or_else(|| {
@@ -193,24 +193,79 @@ fn link_runtime_file(source: &Path, destination: &Path) -> Result<(), String> {
         if metadata.file_type().is_symlink() {
             std::fs::remove_file(destination).map_err(|error| {
                 format!(
-                    "OnlineFix could not replace broken link {}: {error}",
+                    "could not replace broken Steam client link {}: {error}",
                     destination.display()
                 )
             })?;
         } else {
             return Err(format!(
-                "OnlineFix needs {}, but that path is occupied",
+                "the Steam client runtime needs {}, but that path is occupied",
                 destination.display()
             ));
         }
     }
     std::os::unix::fs::symlink(source, destination).map_err(|error| {
         format!(
-            "OnlineFix could not link {} to {}: {error}",
+            "could not link {} to {}: {error}",
             source.display(),
             destination.display()
         )
     })
+}
+
+/// The Steam client files a Wine/Proton game loads to reach the running Steam
+/// client. Steam emulators (OnlineFix builds, the SOVEREIGN emulator) look for
+/// them under `C:\Program Files (x86)\Steam` inside the active prefix.
+#[cfg(target_os = "linux")]
+const PREFIX_STEAM_DIR: &str = "drive_c/Program Files (x86)/Steam";
+
+#[cfg(target_os = "linux")]
+fn steam_client_root<'a>(steam_roots: &'a [PathBuf], files: [&str; 2]) -> Option<&'a PathBuf> {
+    steam_roots
+        .iter()
+        .find(|root| files.iter().all(|name| usable_file(&root.join(name))))
+}
+
+#[cfg(target_os = "linux")]
+fn searched_steam_roots(steam_roots: &[PathBuf]) -> String {
+    if steam_roots.is_empty() {
+        "no Steam installation was found".to_string()
+    } else {
+        steam_roots
+            .iter()
+            .map(|root| root.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+/// Links the local Steam client runtime into the active Wine/Proton prefix and
+/// points `STEAM_COMPAT_CLIENT_INSTALL_PATH` at that installation, which is how
+/// the in-prefix client DLLs reach the Steam client running on the host.
+#[cfg(target_os = "linux")]
+fn link_steam_client_runtime(
+    plan: &mut LaunchPlan,
+    steam_root: &Path,
+    files: [&str; 2],
+) -> Result<(), String> {
+    let prefix = active_wine_prefix(plan)
+        .ok_or_else(|| "could not determine the active Wine/Proton prefix".to_string())?;
+    let destination = prefix.join(PREFIX_STEAM_DIR);
+    std::fs::create_dir_all(&destination).map_err(|error| {
+        format!(
+            "could not prepare the active prefix at {}: {error}",
+            destination.display()
+        )
+    })?;
+    for name in files {
+        link_runtime_file(&steam_root.join(name), &destination.join(name))?;
+    }
+    set_launch_env(
+        plan,
+        "STEAM_COMPAT_CLIENT_INSTALL_PATH",
+        steam_root.to_string_lossy().to_string(),
+    );
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -240,48 +295,13 @@ fn prepare_onlinefix_runtime_from(
     let Some((client_name, renderer_name)) = runtime else {
         return Ok(());
     };
-    let steam_root = steam_roots
-        .iter()
-        .find(|root| {
-            usable_file(&root.join(client_name)) && usable_file(&root.join(renderer_name))
-        })
-        .ok_or_else(|| {
-            let searched = if steam_roots.is_empty() {
-                "no Steam installation was found".to_string()
-            } else {
-                steam_roots
-                    .iter()
-                    .map(|root| root.display().to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            };
-            format!(
-                "OnlineFix needs {client_name} and {renderer_name} from one local Steam installation. Searched: {searched}. Install or repair Steam, then launch again."
-            )
-        })?
-        .clone();
-    let prefix = onlinefix_prefix(plan)
-        .ok_or_else(|| "OnlineFix could not determine the active Wine/Proton prefix".to_string())?;
-    let destination = prefix.join("drive_c/Program Files (x86)/Steam");
-    std::fs::create_dir_all(&destination).map_err(|error| {
+    let steam_root = steam_client_root(steam_roots, [client_name, renderer_name]).ok_or_else(|| {
         format!(
-            "OnlineFix could not prepare the active prefix at {}: {error}",
-            destination.display()
+            "OnlineFix needs {client_name} and {renderer_name} from one local Steam installation. Searched: {}. Install or repair Steam, then launch again.",
+            searched_steam_roots(steam_roots)
         )
     })?;
-    link_runtime_file(
-        &steam_root.join(client_name),
-        &destination.join(client_name),
-    )?;
-    link_runtime_file(
-        &steam_root.join(renderer_name),
-        &destination.join(renderer_name),
-    )?;
-    set_launch_env(
-        plan,
-        "STEAM_COMPAT_CLIENT_INSTALL_PATH",
-        steam_root.to_string_lossy().to_string(),
-    );
+    link_steam_client_runtime(plan, steam_root, [client_name, renderer_name])?;
     Ok(())
 }
 
@@ -291,6 +311,119 @@ pub(crate) fn prepare_onlinefix_runtime(
     exe_path: &Path,
 ) -> Result<(), String> {
     prepare_onlinefix_runtime_from(plan, exe_path, &crate::import::steam_roots())
+}
+
+/// Releases cracked with the SOVEREIGN emulator drop the emulator next to the
+/// game's `steam_api64.dll` — for Unity that is `<Game>_Data/Plugins/x86_64`,
+/// not the executable's directory — and configure it through the sibling
+/// `SOVEREIGN.ini`.
+#[cfg(target_os = "linux")]
+const SOVEREIGN_EMULATOR: &str = "SOVEREIGN64.dll";
+#[cfg(target_os = "linux")]
+const SOVEREIGN_CONFIG: &str = "SOVEREIGN.ini";
+#[cfg(target_os = "linux")]
+const SOVEREIGN_CLIENT_FILES: [&str; 2] = ["steamclient64.dll", "GameOverlayRenderer64.dll"];
+#[cfg(target_os = "linux")]
+const SOVEREIGN_SCAN_DEPTH: usize = 4;
+#[cfg(target_os = "linux")]
+const SOVEREIGN_SCAN_DIRS: usize = 1024;
+
+/// Directory holding `SOVEREIGN64.dll`, searched breadth-first so plugin
+/// folders are reached before deep asset trees, with a hard cap so an unusual
+/// layout cannot stall a launch.
+#[cfg(target_os = "linux")]
+fn sovereign_emulator_dir(game_dir: &Path) -> Option<PathBuf> {
+    let mut queue = VecDeque::from([(game_dir.to_path_buf(), 0usize)]);
+    let mut visited = 0usize;
+    while let Some((dir, depth)) = queue.pop_front() {
+        visited += 1;
+        if visited > SOVEREIGN_SCAN_DIRS {
+            return None;
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if entry.path().is_dir() {
+                if depth < SOVEREIGN_SCAN_DEPTH {
+                    queue.push_back((entry.path(), depth + 1));
+                }
+            } else if entry
+                .file_name()
+                .to_string_lossy()
+                .eq_ignore_ascii_case(SOVEREIGN_EMULATOR)
+            {
+                return Some(dir);
+            }
+        }
+    }
+    None
+}
+
+/// `[Steamworks] Online` from `SOVEREIGN.ini`. `None` when the file or the key
+/// is missing: those releases ship online mode, and the emulator then fails
+/// against the host Steam client unless the runtime is staged.
+#[cfg(target_os = "linux")]
+fn sovereign_online_mode(emulator_dir: &Path) -> Option<bool> {
+    let text = std::fs::read_to_string(emulator_dir.join(SOVEREIGN_CONFIG)).ok()?;
+    let mut in_steamworks = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(section) = line.strip_prefix('[').and_then(|rest| rest.strip_suffix(']')) {
+            in_steamworks = section.trim().eq_ignore_ascii_case("steamworks");
+            continue;
+        }
+        if !in_steamworks {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if !key.trim().eq_ignore_ascii_case("online") {
+            continue;
+        }
+        return Some(matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        ));
+    }
+    None
+}
+
+#[cfg(target_os = "linux")]
+fn prepare_sovereign_runtime_from(
+    plan: &mut LaunchPlan,
+    exe_path: &Path,
+    steam_roots: &[PathBuf],
+) -> Result<(), String> {
+    let Some(game_dir) = exe_path.parent() else {
+        return Ok(());
+    };
+    let Some(emulator_dir) = sovereign_emulator_dir(game_dir) else {
+        return Ok(());
+    };
+    // Offline mode never touches the Steam client, so leave the prefix alone.
+    if sovereign_online_mode(&emulator_dir) == Some(false) {
+        return Ok(());
+    }
+    let steam_root = steam_client_root(steam_roots, SOVEREIGN_CLIENT_FILES).ok_or_else(|| {
+        format!(
+            "SOVEREIGN online mode ([Steamworks] Online=1 in {}) needs {} and {} from one local Steam installation. Searched: {}. Install or repair Steam, then launch again — or set [Steamworks] Online=0 in that file to play offline.",
+            emulator_dir.join(SOVEREIGN_CONFIG).display(),
+            SOVEREIGN_CLIENT_FILES[0],
+            SOVEREIGN_CLIENT_FILES[1],
+            searched_steam_roots(steam_roots)
+        )
+    })?;
+    link_steam_client_runtime(plan, steam_root, SOVEREIGN_CLIENT_FILES)
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn prepare_sovereign_runtime(
+    plan: &mut LaunchPlan,
+    exe_path: &Path,
+) -> Result<(), String> {
+    prepare_sovereign_runtime_from(plan, exe_path, &crate::import::steam_roots())
 }
 
 #[derive(Default)]
@@ -1113,6 +1246,140 @@ mod tests {
         assert!(error.contains("steamclient64.dll"), "{error}");
         assert!(error.contains("GameOverlayRenderer64.dll"), "{error}");
         assert!(error.contains(&steam.display().to_string()), "{error}");
+    }
+
+    #[cfg(target_os = "linux")]
+    fn sovereign_fixture(tmp: &Path, online: Option<&str>) -> (PathBuf, PathBuf) {
+        let game = tmp.join("game");
+        let plugins = game.join("Game_Data/Plugins/x86_64");
+        std::fs::create_dir_all(&plugins).unwrap();
+        let steam = tmp.join("steam");
+        std::fs::create_dir_all(&steam).unwrap();
+        std::fs::write(game.join("Game.exe"), b"exe").unwrap();
+        std::fs::write(plugins.join("SOVEREIGN64.dll"), b"emulator").unwrap();
+        std::fs::write(plugins.join("steam_api64.dll"), b"wrapper").unwrap();
+        std::fs::write(steam.join("steamclient64.dll"), b"client").unwrap();
+        std::fs::write(steam.join("GameOverlayRenderer64.dll"), b"renderer").unwrap();
+        if let Some(online) = online {
+            std::fs::write(
+                plugins.join("SOVEREIGN.ini"),
+                format!("[Game]\nAppID=1913120\n\n[Steamworks]\nOnline={online}\n"),
+            )
+            .unwrap();
+        }
+        (game.join("Game.exe"), steam)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn sovereign_plan(prefix: &Path) -> LaunchPlan {
+        LaunchPlan {
+            command: "umu-run".into(),
+            args: vec![],
+            envs: vec![("WINEPREFIX".into(), prefix.to_string_lossy().to_string())],
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn sovereign_online_mode_stages_the_local_steam_runtime() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (exe, steam) = sovereign_fixture(tmp.path(), Some("1"));
+        let prefix = tmp.path().join("prefix");
+        let mut plan = sovereign_plan(&prefix);
+
+        prepare_sovereign_runtime_from(&mut plan, &exe, std::slice::from_ref(&steam)).unwrap();
+
+        let destination = prefix.join(PREFIX_STEAM_DIR);
+        assert_eq!(
+            std::fs::read_link(destination.join("steamclient64.dll")).unwrap(),
+            steam.join("steamclient64.dll")
+        );
+        assert_eq!(
+            std::fs::read_link(destination.join("GameOverlayRenderer64.dll")).unwrap(),
+            steam.join("GameOverlayRenderer64.dll")
+        );
+        assert_eq!(
+            launch_env(&plan, "STEAM_COMPAT_CLIENT_INSTALL_PATH"),
+            steam.to_str()
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn sovereign_offline_mode_leaves_the_prefix_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (exe, steam) = sovereign_fixture(
+            tmp.path(),
+            Some("0"),
+        );
+        // A decoy Online key outside [Steamworks] must not re-enable staging.
+        let plugins = exe.parent().unwrap().join("Game_Data/Plugins/x86_64");
+        std::fs::write(
+            plugins.join("SOVEREIGN.ini"),
+            "[Diagnostics]\nOnline=1\n\n[Steamworks]\nOnline=0\n",
+        )
+        .unwrap();
+        let prefix = tmp.path().join("prefix");
+        let mut plan = sovereign_plan(&prefix);
+
+        prepare_sovereign_runtime_from(&mut plan, &exe, std::slice::from_ref(&steam)).unwrap();
+
+        assert!(!prefix.join(PREFIX_STEAM_DIR).exists());
+        assert!(launch_env(&plan, "STEAM_COMPAT_CLIENT_INSTALL_PATH").is_none());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn sovereign_without_config_stages_the_runtime() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (exe, steam) = sovereign_fixture(tmp.path(), None);
+        let prefix = tmp.path().join("prefix");
+        let mut plan = sovereign_plan(&prefix);
+
+        prepare_sovereign_runtime_from(&mut plan, &exe, std::slice::from_ref(&steam)).unwrap();
+
+        assert!(prefix
+            .join(PREFIX_STEAM_DIR)
+            .join("steamclient64.dll")
+            .is_file());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn games_without_the_emulator_are_untouched() {
+        let tmp = tempfile::tempdir().unwrap();
+        let game = tmp.path().join("game");
+        std::fs::create_dir_all(game.join("Game_Data/Plugins/x86_64")).unwrap();
+        std::fs::write(game.join("Game.exe"), b"exe").unwrap();
+        let steam = tmp.path().join("steam");
+        std::fs::create_dir_all(&steam).unwrap();
+        std::fs::write(steam.join("steamclient64.dll"), b"client").unwrap();
+        std::fs::write(steam.join("GameOverlayRenderer64.dll"), b"renderer").unwrap();
+        let prefix = tmp.path().join("prefix");
+        let mut plan = sovereign_plan(&prefix);
+
+        prepare_sovereign_runtime_from(&mut plan, &game.join("Game.exe"), std::slice::from_ref(&steam))
+            .unwrap();
+
+        assert!(!prefix.join(PREFIX_STEAM_DIR).exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn sovereign_online_mode_reports_the_missing_local_runtime() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (exe, _) = sovereign_fixture(tmp.path(), Some("1"));
+        let steam = tmp.path().join("empty-steam");
+        std::fs::create_dir_all(&steam).unwrap();
+        let mut plan = sovereign_plan(&tmp.path().join("prefix"));
+
+        let error = prepare_sovereign_runtime_from(&mut plan, &exe, std::slice::from_ref(&steam))
+            .unwrap_err();
+
+        assert!(error.contains("SOVEREIGN.ini"), "{error}");
+        assert!(error.contains("steamclient64.dll"), "{error}");
+        assert!(error.contains(&steam.display().to_string()), "{error}");
+        assert!(error.contains("Online=0"), "{error}");
     }
 
     #[test]

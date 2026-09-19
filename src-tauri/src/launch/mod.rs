@@ -658,8 +658,18 @@ pub async fn game_exe_launch(
         Err(error) => return Ok(json!({ "ok": false, "error": error })),
     }
     #[cfg(target_os = "linux")]
-    if let Err(error) = linux::prepare_onlinefix_runtime(&mut plan, Path::new(&exe_path)) {
-        return Ok(json!({ "ok": false, "error": error }));
+    {
+        if let Err(error) = linux::prepare_onlinefix_runtime(&mut plan, Path::new(&exe_path)) {
+            return Ok(json!({ "ok": false, "error": error }));
+        }
+        // SOVEREIGN-cracked releases belong to the "Steam compatibility fixes"
+        // toggle: staging the host Steam client runtime is what lets their
+        // online mode attach instead of failing with the emulator's popup.
+        if steam_compatibility_fixes_enabled(&state.settings) {
+            if let Err(error) = linux::prepare_sovereign_runtime(&mut plan, Path::new(&exe_path)) {
+                return Ok(json!({ "ok": false, "error": error }));
+            }
+        }
     }
     plan.args.extend(mewgenics_launch_args(
         &exe_path,
