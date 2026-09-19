@@ -455,13 +455,13 @@ async fn resolve_mirror_parts(
     }
 }
 
-/// Report a resolved file list that cannot extract because it only carries
-/// later volumes of a split archive. GameBounty hides servers whose upload is
-/// missing parts on its own page, but the API still returns them: the Blood of
-/// Dawnwalker entry ships a server with part 2 alone. Downloading it wastes
-/// the whole transfer, because 7-Zip opens multi-volume sets from volume one.
-/// The reason names the offending file, so the message says which mirror and
-/// which part are at fault.
+/// Spot a resolved file list that cannot extract because the mirror only has
+/// later volumes of a split archive. GameBounty hides servers with an
+/// incomplete upload on its own page but still returns them through the API,
+/// and the Blood of Dawnwalker entry has one whose only link is part 2.
+/// Download it and the whole transfer is wasted, since 7-Zip opens a
+/// multi-volume set from volume one. The reason names that file, so the
+/// message says which mirror and which part are at fault.
 fn incomplete_volume_set<'a>(
     files: impl Iterator<Item = (Option<&'a str>, &'a str)>,
 ) -> Option<String> {
@@ -488,7 +488,7 @@ fn incomplete_volume_set<'a>(
         let lowest = *numbers.iter().next()?;
         if lowest > 1 {
             return Some(format!(
-                "this mirror only carries part {lowest} of the archive set ({sample}); part 1 is missing, so the set cannot be extracted"
+                "this mirror has only part {lowest} of the archive set ({sample}) and part 1 is missing, so the set cannot be extracted"
             ));
         }
         if let Some(highest) = numbers.iter().next_back() {

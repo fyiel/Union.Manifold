@@ -116,9 +116,9 @@ pub(crate) fn extract_entry_point(dir: &Path, fallback: &Path) -> PathBuf {
     fallback.to_path_buf()
 }
 
-/// Split a numbered archive volume into its set base and its 1-based volume
-/// number: `game.part2.rar` → `("game", 2)`, `game.7z.003` → `("game.7z", 3)`.
-/// Single-file archives (`game.rar`) carry no marker: `None`.
+/// Read a split archive name into its set base and volume number, so
+/// `game.part2.rar` gives (`game`, 2) and `game.7z.003` gives (`game.7z`, 3).
+/// A single archive with no volume marker (`game.rar`) gives None.
 pub(crate) fn part_volume(name: &str) -> Option<(&str, u32)> {
     if let Some(i) = name.find(".part") {
         let rest = &name[i + 5..];
