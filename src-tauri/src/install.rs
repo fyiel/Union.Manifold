@@ -116,23 +116,31 @@ pub(crate) fn extract_entry_point(dir: &Path, fallback: &Path) -> PathBuf {
     fallback.to_path_buf()
 }
 
-fn part_base(name: &str) -> Option<&str> {
+/// Split a numbered archive volume into its set base and its 1-based volume
+/// number: `game.part2.rar` → `("game", 2)`, `game.7z.003` → `("game.7z", 3)`.
+/// Single-file archives (`game.rar`) carry no marker: `None`.
+pub(crate) fn part_volume(name: &str) -> Option<(&str, u32)> {
     if let Some(i) = name.find(".part") {
-        if name[i + 5..]
-            .chars()
-            .next()
-            .map(|c| c.is_ascii_digit())
-            .unwrap_or(false)
-        {
-            return Some(&name[..i]);
+        let rest = &name[i + 5..];
+        let digits = rest
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(rest.len());
+        if let Ok(number) = rest[..digits].parse::<u32>() {
+            return Some((&name[..i], number.max(1)));
         }
     }
     if let Some((stem, ext)) = name.rsplit_once('.') {
         if !stem.is_empty() && ext.len() == 3 && ext.chars().all(|c| c.is_ascii_digit()) {
-            return Some(stem);
+            if let Ok(number) = ext.parse::<u32>() {
+                return Some((stem, number.max(1)));
+            }
         }
     }
     None
+}
+
+fn part_base(name: &str) -> Option<&str> {
+    part_volume(name).map(|(base, _)| base)
 }
 
 fn archive_files(dir: &Path, save_path: &Path) -> Vec<PathBuf> {
@@ -990,6 +998,27 @@ mod tests {
         assert_eq!(part_base("game.zip"), None);
         assert_eq!(part_base("readme.txt"), None);
         assert_eq!(part_base("game.partial.zip"), None);
+    }
+
+    #[test]
+    fn t_part_volume_numbers_the_marker_both_styles() {
+        assert_eq!(part_volume("game.part2.rar"), Some(("game", 2)));
+        assert_eq!(part_volume("game.part12.rar"), Some(("game", 12)));
+        assert_eq!(part_volume("game.part01.7z"), Some(("game", 1)));
+        assert_eq!(part_volume("game.7z.003"), Some(("game.7z", 3)));
+        assert_eq!(
+            part_volume("the blood of dawnwalker.part2.rar"),
+            Some(("the blood of dawnwalker", 2))
+        );
+    }
+
+    #[test]
+    fn t_part_volume_ignores_single_file_names() {
+        assert_eq!(part_volume("game.rar"), None);
+        assert_eq!(part_volume("game.7z"), None);
+        assert_eq!(part_volume("readme.txt"), None);
+        assert_eq!(part_volume(""), None);
+        assert_eq!(part_volume("café.part2.rar"), Some(("café", 2)));
     }
 
     #[test]

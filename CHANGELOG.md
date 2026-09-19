@@ -19,6 +19,13 @@ All notable changes to Union.Manifold. This project is a fork of
   already get. Releases configured with `[Steamworks] Online=0` are left alone,
   and a missing Steam installation is reported before launch with the ini path
   and the offline alternative instead of failing inside the game.
+- A mirror that holds only later volumes of a split archive no longer
+  resolves as a download. GameBounty keeps servers with an incomplete upload
+  in its API after hiding them on the page (The Blood of Dawnwalker ships one
+  whose only link is part 2), so the app downloaded 20 GB of a fragment that
+  could never extract. Resolution now names the missing part, which lets the
+  game page fall through to the next mirror: buzzheavier carries the whole
+  game in one file.
 
 ## 3.9.0
 

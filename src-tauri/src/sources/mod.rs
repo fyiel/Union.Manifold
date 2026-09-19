@@ -455,19 +455,93 @@ async fn resolve_mirror_parts(
     }
 }
 
+/// Report a resolved file list that cannot extract because it only carries
+/// later volumes of a split archive. GameBounty hides servers whose upload is
+/// missing parts on its own page, but the API still returns them: the Blood of
+/// Dawnwalker entry ships a server with part 2 alone. Downloading it wastes
+/// the whole transfer, because 7-Zip opens multi-volume sets from volume one.
+/// The reason names the offending file, so the message says which mirror and
+/// which part are at fault.
+fn incomplete_volume_set<'a>(
+    files: impl Iterator<Item = (Option<&'a str>, &'a str)>,
+) -> Option<String> {
+    let mut sets: std::collections::BTreeMap<String, (std::collections::BTreeSet<u32>, String)> =
+        std::collections::BTreeMap::new();
+    for (file_name, url) in files {
+        let name = file_name
+            .map(str::to_string)
+            .or_else(|| {
+                let tail = url.split(['?', '#']).next()?.rsplit('/').next()?;
+                (!tail.is_empty()).then(|| tail.to_string())
+            })
+            .unwrap_or_default();
+        let lower = name.to_lowercase();
+        let Some((base, number)) = crate::install::part_volume(&lower) else {
+            continue;
+        };
+        let entry = sets
+            .entry(base.to_string())
+            .or_insert_with(|| (std::collections::BTreeSet::new(), name));
+        entry.0.insert(number);
+    }
+    for (_, (numbers, sample)) in sets {
+        let lowest = *numbers.iter().next()?;
+        if lowest > 1 {
+            return Some(format!(
+                "this mirror only carries part {lowest} of the archive set ({sample}); part 1 is missing, so the set cannot be extracted"
+            ));
+        }
+        if let Some(highest) = numbers.iter().next_back() {
+            if let Some(missing) = (1..=*highest).find(|n| !numbers.contains(n)) {
+                return Some(format!(
+                    "part {missing} of {highest} is missing from this mirror's archive set ({sample})"
+                ));
+            }
+        }
+    }
+    None
+}
+
+/// Fail a resolution whose files are an unusable fragment of a split archive,
+/// so the caller falls through to the next mirror instead of downloading it.
+fn reject_incomplete_volume_set(result: ResolveResult) -> ResolveResult {
+    if !result.resolvable {
+        return result;
+    }
+    let reason = match (&result.files, &result.url) {
+        (Some(files), _) if !files.is_empty() => {
+            incomplete_volume_set(files.iter().map(|f| (f.file_name.as_deref(), f.url.as_str())))
+        }
+        (_, Some(url)) => incomplete_volume_set(std::iter::once((
+            result.file_name.as_deref(),
+            url.as_str(),
+        ))),
+        _ => None,
+    };
+    match reason {
+        Some(reason) => ResolveResult {
+            resolvable: false,
+            reason: Some(reason),
+            ..Default::default()
+        },
+        None => result,
+    }
+}
+
 pub(crate) async fn adapter_resolve_with(
     app: Option<&AppHandle>,
     id: &str,
     option: &schema::DownloadOption,
 ) -> ResolveResult {
-    match id {
+    let result = match id {
         "unioncrax" => adapters::unioncrax::resolve_download(option).await,
         _ if option.parts.is_empty() => match app {
             Some(app) => hosts::resolve_url_via(app, option).await,
             None => hosts::resolve_url(option).await,
         },
         _ => resolve_mirror_parts(app, option).await,
-    }
+    };
+    reject_incomplete_volume_set(result)
 }
 
 pub struct Registry {
@@ -1135,6 +1209,110 @@ mod tests {
         assert!(listed.iter().any(|s| s.id == "gog"));
         let active = reg.active_ids(&None);
         assert!(!active.iter().any(|id| id == "onlinefix"));
+    }
+
+    fn names<'a>(files: &'a [ResolvedFile]) -> impl Iterator<Item = (Option<&'a str>, &'a str)> {
+        files.iter().map(|f| (f.file_name.as_deref(), f.url.as_str()))
+    }
+
+    fn resolved_file(name: &str) -> ResolvedFile {
+        ResolvedFile {
+            url: format!("https://host.example/files/{name}"),
+            file_name: Some(name.to_string()),
+            size_bytes: None,
+        }
+    }
+
+    #[test]
+    fn lone_later_volume_is_not_downloadable() {
+        // GameBounty ships this server for The Blood of Dawnwalker: the only
+        // link holds part 2 of the set, so the transfer cannot extract.
+        let files = [resolved_file("The Blood of Dawnwalker.part2.rar")];
+        let reason = incomplete_volume_set(names(&files)).expect("part 2 alone is a fragment");
+        assert!(reason.contains("part 2"), "{reason}");
+        assert!(
+            reason.contains("The Blood of Dawnwalker.part2.rar"),
+            "the message names the file: {reason}"
+        );
+    }
+
+    #[test]
+    fn later_digit_volume_is_not_downloadable() {
+        let files = [resolved_file("game.7z.002")];
+        assert!(incomplete_volume_set(names(&files)).is_some());
+    }
+
+    #[test]
+    fn complete_volume_sets_pass() {
+        let part_set = [resolved_file("game.part1.rar"), resolved_file("game.part2.rar")];
+        assert_eq!(incomplete_volume_set(names(&part_set)), None);
+        let digit_set = [resolved_file("game.7z.001"), resolved_file("game.7z.002")];
+        assert_eq!(incomplete_volume_set(names(&digit_set)), None);
+    }
+
+    #[test]
+    fn single_file_archives_pass() {
+        let files = [resolved_file("The-Blood-of-Dawnwalker-SteamRIP.com.rar")];
+        assert_eq!(incomplete_volume_set(names(&files)), None);
+    }
+
+    #[test]
+    fn gap_in_a_volume_set_is_reported() {
+        let files = [resolved_file("game.7z.001"), resolved_file("game.7z.003")];
+        let reason = incomplete_volume_set(names(&files)).expect("part 2 is missing");
+        assert!(reason.contains("part 2 of 3"), "{reason}");
+    }
+
+    #[test]
+    fn file_name_falls_back_to_the_url() {
+        let files = [ResolvedFile {
+            url: "https://host.example/x/The_Blood_of_Dawnwalker.part2.rar?v=1".to_string(),
+            file_name: None,
+            size_bytes: None,
+        }];
+        assert!(incomplete_volume_set(names(&files)).is_some());
+    }
+
+    #[test]
+    fn reject_incomplete_volume_set_rewrites_only_fragments() {
+        let complete = ResolveResult {
+            resolvable: true,
+            url: Some("https://host.example/files/The-Blood-of-Dawnwalker-SteamRIP.com.rar".to_string()),
+            file_name: Some("The-Blood-of-Dawnwalker-SteamRIP.com.rar".to_string()),
+            ..Default::default()
+        };
+        let kept = reject_incomplete_volume_set(complete);
+        assert!(kept.resolvable);
+        assert_eq!(kept.reason, None);
+
+        let fragment = ResolveResult {
+            resolvable: true,
+            url: Some("https://host.example/files/Game.part2.rar".to_string()),
+            file_name: Some("Game.part2.rar".to_string()),
+            ..Default::default()
+        };
+        let rejected = reject_incomplete_volume_set(fragment);
+        assert!(!rejected.resolvable);
+        assert!(rejected.url.is_none(), "the fragment url is dropped");
+        assert!(rejected.reason.is_some_and(|r| r.contains("part 2")));
+
+        let already_failed = ResolveResult {
+            resolvable: false,
+            reason: Some("host down".to_string()),
+            ..Default::default()
+        };
+        let untouched = reject_incomplete_volume_set(already_failed);
+        assert_eq!(untouched.reason.as_deref(), Some("host down"));
+    }
+
+    #[test]
+    fn multi_file_lists_are_checked_as_a_set() {
+        let files = [
+            resolved_file("alpha.part1.rar"),
+            resolved_file("alpha.part2.rar"),
+            resolved_file("beta.part1.rar"),
+        ];
+        assert_eq!(incomplete_volume_set(names(&files)), None);
     }
 
     #[test]
