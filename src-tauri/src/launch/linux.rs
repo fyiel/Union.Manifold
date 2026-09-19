@@ -1,8 +1,11 @@
 use std::{
     cmp::Ordering,
-    collections::{HashSet, VecDeque},
+    collections::HashSet,
     path::{Path, PathBuf},
 };
+
+#[cfg(target_os = "linux")]
+use std::collections::VecDeque;
 
 use serde_json::{json, Value};
 use tauri::State;

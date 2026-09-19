@@ -1211,7 +1211,7 @@ mod tests {
         assert!(!active.iter().any(|id| id == "onlinefix"));
     }
 
-    fn names<'a>(files: &'a [ResolvedFile]) -> impl Iterator<Item = (Option<&'a str>, &'a str)> {
+    fn names(files: &[ResolvedFile]) -> impl Iterator<Item = (Option<&str>, &str)> {
         files.iter().map(|f| (f.file_name.as_deref(), f.url.as_str()))
     }
 
