@@ -8,6 +8,12 @@ pub mod protondb;
 pub mod schema;
 pub mod steam;
 
+/// Hosts this app hands to Slipgate's browser fetch (`POST /fetch`). The bundled
+/// resolver only allows `hydralinks.cloud` on its own, so the SteamRIP feed and
+/// the Online-Fix pages a source or a repair resolves through it would be
+/// refused as "fetch url not allowed".
+pub const SLIPGATE_FETCH_HOSTS: &str = "hydralinks.cloud,steamrip.com,online-fix.me";
+
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};

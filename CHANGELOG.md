@@ -3,6 +3,23 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.9.2
+
+### Fixed
+
+- The built-in resolver starts on hosts without the `xvfb` package. Its
+  bundled FlareSolverr exits during the browser test as soon as Xvfb is
+  missing, so on a default Arch install (and any minimal one) the runtime
+  never reported healthy and every Slipgate-backed source fell back to a
+  remote URL or failed outright. FlareSolverr also launches Chrome with
+  `--headless=new`, so the virtual display was only a startup precondition;
+  it is now used when present and skipped when it is not.
+- The built-in resolver no longer refuses the app's own fetches. Slipgate
+  allows `POST /fetch` only for hosts named in `SLIPGATE_FETCH_ALLOWED_HOSTS`
+  and defaults to `hydralinks.cloud`, so SteamRIP and Online-Fix catalogue and
+  page fetches came back as "fetch url not allowed"; the managed resolver now
+  ships with the hosts this app fetches through it.
+
 ## 3.9.1
 
 ### Fixed

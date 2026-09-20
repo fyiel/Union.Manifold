@@ -17,8 +17,10 @@ FLARESOLVERR_VERSION = "3.5.0"
 FLARESOLVERR_COMMIT = "4ca91a24f87a73f963e1d6610cbf3b9f01c1cc1b"
 # Packaging revision: bump when the bundle layout changes without an upstream
 # version move, so already-installed runtimes see an update. r1 strips the
-# PyInstaller-bundled libreadline/libtinfo that broke FlareSolverr on Arch.
-RUNTIME_REV = "r1"
+# PyInstaller-bundled libreadline/libtinfo that broke FlareSolverr on Arch; r2
+# makes FlareSolverr's Xvfb display optional so the runtime starts on hosts
+# without the xvfb package.
+RUNTIME_REV = "r2"
 FLARESOLVERR = {
     "linux-x86_64": {
         "name": "flaresolverr_linux_x64.tar.gz",
@@ -57,6 +59,43 @@ def find_executable(root: Path, name: str) -> Path:
     if len(matches) != 1:
         raise RuntimeError(f"expected one {name} in FlareSolverr archive, found {len(matches)}")
     return matches[0]
+
+
+# FlareSolverr's Linux path starts Xvfb whenever HEADLESS is true, yet it
+# launches Chrome with `--headless=new` at the same time (undetected_chromedriver
+# adds that flag for every Chrome 108+ build), so nothing ever renders into that
+# display. On a host without the xvfb package - the default on Arch and most
+# minimal installs - Xvfb() raises and FlareSolverr exits while testing the
+# browser, which leaves the whole built-in resolver unhealthy. Make the virtual
+# display best-effort: take it when it exists, carry on headless when it does
+# not.
+XVFB_CALL = """def start_xvfb_display():
+    global XVFB_DISPLAY
+    if XVFB_DISPLAY is None:
+        from xvfbwrapper import Xvfb
+        XVFB_DISPLAY = Xvfb()
+        XVFB_DISPLAY.start()
+"""
+XVFB_CALL_PATCHED = """def start_xvfb_display():
+    global XVFB_DISPLAY
+    if XVFB_DISPLAY is None:
+        try:
+            from xvfbwrapper import Xvfb
+            XVFB_DISPLAY = Xvfb()
+            XVFB_DISPLAY.start()
+        except Exception as exc:
+            logging.warning("no Xvfb display available, running headless: %s", exc)
+            XVFB_DISPLAY = False
+"""
+
+
+def patch_flaresolverr(source: Path) -> None:
+    """Pin the one upstream behaviour the bundled runtime cannot rely on: Xvfb."""
+    utils = source / "src" / "utils.py"
+    text = utils.read_text(encoding="utf-8")
+    if XVFB_CALL not in text:
+        raise RuntimeError("FlareSolverr Xvfb patch no longer applies to src/utils.py")
+    utils.write_text(text.replace(XVFB_CALL, XVFB_CALL_PATCHED, 1), encoding="utf-8")
 
 
 def main() -> None:
@@ -122,6 +161,7 @@ def main() -> None:
             raise RuntimeError(
                 f"FlareSolverr checkout drifted: expected {FLARESOLVERR_COMMIT}, got {head}"
             )
+        patch_flaresolverr(flaresolverr_source)
         run(
             sys.executable,
             "-m",

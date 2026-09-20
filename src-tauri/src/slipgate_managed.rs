@@ -670,6 +670,10 @@ async fn start_runtime(
             format!("http://127.0.0.1:{}/v1", config.flaresolverr_port),
         ),
         ("SLIPGATE_LOG_LEVEL", "info".to_string()),
+        (
+            "SLIPGATE_FETCH_ALLOWED_HOSTS",
+            crate::sources::SLIPGATE_FETCH_HOSTS.to_string(),
+        ),
     ];
     if let Some(proxy) = settings.get_string("proxyUrl") {
         slipgate_env.push(("SLIPGATE_PROXY_URL", proxy));
