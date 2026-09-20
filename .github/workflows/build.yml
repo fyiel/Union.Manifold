@@ -230,6 +230,13 @@ jobs:
         run: python -m pip install pyinstaller==6.20.0
       - name: Build resolver runtime
         run: python renderer/scripts/build-resolver-runtime.py --platform ${{ matrix.platform }} --output resolver-runtime
+      # Start the artifact the way the app does before it is published. Building
+      # it proves nothing: the runtime that shipped in 3.8.0/3.9.x packed fine
+      # and never came up, because FlareSolverr exits during its browser test
+      # when the host has no xvfb package. Failing here keeps that artifact out
+      # of the release instead of out of the app.
+      - name: Smoke test resolver runtime
+        run: python renderer/scripts/smoke-resolver-runtime.py --artifact resolver-runtime/resolver-runtime-${{ matrix.platform }}.zip
       - uses: actions/upload-artifact@v4
         with:
           name: resolver-runtime-${{ matrix.platform }}
