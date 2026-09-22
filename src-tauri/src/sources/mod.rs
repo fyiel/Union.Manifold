@@ -12,7 +12,8 @@ pub mod steam;
 /// resolver only allows `hydralinks.cloud` on its own, so the SteamRIP feed and
 /// the Online-Fix pages a source or a repair resolves through it would be
 /// refused as "fetch url not allowed".
-pub const SLIPGATE_FETCH_HOSTS: &str = "hydralinks.cloud,steamrip.com,online-fix.me";
+pub const SLIPGATE_FETCH_HOSTS: &str =
+    "hydralinks.cloud,steamrip.com,online-fix.me,zeigames.com";
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -241,9 +242,9 @@ pub struct SourceMeta {
 
 pub const SOURCES: &[SourceMeta] = &[
     SourceMeta {
-        id: "unioncrax",
-        name: "UnionCrax",
-        homepage: "https://union-crax.xyz",
+        id: "kryo",
+        name: "Kryoto",
+        homepage: "https://kryo.to",
         requires_slipgate: false,
         torrent_only: false,
     },
@@ -265,7 +266,7 @@ pub const SOURCES: &[SourceMeta] = &[
         id: "zeigames",
         name: "ZeiGames",
         homepage: "https://zeigames.com",
-        requires_slipgate: false,
+        requires_slipgate: true,
         torrent_only: false,
     },
     SourceMeta {
@@ -304,7 +305,7 @@ fn hidden_by_torrent_filter(source: &SourceMeta) -> bool {
 
 pub fn capabilities_for(id: &str) -> Capabilities {
     match id {
-        "unioncrax" => adapters::unioncrax::capabilities(),
+        "kryo" => adapters::kryo::capabilities(),
         "gamebounty" => adapters::gamebounty::capabilities(),
         "steamrip" => adapters::steamrip::capabilities(),
         "zeigames" => adapters::zeigames::capabilities(),
@@ -316,28 +317,9 @@ pub fn capabilities_for(id: &str) -> Capabilities {
     }
 }
 
-fn simple_text_query(params: &QueryParams) -> Option<&str> {
-    let query = params.text.as_deref()?.trim();
-    (!query.is_empty()
-        && params.tags.is_empty()
-        && params.min_year.is_none()
-        && params.max_year.is_none()
-        && params.min_size_bytes.is_none()
-        && params.max_size_bytes.is_none()
-        && matches!(params.sort.as_deref(), None | Some("relevance"))
-        && params.order.is_none()
-        && !params.balanced)
-        .then_some(query)
-}
-
 async fn adapter_query(id: &str, params: &QueryParams) -> Option<Vec<SourceGame>> {
-    if id == "unioncrax" {
-        if let Some(query) = simple_text_query(params) {
-            return Some(adapters::unioncrax::search(query, params.limit).await);
-        }
-    }
     match id {
-        "unioncrax" => adapters::unioncrax::query(params).await,
+        "kryo" => adapters::kryo::query(params).await,
         "gamebounty" => adapters::gamebounty::query(params).await,
         "steamrip" => adapters::steamrip::query(params).await,
         "zeigames" => adapters::zeigames::query(params).await,
@@ -351,7 +333,7 @@ async fn adapter_query(id: &str, params: &QueryParams) -> Option<Vec<SourceGame>
 
 async fn adapter_search(id: &str, q: &str, limit: usize) -> Vec<SourceGame> {
     match id {
-        "unioncrax" => adapters::unioncrax::search(q, limit).await,
+        "kryo" => adapters::kryo::search(q, limit).await,
         "gamebounty" => adapters::gamebounty::search(q, limit).await,
         "steamrip" => adapters::steamrip::search(q, limit).await,
         "zeigames" => adapters::zeigames::search(q, limit).await,
@@ -365,7 +347,7 @@ async fn adapter_search(id: &str, q: &str, limit: usize) -> Vec<SourceGame> {
 
 async fn adapter_detail(id: &str, slug: &str) -> Option<SourceGame> {
     match id {
-        "unioncrax" => adapters::unioncrax::get_detail(slug).await,
+        "kryo" => adapters::kryo::get_detail(slug).await,
         "gamebounty" => adapters::gamebounty::get_detail(slug).await,
         "steamrip" => adapters::steamrip::get_detail(slug).await,
         "zeigames" => adapters::zeigames::get_detail(slug).await,
@@ -536,16 +518,15 @@ fn reject_incomplete_volume_set(result: ResolveResult) -> ResolveResult {
 
 pub(crate) async fn adapter_resolve_with(
     app: Option<&AppHandle>,
-    id: &str,
     option: &schema::DownloadOption,
 ) -> ResolveResult {
-    let result = match id {
-        "unioncrax" => adapters::unioncrax::resolve_download(option).await,
-        _ if option.parts.is_empty() => match app {
+    let result = if option.parts.is_empty() {
+        match app {
             Some(app) => hosts::resolve_url_via(app, option).await,
             None => hosts::resolve_url(option).await,
-        },
-        _ => resolve_mirror_parts(app, option).await,
+        }
+    } else {
+        resolve_mirror_parts(app, option).await
     };
     reject_incomplete_volume_set(result)
 }
@@ -1079,7 +1060,11 @@ pub async fn sources_resolve(
     source_id: String,
     option: schema::DownloadOption,
 ) -> Result<Value> {
-    let result = adapter_resolve_with(Some(&app), &source_id, &option).await;
+    // Resolution is host-driven: the option's URL decides which host resolver
+    // runs, so no source owns a private download flow any more. The id stays in
+    // the signature because the renderer sends it with every call.
+    let _ = source_id;
+    let result = adapter_resolve_with(Some(&app), &option).await;
     Ok(json!({ "ok": true, "result": result }))
 }
 
@@ -1398,40 +1383,5 @@ mod tests {
         assert_eq!(result.games.len(), MAX_PAGE_SIZE);
         assert!(result.games[0].sources[0].download_options.is_empty());
         assert!(result.games[0].sources[0].direct);
-    }
-
-    #[test]
-    fn only_plain_relevance_queries_use_source_search() {
-        let plain = QueryParams {
-            text: Some(" wuchang ".to_string()),
-            sort: Some("relevance".to_string()),
-            ..Default::default()
-        };
-        assert_eq!(simple_text_query(&plain), Some("wuchang"));
-
-        for filtered in [
-            QueryParams {
-                tags: vec!["RPG".to_string()],
-                ..plain.clone()
-            },
-            QueryParams {
-                min_year: Some(2025),
-                ..plain.clone()
-            },
-            QueryParams {
-                sort: Some("latest".to_string()),
-                ..plain.clone()
-            },
-            QueryParams {
-                order: Some("asc".to_string()),
-                ..plain.clone()
-            },
-            QueryParams {
-                balanced: true,
-                ..plain.clone()
-            },
-        ] {
-            assert_eq!(simple_text_query(&filtered), None);
-        }
     }
 }

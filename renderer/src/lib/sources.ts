@@ -150,10 +150,6 @@ export function resolveInstalledGame(appid: string, title: string, knownSteamApp
 }
 
 async function resolveInstalledGameOnce(appid: string, title: string, knownSteamAppId?: number | null): Promise<UnifiedSourceGame | null> {
-  if (!knownSteamAppId && /^\d+$/.test(appid)) {
-    const full = await getSourceDetail([{ sourceId: "unioncrax", sourceSlug: appid }])
-    if (full) return full
-  }
   const steamAppId = knownSteamAppId ?? (() => {
     const m = /^steam-(\d+)$/.exec(appid)
     return m ? Number(m[1]) : null
@@ -247,10 +243,10 @@ export function fetchSteamArt(appid?: number | null, name?: string): Promise<str
   void p.then((urls) => { if (!urls.length) _steamArt.delete(appid) })
   return p
 }
-export const SOURCE_PRIORITY = ["unioncrax", "gamebounty", "steamrip", "zeigames", "onlinefix", "gog", "empress", "kaoskrew"]
+export const SOURCE_PRIORITY = ["kryo", "gamebounty", "steamrip", "zeigames", "onlinefix", "gog", "empress", "kaoskrew"]
 
 export const SOURCE_NAMES: Record<string, string> = {
-  unioncrax: "UnionCrax",
+  kryo: "Kryoto",
   gamebounty: "GameBounty",
   steamrip: "SteamRIP",
   zeigames: "ZeiGames",
@@ -264,7 +260,7 @@ export function sourceName(id: string): string {
 }
 
 export const SOURCE_ABBR: Record<string, string> = {
-  unioncrax: "UC",
+  kryo: "KR",
   gamebounty: "GB",
   steamrip: "SR",
   zeigames: "ZG",
@@ -282,7 +278,7 @@ export function sourceIsDirect(source: SourceGame): boolean {
 }
 
 export const SOURCE_DIRECT: Record<string, boolean> = {
-  unioncrax: true,
+  kryo: true,
   steamrip: true,
   gamebounty: true,
   zeigames: true,
@@ -302,7 +298,7 @@ function migrateSourceIds(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   const ids = value
     .filter((id: unknown): id is string => typeof id === "string")
-    .map((id) => id === "rexagames" ? "zeigames" : id)
+    .map((id) => id === "rexagames" ? "zeigames" : id === "unioncrax" ? "kryo" : id)
     .filter((id) => SOURCE_PRIORITY.includes(id))
   return [...new Set(ids)]
 }
@@ -385,6 +381,7 @@ export type DownloadEntry = { source: SourceGame; option: SourceDownloadOption }
 
 const HOST_FRIENDLINESS: Record<string, number> = {
   ucfiles: 0, // UnionCrax.Direct — #1 (in-app, no gates)
+  kryo: 6, // Kryoto filehost — invisible Turnstile, browser-only
   pixeldrain: 1, // #2 (dedicated resolver, no gates)
   gofile: 2, // #3 (API resolver; occasional temp-unavailable)
   datanodes: 3, // direct; may hit Cloudflare (Slipgate fallback)

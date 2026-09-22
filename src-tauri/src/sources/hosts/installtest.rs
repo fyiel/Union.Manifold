@@ -52,9 +52,7 @@ async fn source_games(source: &str, query: Option<&str>, limit: usize) -> Vec<So
         ..Default::default()
     };
     match source {
-        "unioncrax" => adapters::unioncrax::query(&params)
-            .await
-            .unwrap_or_default(),
+        "kryo" => adapters::kryo::query(&params).await.unwrap_or_default(),
         "gamebounty" => adapters::gamebounty::query(&params)
             .await
             .unwrap_or_default(),
@@ -65,15 +63,15 @@ async fn source_games(source: &str, query: Option<&str>, limit: usize) -> Vec<So
 
 async fn detail_of(source: &str, slug: &str) -> Option<SourceGame> {
     match source {
-        "unioncrax" => adapters::unioncrax::get_detail(slug).await,
+        "kryo" => adapters::kryo::get_detail(slug).await,
         "gamebounty" => adapters::gamebounty::get_detail(slug).await,
         "zeigames" => adapters::zeigames::get_detail(slug).await,
         _ => adapters::steamrip::get_detail(slug).await,
     }
 }
 
-async fn resolve_any(source: &str, opt: &DownloadOption) -> ResolveResult {
-    crate::sources::adapter_resolve_with(None, source, opt).await
+async fn resolve_any(opt: &DownloadOption) -> ResolveResult {
+    crate::sources::adapter_resolve_with(None, opt).await
 }
 
 async fn download_to(
@@ -469,7 +467,7 @@ async fn install_one_game() {
             "\n-- try #{tried} [{}] \"{}\" host={} size={:?} ({:?}) --",
             gg.source_id, gg.title, opt.host_type, gg.size_bytes, gg.size_text
         );
-        let r = resolve_any(&source, opt).await;
+        let r = resolve_any(opt).await;
         if !r.resolvable {
             eprintln!("   resolve soft-fail: {:?}", r.reason);
             continue;

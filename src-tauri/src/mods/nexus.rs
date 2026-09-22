@@ -21,6 +21,12 @@ const API: &str = "https://api.nexusmods.com";
 
 const CLOUDFLARE_HINT: &str = "Cloudflare blocked the request. A cf_clearance cookie only works from the same browser AND the same User-Agent that made it. Copy a fresh cf_clearance and paste your browser's User-Agent under Settings > Mods too";
 
+/// Overall ceiling for one install click. The free path is genuinely slow (the
+/// page's countdown plus a resolver that warms a browser), but an install button
+/// must never spin without an answer: the ceiling sits above the resolver's own
+/// resolve timeout and below anything a user would read as "stuck".
+const INSTALL_BUDGET: Duration = Duration::from_secs(200);
+
 const WWW_HOST: &str = "www.nexusmods.com";
 const GENERATE_URL: &str =
     "https://www.nexusmods.com/Core/Libs/Common/Managers/Downloads?GenerateDownloadUrl";
@@ -317,8 +323,17 @@ fn session_cookie(state: &AppState) -> Option<String> {
 }
 
 async fn game_id_for_domain(key: &str, domain: &str) -> Result<Option<u64>, String> {
+    let find = |list: &[NexusGame]| list.iter().find(|g| g.domain == domain).map(|g| g.id);
     let list = games_list(key).await?;
-    Ok(list.iter().find(|g| g.domain == domain).map(|g| g.id))
+    if let Some(id) = find(&list) {
+        return Ok(Some(id));
+    }
+    // A game Nexus added after this cache was written has no numeric id in it,
+    // and the cached list is otherwise never refreshed (the title matcher's one
+    // refresh per process is spent elsewhere). New games are exactly the case
+    // this lookup exists for, so refetch once before giving up.
+    let fresh = fetch_games(key).await?;
+    Ok(find(&fresh))
 }
 
 fn nexus_session_value(state: &AppState) -> Option<String> {
@@ -382,11 +397,28 @@ fn build_generate_form(file_id: u64, game_id: u64) -> String {
 
 fn parse_generate_response(body: &str) -> Option<String> {
     let v: Value = serde_json::from_str(body).ok()?;
-    ["url", "URI", "src", "download_url"]
-        .iter()
-        .find_map(|k| v.get(*k).and_then(|u| u.as_str()))
-        .map(http::decode_entities)
-        .filter(|s| s.starts_with("http"))
+    // Nexus answers the generate call with its mirror list: an array of objects,
+    // each carrying the CDN URI. Reading only the root of that array is why a
+    // perfectly valid session used to look expired, so both shapes are accepted.
+    let link = match &v {
+        Value::Array(items) => items.iter().find_map(|item| {
+            ["URI", "uri", "url", "src", "download_url"]
+                .iter()
+                .find_map(|k| item.get(*k).and_then(|u| u.as_str()))
+        }),
+        _ => ["url", "URI", "uri", "src", "download_url"]
+            .iter()
+            .find_map(|k| v.get(*k).and_then(|u| u.as_str())),
+    }?;
+    let link = http::decode_entities(link);
+    link.starts_with("http").then_some(link)
+}
+
+/// Whether the generate answer is Nexus's logged-out form: an empty mirror
+/// array. Nothing a browser can add to that, so the caller stops instead of
+/// spending a resolve on the same dead session.
+fn generate_is_logged_out(body: &str) -> bool {
+    matches!(serde_json::from_str::<Value>(body), Ok(Value::Array(items)) if items.is_empty())
 }
 
 fn is_cloudflare_challenge(status: u16, body: &str) -> bool {
@@ -398,7 +430,13 @@ fn is_cloudflare_challenge(status: u16, body: &str) -> bool {
 
 enum FreeDownload {
     Started,
+    /// The session cookie is unusable: absent, rejected, or logged out. A
+    /// resolver replaying the same cookie fails identically, so callers stop
+    /// instead of spending a resolve on it.
     NeedsSession(Option<String>),
+    /// The session may be fine but this client cannot get past the gate
+    /// (Cloudflare). The resolver's browser is exactly what that is for.
+    NeedsBrowser(Option<String>),
 }
 
 async fn native_free_download(
@@ -459,7 +497,7 @@ async fn native_free_download(
         (status, body)
     };
     if is_cloudflare_challenge(page.0, &page.1) {
-        return Ok(FreeDownload::NeedsSession(Some(
+        return Ok(FreeDownload::NeedsBrowser(Some(
             CLOUDFLARE_HINT.to_string(),
         )));
     }
@@ -495,7 +533,7 @@ async fn native_free_download(
     let status = generate.0;
     let body = generate.1;
     if is_cloudflare_challenge(status, &body) {
-        return Ok(FreeDownload::NeedsSession(Some(
+        return Ok(FreeDownload::NeedsBrowser(Some(
             CLOUDFLARE_HINT.to_string(),
         )));
     }
@@ -508,9 +546,20 @@ async fn native_free_download(
         return Err(format!("nexus download generator: HTTP {status}"));
     }
     let Some(url) = parse_generate_response(&body) else {
-        return Ok(FreeDownload::NeedsSession(Some(
-            "no download url in the response, the session may have expired".to_string(),
-        )));
+        return Ok(if generate_is_logged_out(&body) {
+            FreeDownload::NeedsSession(Some(
+                "NexusMods answered with no download link: the session cookie is logged \
+                 out. Paste a fresh nexusmods_session under Settings > Mods, or use \
+                 \"Mod Manager Download\" on the mod page"
+                    .to_string(),
+            ))
+        } else {
+            FreeDownload::NeedsBrowser(Some(
+                "the download generator answered without a link; the resolver's browser \
+                 can try it"
+                    .to_string(),
+            ))
+        });
     };
 
     let spec = fetch_spec(key, appid, domain, mod_id, Some(file_id)).await?;
@@ -661,78 +710,101 @@ pub async fn nexus_install(
     mod_id: String,
     file_id: u64,
 ) -> Result<Value, String> {
-    let res = async {
-        let mid: u64 = mod_id.parse().map_err(|_| format!("bad mod id {mod_id}"))?;
-        let key = api_key(&state)?;
-        let premium = premium_user(&key).await?;
-        if !premium {
-            let mut session_failure: Option<Option<String>> = None;
-            if session_cookie(&state).is_some() {
-                match native_free_download(&app, &state, &key, &appid, &domain, mid, file_id)
-                    .await?
-                {
-                    FreeDownload::Started => return Ok(json!({ "ok": true, "started": true })),
-                    FreeDownload::NeedsSession(reason) => session_failure = Some(reason),
-                }
-            }
-            if crate::slipgate::cfg().is_some() {
-                match slipgate_resolve(&state, &key, &domain, mid, file_id).await {
-                    Ok(link) => {
-                        let spec = fetch_spec(&key, &appid, &domain, mid, Some(file_id)).await?;
-                        tauri::async_runtime::spawn(run_archive_install(
-                            app.clone(),
-                            spec,
-                            link.url,
-                            link.headers,
-                        ));
-                        return Ok(json!({ "ok": true, "started": true }));
-                    }
-                    Err(e) => {
-                        return Ok(json!({
-                            "ok": true,
-                            "started": false,
-                            "needsNxm": true,
-                            "modPageUrl": format!("{}?tab=files", mod_page_url(&domain, mid)),
-                            "slipgateError": e,
-                        }));
-                    }
-                }
-            }
-            let reason = match session_failure {
-                Some(r) => r,
-                None => {
-                    match native_free_download(&app, &state, &key, &appid, &domain, mid, file_id)
-                        .await?
-                    {
-                        FreeDownload::Started => return Ok(json!({ "ok": true, "started": true })),
-                        FreeDownload::NeedsSession(r) => r,
-                    }
-                }
-            };
-            let mut out = json!({
-                "ok": true,
-                "started": false,
-                "needsSession": true,
-                "needsNxm": true,
-                "modPageUrl": format!("{}?tab=files", mod_page_url(&domain, mid)),
-            });
-            if let Some(r) = reason {
-                out["sessionError"] = json!(r);
-            }
-            return Ok(out);
-        }
-        let spec = fetch_spec(&key, &appid, &domain, mid, Some(file_id)).await?;
-        let links = api_json(
-            &key,
-            &format!("{API}/v1/games/{domain}/mods/{mid}/files/{file_id}/download_link.json"),
+    let res = tokio::time::timeout(
+        INSTALL_BUDGET,
+        nexus_install_inner(app, &state, appid, domain, mod_id, file_id),
+    )
+    .await
+    .unwrap_or_else(|_| {
+        Err(
+            "NexusMods did not answer in time. Try again, or use \"Mod Manager Download\" \
+             on the mod page"
+                .to_string(),
         )
-        .await?;
-        let url = first_link(&links).ok_or("NexusMods returned no download link")?;
-        tauri::async_runtime::spawn(run_archive_install(app.clone(), spec, url, HashMap::new()));
-        Ok(json!({ "ok": true, "started": true }))
-    }
-    .await;
+    });
     Ok(fold(res))
+}
+
+async fn nexus_install_inner(
+    app: AppHandle,
+    state: &AppState,
+    appid: String,
+    domain: String,
+    mod_id: String,
+    file_id: u64,
+) -> Result<Value, String> {
+    let mid: u64 = mod_id.parse().map_err(|_| format!("bad mod id {mod_id}"))?;
+    let key = api_key(state)?;
+    let premium = premium_user(&key).await?;
+    if !premium {
+        let mut session_failure: Option<Option<String>> = None;
+        // A session Nexus itself rejects cannot be rescued by a resolver
+        // replaying the same cookie, so that answer stops the flow instead of
+        // buying a minute of resolve attempts that must fail the same way.
+        let mut session_dead = false;
+        if session_cookie(state).is_some() {
+            match native_free_download(&app, state, &key, &appid, &domain, mid, file_id).await? {
+                FreeDownload::Started => return Ok(json!({ "ok": true, "started": true })),
+                FreeDownload::NeedsSession(reason) => {
+                    session_dead = true;
+                    session_failure = Some(reason);
+                }
+                FreeDownload::NeedsBrowser(reason) => session_failure = Some(reason),
+            }
+        }
+        if !session_dead && crate::slipgate::cfg().is_some() {
+            match slipgate_resolve(state, &key, &domain, mid, file_id).await {
+                Ok(link) => {
+                    let spec = fetch_spec(&key, &appid, &domain, mid, Some(file_id)).await?;
+                    tauri::async_runtime::spawn(run_archive_install(
+                        app.clone(),
+                        spec,
+                        link.url,
+                        link.headers,
+                    ));
+                    return Ok(json!({ "ok": true, "started": true }));
+                }
+                Err(e) => {
+                    return Ok(json!({
+                        "ok": true,
+                        "started": false,
+                        "needsNxm": true,
+                        "modPageUrl": format!("{}?tab=files", mod_page_url(&domain, mid)),
+                        "slipgateError": e,
+                    }));
+                }
+            }
+        }
+        let reason = match session_failure {
+            Some(r) => r,
+            None => match native_free_download(&app, state, &key, &appid, &domain, mid, file_id)
+                .await?
+            {
+                FreeDownload::Started => return Ok(json!({ "ok": true, "started": true })),
+                FreeDownload::NeedsSession(r) | FreeDownload::NeedsBrowser(r) => r,
+            },
+        };
+        let mut out = json!({
+            "ok": true,
+            "started": false,
+            "needsSession": true,
+            "needsNxm": true,
+            "modPageUrl": format!("{}?tab=files", mod_page_url(&domain, mid)),
+        });
+        if let Some(r) = reason {
+            out["sessionError"] = json!(r);
+        }
+        return Ok(out);
+    }
+    let spec = fetch_spec(&key, &appid, &domain, mid, Some(file_id)).await?;
+    let links = api_json(
+        &key,
+        &format!("{API}/v1/games/{domain}/mods/{mid}/files/{file_id}/download_link.json"),
+    )
+    .await?;
+    let url = first_link(&links).ok_or("NexusMods returned no download link")?;
+    tauri::async_runtime::spawn(run_archive_install(app.clone(), spec, url, HashMap::new()));
+    Ok(json!({ "ok": true, "started": true }))
 }
 
 struct NxmLink {
@@ -906,6 +978,30 @@ mod tests {
         assert_eq!(parse_generate_response(r#"{"error":"nope"}"#), None);
         assert_eq!(parse_generate_response(r#"{"url":"/relative/path"}"#), None);
         assert_eq!(parse_generate_response("<html>Just a moment</html>"), None);
+    }
+
+    #[test]
+    fn parses_the_mirror_array_the_generate_endpoint_returns() {
+        // Nexus answers the free generate call with its mirror list, not with a
+        // bare object; reading only the root made a working session look expired.
+        let body = r#"[{"name":"Nexus CDN","URI":"https://cdn.nexus.com/file.zip?token=abc&amp;t=1"}]"#;
+        assert_eq!(
+            parse_generate_response(body),
+            Some("https://cdn.nexus.com/file.zip?token=abc&t=1".to_string())
+        );
+        assert_eq!(parse_generate_response(r#"[{"name":"Nexus CDN"}]"#), None);
+        assert_eq!(parse_generate_response("[]"), None);
+    }
+
+    #[test]
+    fn tells_a_logged_out_generate_answer_from_a_gated_one() {
+        // The empty mirror array is Nexus's logged-out answer: no browser can
+        // turn it into a link, so the install flow must not spend a resolve on it.
+        assert!(generate_is_logged_out("[]"));
+        assert!(generate_is_logged_out(" [] "));
+        assert!(!generate_is_logged_out(r#"[{"URI":"https://cdn.nexus.com/x"}]"#));
+        assert!(!generate_is_logged_out(r#"{"error":"nope"}"#));
+        assert!(!generate_is_logged_out("<html>Just a moment</html>"));
     }
 
     #[test]

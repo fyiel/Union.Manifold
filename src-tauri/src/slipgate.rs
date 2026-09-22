@@ -99,6 +99,10 @@ fn external_cfg() -> Option<Cfg> {
 }
 
 async fn post(cfg: &Cfg, path: &str, body: Value, timeout: Duration) -> Result<Value, String> {
+    // A resolve warms a browser and can legitimately take a minute; retrying a
+    // slow or failed one multiplies that silently, so the resolver's own answer
+    // is final. Cheap probes (/health, /fetch) keep the default retries.
+    let retries = if path == "/resolve" { Some(0) } else { None };
     let mut headers = HashMap::new();
     headers.insert("Content-Type".to_string(), "application/json".to_string());
     headers.insert("Accept".to_string(), "application/json".to_string());
@@ -112,6 +116,7 @@ async fn post(cfg: &Cfg, path: &str, body: Value, timeout: Duration) -> Result<V
             headers,
             body: Some(serde_json::to_vec(&body).map_err(|e| format!("slipgate encode: {e}"))?),
             timeout: Some(timeout),
+            retries,
             ..Default::default()
         },
     )

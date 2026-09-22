@@ -28,32 +28,30 @@ const ORIGIN: &str = "https://zeigames.com";
 const SEARCH_CONCURRENCY: usize = 5;
 const POOL_TARGET: usize = 300;
 
-// Genre forums (stable IPS node ids). Browsing with no genre filter fans out
-// across all of them; a single-genre filter fetches just that forum deeper.
-// The Adult forum (83) is included but its posts are flagged nsfw.
-static GENRES: &[(u32, &str)] = &[
-    (71, "Action"),
-    (72, "Adventure"),
-    (73, "Survival"),
-    (74, "RPG"),
-    (75, "FPS"),
-    (76, "Simulation"),
-    (77, "Strategy"),
-    (78, "Sport"),
-    (79, "Horror"),
-    (80, "Racing"),
-    (81, "Fighting"),
-    (82, "Puzzle"),
-    (84, "VR"),
-    (85, "Denuvo"),
-    (83, "Adult"),
+// Genre forums (stable IPS node ids, with the slug the site routes them by).
+// Browsing with no genre filter fans out across all of them; a single-genre
+// filter fetches just that forum deeper.
+static GENRES: &[(u32, &str, &str)] = &[
+    (71, "action", "Action"),
+    (72, "adventure", "Adventure"),
+    (73, "survival", "Survival"),
+    (74, "rpg", "RPG"),
+    (75, "fps", "FPS"),
+    (76, "simulation", "Simulation"),
+    (77, "strategy", "Strategy"),
+    (78, "sports", "Sports"),
+    (79, "horror", "Horror"),
+    (80, "racing", "Racing"),
+    (81, "fighting", "Fighting"),
+    (82, "puzzle", "Puzzle"),
+    (84, "vr", "VR"),
+    (85, "denuvo-games", "Denuvo"),
 ];
-
 static ROW_URL_TITLE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"href="(https://zeigames\.com/topic/\d+-[^"?]+/)"\s+class="ipsLinkPanel"[^>]*><span>(.*?)</span>"#).unwrap()
 });
 static ROW_COVER: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"data-tthumb-(?:large|small)=([^\s>]+)").unwrap());
+    LazyLock::new(|| Regex::new(r#"data-zeithumb-(?:large|small)="([^"]+)""#).unwrap());
 static ROW_DATE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"datetime='([^']+)'").unwrap());
 static SEARCH_ROW: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?s)<h3[^>]*data-ips-hook="commentTitle"[^>]*>.*?href="(https://zeigames\.com/topic/\d+-[^"?]+/)"[^>]*>(.*?)</a>"#).unwrap()
@@ -94,7 +92,7 @@ pub fn capabilities() -> Capabilities {
 }
 
 fn genre_name(id: u32) -> Option<&'static str> {
-    GENRES.iter().find(|(g, _)| *g == id).map(|(_, n)| *n)
+    GENRES.iter().find(|(g, _, _)| *g == id).map(|(_, _, n)| *n)
 }
 
 fn enc(s: &str) -> String {
@@ -203,14 +201,33 @@ fn parse_listing(html: &str, genre: &str) -> Vec<SourceGame> {
     games
 }
 
-async fn fetch_forum_page(forum_id: u32, genre: &str, page: usize) -> Vec<SourceGame> {
+/// Every ZeiGames page now sits behind a Cloudflare gate that answers plain
+/// clients with a 403, so a fetch goes through the resolver's browser when one
+/// is configured. The plain fetch stays as the fallback: it is what works if
+/// the gate ever lets a plain client through, and it keeps the source honest
+/// when no resolver is set up (the pages then come back empty rather than
+/// failing the whole query).
+async fn fetch_page(url: &str) -> Option<String> {
+    if crate::slipgate::cfg().is_some() {
+        if let Ok(body) = crate::slipgate::fetch_configured(url, Duration::from_secs(60)).await {
+            if !body.trim().is_empty() {
+                return Some(body);
+            }
+        }
+    }
+    http::get_text(url).await.ok()
+}
+
+async fn fetch_forum_page(forum_id: u32, slug: &str, genre: &str, page: usize) -> Vec<SourceGame> {
     let key = format!("{forum_id}:{page}");
     let genre = genre.to_string();
+    let slug = slug.to_string();
     LISTING
         .get_or(&key, || async move {
-            let url =
-                format!("{ORIGIN}/forum/{forum_id}-x/?sortby=start_date&sortdir=desc&page={page}");
-            let html = http::get_text(&url).await.ok()?;
+            let url = format!(
+                "{ORIGIN}/forum/{forum_id}-{slug}/page/{page}/?sortby=start_date&sortdirection=desc"
+            );
+            let html = fetch_page(&url).await?;
             Some(parse_listing(&html, &genre))
         })
         .await
@@ -234,10 +251,10 @@ pub async fn query(params: &QueryParams) -> Option<Vec<SourceGame>> {
     }
 
     // Map requested genre tags to forums; unknown tags (or none) => all genres.
-    let wanted: Vec<(u32, &str)> = {
+    let wanted: Vec<(u32, &str, &str)> = {
         let picked: Vec<_> = GENRES
             .iter()
-            .filter(|(_, n)| params.tags.iter().any(|t| t.eq_ignore_ascii_case(n)))
+            .filter(|(_, _, n)| params.tags.iter().any(|t| t.eq_ignore_ascii_case(n)))
             .copied()
             .collect();
         if picked.is_empty() {
@@ -250,13 +267,13 @@ pub async fn query(params: &QueryParams) -> Option<Vec<SourceGame>> {
     // to fill the 300 pool after the central layer sorts/filters.
     let pages = if wanted.len() == 1 { 4 } else { 1 };
     let mut jobs = Vec::new();
-    for (fid, genre) in &wanted {
+    for (fid, slug, genre) in &wanted {
         for page in 1..=pages {
-            jobs.push((*fid, genre.to_string(), page));
+            jobs.push((*fid, slug.to_string(), genre.to_string(), page));
         }
     }
-    let batches = http::map_limit(jobs, 8, |(fid, genre, page)| async move {
-        Some(fetch_forum_page(fid, &genre, page).await)
+    let batches = http::map_limit(jobs, 8, |(fid, slug, genre, page)| async move {
+        Some(fetch_forum_page(fid, &slug, &genre, page).await)
     })
     .await;
     let mut pool: Vec<SourceGame> = Vec::new();
@@ -282,12 +299,11 @@ pub async fn search(q: &str, limit: usize) -> Vec<SourceGame> {
     // Quoted phrase + title-only is the site's "exact" mode; bare terms pull in
     // unrelated posts (per the source's own search hint).
     let url = format!(
-        "{ORIGIN}/search/?q={}&type=forums_topic&search_in=titles&sortby=relevancy",
+        "{ORIGIN}/search/?q={}&type=forums_topic&search_in=titles&sortby=relevancy&quick=1",
         enc(&format!("\"{q}\""))
     );
-    let html = match http::get_text(&url).await {
-        Ok(h) => h,
-        Err(_) => return Vec::new(),
+    let Some(html) = fetch_page(&url).await else {
+        return Vec::new();
     };
     let terms: Vec<String> = q
         .to_lowercase()
@@ -324,7 +340,7 @@ pub async fn get_detail(slug: &str) -> Option<SourceGame> {
     DETAIL
         .get_or(&key, || async move {
             let url = format!("{ORIGIN}/topic/{clean}/");
-            let html = http::get_text(&url).await.ok()?;
+            let html = fetch_page(&url).await?;
 
             let raw_title = TITLE_TAG
                 .captures(&html)
@@ -448,5 +464,37 @@ mod tests {
             slug_from_url("https://zeigames.com/topic/10440-broforce-free-download/").as_deref(),
             Some("10440-broforce-free-download")
         );
+    }
+
+    #[test]
+    fn listing_row_yields_title_slug_and_cover() {
+        // The row markup as the forum serves it: the thumbnail plugin renamed
+        // its attributes from `data-tthumb-*` to `data-zeithumb-*` (now quoted),
+        // which silently emptied every cover until this test pinned it.
+        let row = r#"
+<li data-ips-hook="topicRow" class="ipsData__item topic_11438 zeithumb_row zeithumb_grid " data-rowid="11438">
+  <a href="https://zeigames.com/topic/11438-lamp-chronicle-free-download-v09147437/" class="ipsLinkPanel" aria-hidden="true" tabindex="-1"><span>Lamp Chronicle Free Download (v0.9.14.7437)</span></a>
+  <span class="zeithumb_marker ipsHide" data-zeithumb-topic="11438" data-zeithumb-small="https://zeigames.com/uploads/monthly_2026_08/lamp-chronicle.webp.08ebbd132f683330938fc2ee508ccf38.webp" data-zeithumb-size="460px" data-zeithumb-ratio="460/215" data-zeithumb-alt="Lamp Chronicle"></span>
+  <time datetime='2026-08-26T12:13:21Z' title='08/26/2026 12:13  PM' data-short='50 min' class='ipsTime ipsTime--long'></time>
+</li>
+"#;
+        let games = parse_listing(row, "Action");
+        assert_eq!(games.len(), 1, "the row parses");
+        let game = &games[0];
+        assert_eq!(game.title, "Lamp Chronicle");
+        assert_eq!(game.version.as_deref(), Some("0.9.14.7437"));
+        assert_eq!(
+            game.source_slug,
+            "11438-lamp-chronicle-free-download-v09147437"
+        );
+        assert_eq!(
+            game.image.as_deref(),
+            Some(
+                "https://zeigames.com/uploads/monthly_2026_08/lamp-chronicle.webp.08ebbd132f683330938fc2ee508ccf38.webp"
+            ),
+            "the row's own thumbnail is the card image"
+        );
+        assert!(game.added_at.is_some(), "the topic start date parses");
+        assert_eq!(game.genres, vec!["Action".to_string()]);
     }
 }

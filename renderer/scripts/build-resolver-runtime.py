@@ -11,16 +11,17 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-SLIPGATE_VERSION = "0.5.3"
-SLIPGATE_COMMIT = "e316640c35aabfbe83bc28f9ae1be9e8dbfbb7d0"
+SLIPGATE_VERSION = "0.5.4"
+SLIPGATE_COMMIT = "e8b9bc72e24de8a7b05f763c01a8ef834ef665ab"
 FLARESOLVERR_VERSION = "3.5.0"
 FLARESOLVERR_COMMIT = "4ca91a24f87a73f963e1d6610cbf3b9f01c1cc1b"
 # Packaging revision: bump when the bundle layout changes without an upstream
 # version move, so already-installed runtimes see an update. r1 strips the
 # PyInstaller-bundled libreadline/libtinfo that broke FlareSolverr on Arch; r2
 # makes FlareSolverr's Xvfb display optional so the runtime starts on hosts
-# without the xvfb package.
-RUNTIME_REV = "r2"
+# without the xvfb package; r3 strips the PyInstaller-bundled NSS libraries that
+# crash Chrome on hosts with a newer system NSS.
+RUNTIME_REV = "r3"
 FLARESOLVERR = {
     "linux-x86_64": {
         "name": "flaresolverr_linux_x64.tar.gz",
@@ -31,6 +32,18 @@ FLARESOLVERR = {
         "executable": "flaresolverr.exe",
     },
 }
+
+# The NSS family Chrome loads by soname. FlareSolverr's bundle ships all six, so
+# a host with a newer system NSS gets a version clash on the one library the
+# bundle does not carry (libsoftokn3.so) and Chrome dies before the first page.
+NSS_LIBS = (
+    "libnss3.so",
+    "libnssutil3.so",
+    "libnspr4.so",
+    "libplc4.so",
+    "libplds4.so",
+    "libsmime3.so",
+)
 
 
 def run(*args: str, cwd: Path | None = None) -> None:
@@ -195,6 +208,16 @@ def main() -> None:
                 bundled.unlink()
             for bundled in package.rglob("libtinfo.so.6"):
                 bundled.unlink()
+            # Same hazard, worse failure: the bundle ships an older NSS, and
+            # Chrome reaches it through the same LD_LIBRARY_PATH while loading
+            # the *system* libsoftokn3.so, which needs a newer libnssutil3. The
+            # version clash is fatal (nss_error=-5925) and Chrome dies on every
+            # navigation, so the whole built-in resolver looks unhealthy on a
+            # host whose system NSS is newer than the bundled copy. Dropping the
+            # bundled set leaves Chrome on the host's consistent NSS.
+            for soname in NSS_LIBS:
+                for bundled in package.rglob(soname):
+                    bundled.unlink()
 
         archive = args.output / artifact_name
         with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as output:

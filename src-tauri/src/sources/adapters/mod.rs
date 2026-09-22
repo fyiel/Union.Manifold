@@ -3,7 +3,7 @@ pub mod gamebounty;
 pub mod gog;
 pub mod hydralinks;
 pub mod kaoskrew;
+pub mod kryo;
 pub mod onlinefix;
 pub mod steamrip;
-pub mod unioncrax;
 pub mod zeigames;

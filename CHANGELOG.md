@@ -3,6 +3,57 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.9.5
+
+### Fixed
+
+- `fileq` and `fileditch` resolve in-app again. Both were left browser-only in
+  3.9.4 because no resolver release shipped a recipe for them, and the bundled
+  resolver (Slipgate 0.5.4) now does. FileQ gates its free download behind a
+  Cloudflare Turnstile widget inside the page's own form, and FileDitch answers
+  plain clients with a page whose own module runs a WebAssembly proof of work
+  before its hidden form returns the signed link. The resolver drives both
+  through its browser and hands the downloader the direct URL, so both hosts are
+  offered as an in-app download again instead of only in a browser.
+
+- The bundled resolver's browser starts on hosts whose system NSS is newer than
+  the copy FlareSolverr ships. Chrome loaded the bundled `libnss3`/`libnspr4`
+  through the runtime's library path while the host's `libsoftokn3.so` needed a
+  newer `libnssutil3`, so it died with an NSS version clash before the first page
+  and the whole built-in resolver reported unhealthy on such hosts (Arch among
+  them). The bundled NSS libraries are stripped from the runtime, leaving Chrome
+  on the host's own consistent set.
+
+- Nexus mod downloads no longer spin for minutes on a session that is logged
+  out. The free-download probe now tells a rejected session apart from a
+  Cloudflare gate: a logged-out one answers immediately with the session error
+  and the mod page, because a resolver replaying the same cookie cannot do
+  better, while a gated one still goes to the resolver. The install command as a
+  whole is bounded, and a resolve is never silently retried three times.
+
+- Nexus free downloads read the mirror list the generate endpoint actually
+  returns (an array of mirror objects), so a working session no longer looks
+  expired, and the numeric game id lookup refetches the game list when a game
+  Nexus added after the cache was written is missing from it.
+
+- Kryoto replaces UnionCrax as a source. It reads the catalog, search and
+  per-game download links from `kryo.to`'s own JSON API, so browsing is a plain
+  fetch, and it maps each mirror to the host the app already knows (pixeldrain,
+  buzzheavier, gofile, mediafire, vikingfile, fileditch, mocha). Kryoto's own
+  filehost link is behind a Turnstile the site only mints from its own download
+  button, so that option is offered as browser-only with the game page named,
+  and the source keeps the first slot in the source order. A saved UnionCrax
+  priority entry migrates to it.
+
+- ZeiGames works again after its forum moved behind a Cloudflare gate and its
+  markup drifted: every page now goes through the resolver's browser, the
+  listing URL uses the site's current slug, path pagination and `sortdirection`
+  form, search sends the `quick=1` its own result URLs carry, thumbnails read
+  the renamed `data-zeithumb-*` attribute (the row parser is pinned by a test
+  over the current markup), and the genre table drops the forum that no longer
+  exists. The source is declared resolver-backed, since plain HTTP can no longer
+  reach it.
+
 ## 3.9.4
 
 ### Fixed

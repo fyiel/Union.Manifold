@@ -42,13 +42,6 @@ pub fn save<V: Serialize>(name: &str, map: &HashMap<String, V>) {
     }
 }
 
-pub async fn save_async<V: Serialize + Send + 'static>(
-    name: &'static str,
-    map: HashMap<String, V>,
-) {
-    let _ = tokio::task::spawn_blocking(move || save(name, &map)).await;
-}
-
 const FLUSH_DELAY: Duration = Duration::from_secs(2);
 
 static FLUSHERS: Mutex<Vec<&'static (dyn Flush + Send + Sync)>> = Mutex::new(Vec::new());
