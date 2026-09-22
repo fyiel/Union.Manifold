@@ -3,6 +3,35 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.9.6
+
+### Fixed
+
+- Kryoto's own filehost is offered as an in-app download again. Its link needs a
+  Cloudflare Turnstile token that only the site's own page can mint, so the
+  in-app browser opens the game page, mints the token there (the invisible
+  widget the site itself uses), and the app posts the token to the filehost's
+  resolve endpoint. When the site's endpoint refuses the token, the same window
+  stays open for the site's own download button, and the link it lands on is
+  captured from the download.
+
+- Gated hosts whose resolver recipe cannot pass a Turnstile fall back to the
+  in-app browser instead of failing outright. VikingFile is the case at hand,
+  and it now resolves end to end without any interaction: the page's own widget
+  solves in the app's window, the page posts the token itself, and the direct
+  link it produces (`https://vikingfile.com/d/...`, which redirects to the CDN
+  and answers 206 with the full 44 MB) is captured and handed to the downloader.
+  The in-app solver (hidden window, page probe, link capture, escalation, cancel
+  on close) is wired back into the app, where it had been left disconnected
+  since the built-in resolver landed.
+
+- Browse thumbnails are portrait. Kryoto's own art is a landscape Steam header,
+  which the grid zoom-cropped into a blur, so a game's portrait capsule now wins:
+  the site's vertical cover, else the Steam library capsule for the game's appid.
+  Cards also swap to the Steam capsule when the art they loaded turns out to be
+  landscape, and art with no portrait available at all is letterboxed instead of
+  cropped.
+
 ## 3.9.5
 
 ### Fixed

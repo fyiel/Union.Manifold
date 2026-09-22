@@ -7,12 +7,13 @@
 //! scrape and no gate is involved.
 //!
 //! The links split in two. The site's own host (`dl.kryo.to/#<tag>/<id>.7z`) is
-//! behind an invisible Cloudflare Turnstile that the site only mints when its
-//! own download button is clicked, so that option is offered as browser-only
-//! with the game page as its fallback. Every mirror (pixeldrain, buzzheavier,
-//! gofile, mediafire, vikingfile, fileditch, mocha, mega) is a plain outbound
-//! URL and goes through the shared host dispatch, which decides per host
-//! whether the resolver in use can take it.
+//! behind a Cloudflare Turnstile that only the site's own download button mints
+//! a token for, so that option resolves through the in-app browser: that window
+//! opens the game page, clicks the button, and the signed link the site then
+//! navigates to is captured from the download. Every mirror (pixeldrain,
+//! buzzheavier, gofile, mediafire, vikingfile, fileditch, mocha, mega) is a
+//! plain outbound URL and goes through the shared host dispatch, which decides
+//! per host whether the resolver in use can take it.
 
 use std::sync::LazyLock;
 use std::time::Duration;
@@ -72,9 +73,10 @@ fn download_options(v: &Value, slug: &str) -> Vec<DownloadOption> {
                         return None;
                     }
                     let host = str_field(link, "host");
-                    // The site's own host is the one link that cannot be handed
-                    // to a downloader: its resolver wants a Turnstile token the
-                    // site only mints from its own download button.
+                    // The site's own host needs a Turnstile token that only the
+                    // site's own download button mints, so it resolves through
+                    // the in-app browser: that window clicks the button and the
+                    // signed link it lands on is captured from the download.
                     let own_host = host.eq_ignore_ascii_case("kryo") || url.starts_with("https://dl.kryo.to/");
                     let label = str_field(link, "label");
                     Some(DownloadOption {
@@ -92,7 +94,7 @@ fn download_options(v: &Value, slug: &str) -> Vec<DownloadOption> {
                         } else {
                             hosts::detect_host_type(&url)
                         },
-                        resolvable: !own_host && hosts::is_resolvable(&url),
+                        resolvable: own_host || hosts::is_resolvable(&url),
                         page_url: own_host.then(|| page_url.clone()),
                         size_bytes: own_host.then_some(download_size).flatten(),
                         url: Some(url),
@@ -110,6 +112,7 @@ fn normalize(v: &Value) -> SourceGame {
     let appid = steam_app_id(v);
     let cover = str_field(v, "cover");
     let cover_horizontal = str_field(v, "cover_horizontal");
+    let cover_vertical = str_field(v, "cover_vertical");
     let size_text = str_field(v, "size");
     let genres: Vec<String> = v
         .get("genres")
@@ -136,7 +139,12 @@ fn normalize(v: &Value) -> SourceGame {
         dedup_key: dedup_key_for(appid, &title),
         title,
         description: opt(str_field(v, "short")),
-        image: opt(cover).or_else(|| opt(cover_horizontal.clone())),
+        // Browse tiles are portrait, so the portrait capsule wins: the site's
+        // own vertical cover, then the Steam capsule by appid, and only then
+        // the landscape header (both of its cover fields are the same header).
+        image: opt(cover_vertical)
+            .or_else(|| appid.map(|id| crate::sources::steam::steam_image(id, "library_600x900.jpg")))
+            .or_else(|| opt(cover)),
         hero_image: opt(cover_horizontal),
         genres,
         developer: opt(str_field(v, "developer")),

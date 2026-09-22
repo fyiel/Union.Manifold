@@ -80,7 +80,12 @@ fn no_recipe_reason(g: &GateHost) -> String {
     )
 }
 
-pub async fn resolve(url: &str) -> ResolveResult {
+/// Resolve a gate host. Slipgate is tried first when the instance has one
+/// configured; when that cannot produce a usable URL (nothing configured, the
+/// recipe is missing from the instance, or the resolve failed) the in-app
+/// browser takes over, since it drives the wall's own page and can also wait
+/// for a captcha the user solves by hand.
+pub async fn resolve(app: Option<&tauri::AppHandle>, url: &str) -> ResolveResult {
     let Some(g) = entry_for(url) else {
         return not_resolvable(url, Some("not a Slipgate host"));
     };
@@ -105,6 +110,25 @@ pub async fn resolve(url: &str) -> ResolveResult {
             Err(e) => slipgate_error = Some(e),
         }
     }
+
+    // Slipgate produced nothing usable, so hand the page to the in-app
+    // browser when the caller has an app handle to drive it with.
+    let solved = match app {
+        Some(app) => crate::resolver::solve(app, url).await.ok(),
+        None => None,
+    };
+    if let Some(solved) = solved.filter(|s| s.url.is_some()) {
+        let headers = solved.headers(Some(url));
+        return ResolveResult {
+            resolvable: true,
+            url: solved.url,
+            file_name: solved.file_name,
+            headers: Some(headers),
+            ephemeral: true,
+            ..Default::default()
+        };
+    }
+
     not_resolvable(
         url,
         Some(&match slipgate_error {

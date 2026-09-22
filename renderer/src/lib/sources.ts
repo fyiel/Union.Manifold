@@ -381,7 +381,7 @@ export type DownloadEntry = { source: SourceGame; option: SourceDownloadOption }
 
 const HOST_FRIENDLINESS: Record<string, number> = {
   ucfiles: 0, // UnionCrax.Direct — #1 (in-app, no gates)
-  kryo: 6, // Kryoto filehost — invisible Turnstile, browser-only
+  kryo: 3, // Kryoto filehost — in-app browser mints its Turnstile token
   pixeldrain: 1, // #2 (dedicated resolver, no gates)
   gofile: 2, // #3 (API resolver; occasional temp-unavailable)
   datanodes: 3, // direct; may hit Cloudflare (Slipgate fallback)
@@ -499,7 +499,9 @@ export function unifiedToGame(game: UnifiedSourceGame): Game {
     name: game.title,
     description: game.description || "",
     genres: game.genres || [],
-    image: game.image || "./fallbacks/game-card-3x4.svg",
+    // Cards are portrait tiles, so a landscape source image loses to the
+    // Steam capsule when the game carries an appid.
+    image: game.steamAppId ? steamCoverUrl(game.steamAppId) : game.image || "./fallbacks/game-card-3x4.svg",
     screenshots: [],
     hero_image: game.heroImage || undefined,
     release_date: game.releaseDate || "",
@@ -560,7 +562,8 @@ export async function startSourceDownload(
   const sourceVersion = source?.version?.trim() || undefined
   const metadata = {
     name: game.title,
-    image: game.image || (game.steamAppId ? steamCoverUrl(game.steamAppId) : undefined),
+    // Same portrait rule as the cards: the capsule wins over landscape art.
+    image: game.steamAppId ? steamCoverUrl(game.steamAppId) : game.image,
     heroImage: game.heroImage || undefined,
     steamAppId: game.steamAppId ?? undefined,
     sizeBytes: game.sizeBytes,

@@ -166,12 +166,62 @@ pub async fn resolve_url_via(app: &AppHandle, option: &DownloadOption) -> Resolv
     dispatch(Some(app), option).await
 }
 
-async fn dispatch(_app: Option<&AppHandle>, option: &DownloadOption) -> ResolveResult {
+/// Whether this option can only be resolved by a real browser. `dl.kryo.to`
+/// hides its signed link behind a Cloudflare Turnstile that an HTTP client
+/// cannot pass, so the in-app browser mints the link from the game page.
+fn needs_in_app_browser(option: &DownloadOption) -> bool {
+    option.host_type.eq_ignore_ascii_case("kryo")
+        || option
+            .url
+            .as_deref()
+            .is_some_and(|u| hostname_of(u) == "dl.kryo.to")
+}
+
+/// Page the in-app browser opens: the adapter's own game page when it set one
+/// (the page that carries the download button), otherwise the option's URL.
+fn in_app_page<'a>(option: &'a DownloadOption, url: &'a str) -> &'a str {
+    option.page_url.as_deref().unwrap_or(url)
+}
+
+async fn resolve_in_app_browser(
+    app: Option<&AppHandle>,
+    option: &DownloadOption,
+    url: &str,
+) -> ResolveResult {
+    let Some(app) = app else {
+        return not_resolvable(url, Some("Kryo - this host needs the in-app browser"));
+    };
+    let page = in_app_page(option, url);
+    match crate::resolver::solve_target(app, page, option.url.as_deref()).await {
+        Ok(solved) if solved.url.is_some() => {
+            let headers = solved.headers(Some(page));
+            ResolveResult {
+                resolvable: true,
+                url: solved.url,
+                file_name: solved.file_name,
+                headers: Some(headers),
+                ephemeral: true,
+                ..Default::default()
+            }
+        }
+        Ok(_) => not_resolvable(
+            url,
+            Some("Kryo - the in-app browser did not produce a download"),
+        ),
+        Err(e) => not_resolvable(url, Some(&format!("Kryo: {e}"))),
+    }
+}
+
+async fn dispatch(app: Option<&AppHandle>, option: &DownloadOption) -> ResolveResult {
     let url = option
         .url
         .as_deref()
         .or(option.page_url.as_deref())
         .unwrap_or("");
+
+    if needs_in_app_browser(option) {
+        return resolve_in_app_browser(app, option, url).await;
+    }
 
     if pixeldrain::matches(url) {
         return pixeldrain::resolve(url).await;
@@ -205,7 +255,7 @@ async fn dispatch(_app: Option<&AppHandle>, option: &DownloadOption) -> ResolveR
         return filekeeper::resolve(url).await;
     }
     if gate::matches(url) {
-        return gate::resolve(url).await;
+        return gate::resolve(app, url).await;
     }
 
     if let Some(r) = result {
@@ -271,5 +321,60 @@ async fn dispatch(_app: Option<&AppHandle>, option: &DownloadOption) -> ResolveR
         open_url: Some(url.to_string()),
         reason: Some(reason),
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn option(host_type: &str, url: &str, page_url: Option<&str>) -> DownloadOption {
+        DownloadOption {
+            host_type: host_type.to_string(),
+            url: Some(url.to_string()),
+            page_url: page_url.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn kryo_own_host_opens_its_game_page() {
+        let opt = option(
+            "kryo",
+            "https://dl.kryo.to/#abcdef",
+            Some("https://kryo.to/game/foo"),
+        );
+        assert!(needs_in_app_browser(&opt));
+        let url = opt.url.as_deref().unwrap_or("");
+        assert_eq!(in_app_page(&opt, url), "https://kryo.to/game/foo");
+    }
+
+    #[test]
+    fn kryo_host_type_is_recognized_without_a_matching_url() {
+        let opt = option("kryo", "https://kryo.to/game/foo", None);
+        assert!(needs_in_app_browser(&opt));
+    }
+
+    #[test]
+    fn dl_kryo_to_url_is_recognized_without_the_adapter_label() {
+        let opt = option("", "https://dl.kryo.to/#abcdef", None);
+        assert!(needs_in_app_browser(&opt));
+        let url = opt.url.as_deref().unwrap_or("");
+        assert_eq!(in_app_page(&opt, url), "https://dl.kryo.to/#abcdef");
+    }
+
+    #[test]
+    fn other_hosts_are_not_in_app_browser_hosts() {
+        assert!(!needs_in_app_browser(&option(
+            "steamrip",
+            "https://steamrip.com/foo/",
+            None
+        )));
+        // A lookalike domain must not be mistaken for the fileyard.
+        assert!(!needs_in_app_browser(&option(
+            "buzzheavier",
+            "https://dl.kryo.to.evil.com/x",
+            None
+        )));
     }
 }

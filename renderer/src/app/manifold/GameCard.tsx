@@ -38,7 +38,7 @@ export const GameCard = memo(function GameCard({
           style={{ position: "absolute", inset: 0, display: "flex", alignItems: "flex-end", padding: 12, color: "inherit", textDecoration: "none", cursor: "pointer" }}
         >
           {hasImg && (
-            <SmartImage candidates={candidates} steamAppId={game.steamAppId} alt={game.title} lazy onAllFailed={() => setImgOk(false)} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
+            <SmartImage candidates={candidates} steamAppId={game.steamAppId} alt={game.title} lazy portrait onAllFailed={() => setImgOk(false)} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
           )}
           {!hasImg && (
             <span style={{ fontFamily: MONO, fontSize: 11, lineHeight: 1.35, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--mf-t2)" }}>{game.title}</span>

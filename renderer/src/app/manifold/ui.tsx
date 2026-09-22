@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { Search, Loader2 } from "lucide-react"
 import { cardImageUrl, proxyImageUrl } from "@/lib/utils"
-import { fetchSteamArt } from "@/lib/sources"
+import { fetchSteamArt, steamCoverUrl } from "@/lib/sources"
 
 export const MONO = "var(--mf-mono)"
 
@@ -36,10 +36,14 @@ export function gameImageCandidates(
   const steam = steamArtLadder(game.steamAppId)
   const sourceImgs = [game.image, ...(game.sources || []).map((s) => s.image), game.heroImage]
   const custom = game.image && game.image.startsWith("uc-custom://") ? game.image : undefined
+  // Card tiles are portrait, so when the appid is known the portrait capsule
+  // leads every source image up front and no landscape art ever paints first.
+  const capsule = opts?.card && game.steamAppId ? steamCoverUrl(game.steamAppId) : steam[0]
+  const steamRest = steam.filter((u) => u !== capsule)
   const raw = custom
     ? [custom, ...steam, ...sourceImgs]
-    : opts?.steamFirst && game.steamAppId
-      ? [steam[0], ...sourceImgs, ...steam.slice(1)]
+    : (opts?.card || opts?.steamFirst) && game.steamAppId
+      ? [capsule, ...sourceImgs, ...steamRest]
       : [...sourceImgs, ...steam]
   const map = opts?.card ? cardImageUrl : proxyImageUrl
   const seen = new Set<string>()
@@ -71,9 +75,11 @@ function nextAlive(list: string[], from: number): number {
   return i
 }
 
-export function SmartImage({ candidates, steamAppId, name, alt, onAllFailed, style, lazy }: { candidates: string[]; steamAppId?: number | null; name?: string; alt?: string; onAllFailed?: () => void; style?: CSSProperties; lazy?: boolean }) {
+export function SmartImage({ candidates, steamAppId, name, alt, onAllFailed, style, lazy, portrait }: { candidates: string[]; steamAppId?: number | null; name?: string; alt?: string; onAllFailed?: () => void; style?: CSSProperties; lazy?: boolean; portrait?: boolean }) {
   const [extra, setExtra] = useState<string[]>([])
   const [idx, setIdx] = useState(() => nextAlive(candidates, 0))
+  const [fit, setFit] = useState<CSSProperties["objectFit"]>("cover")
+  const portraitSwapped = useRef(false)
   const steamTried = useRef(false)
   const exhaustedFired = useRef(false)
 
@@ -83,6 +89,8 @@ export function SmartImage({ candidates, steamAppId, name, alt, onAllFailed, sty
     prevSig.current = sig
     setIdx(nextAlive(candidates, 0))
     setExtra([])
+    setFit("cover")
+    portraitSwapped.current = false
     steamTried.current = false
     exhaustedFired.current = false
   }
@@ -124,7 +132,23 @@ export function SmartImage({ candidates, steamAppId, name, alt, onAllFailed, sty
         if (next < all.length) { setIdx(next); return }
         exhausted()
       }}
-      style={style}
+      onLoad={portrait ? (event) => {
+        const img = event.currentTarget
+        if (img.naturalWidth <= img.naturalHeight) { setFit("cover"); return }
+        // A landscape image loaded into a portrait tile. When the appid is
+        // known, swap to the Steam capsule; otherwise letterbox what we have
+        // rather than crop its centre away.
+        const capsule = steamAppId ? proxyImageUrl(steamCoverUrl(steamAppId)) : undefined
+        if (capsule && !portraitSwapped.current && !all.includes(capsule) && !hasFailed(capsule)) {
+          portraitSwapped.current = true
+          setFit("cover")
+          setIdx(all.length)
+          setExtra((p) => [...p, capsule])
+          return
+        }
+        setFit("contain")
+      } : undefined}
+      style={portrait ? { ...style, objectFit: fit } : style}
     />
   )
 }
