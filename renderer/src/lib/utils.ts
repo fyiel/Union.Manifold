@@ -69,27 +69,20 @@ function normalizeRemoteMediaUrl(url: string): string {
   return trimmed
 }
 
-const PUBLIC_IMAGE_HOST_SUFFIXES = [
-  "cdn.union-crax.xyz",
-  "images.igdb.com",
-  "steamgriddb.com",
-  "cdn.steamgriddb.com",
-  "akamai.steamstatic.com",
-  "cloudflare.steamstatic.com",
-  "steamcdn-a.akamaihd.net",
-  "steamstatic.com",
-  "steampowered.com",
-  "discordapp.com",
-  "discordapp.net",
-  "discord.com",
-  "googleusercontent.com",
-  "githubusercontent.com",
-  "scdn.co",
-]
+// Art on the app's own CDN sits behind the same Cloudflare gate as the mirror
+// and an ISP that blocks the CDN usually leaves the mirror reachable, so this
+// is the one host that still goes through the mirror's /api/image-proxy: the
+// mirror streams the bytes server-side, which is what makes those covers load
+// without a cf_clearance cookie. Every other image CDN (Steam, IGDB,
+// SteamGridDB, Discord, GitHub…) is fetched by the local uc-asset proxy
+// directly — routing them through the mirror only added a second network
+// dependency that blanked every cover whenever the mirror answered with a
+// Cloudflare challenge.
+const MIRROR_PROXIED_HOSTS = ["cdn.union-crax.xyz"]
 
-function isPublicImageHost(host: string): boolean {
+function isMirrorProxiedHost(host: string): boolean {
   const normalized = normalizeHostname(host)
-  return PUBLIC_IMAGE_HOST_SUFFIXES.some(
+  return MIRROR_PROXIED_HOSTS.some(
     (suffix) => normalized === suffix || normalized.endsWith(`.${suffix}`),
   )
 }
@@ -156,7 +149,7 @@ export function proxyMediaUrl(mediaUrl: string): string {
       if (isUcFilesAppUrl(parsed.hostname)) {
         return apiUrl(`/api/ucfiles/media?url=${encodeURIComponent(normalizedRemoteUrl)}&raw=1`)
       }
-      if (isPublicImageHost(parsed.hostname)) {
+      if (isMirrorProxiedHost(parsed.hostname)) {
         return apiUrl(`/api/image-proxy?url=${encodeURIComponent(normalizedRemoteUrl)}&raw=1`)
       }
     } catch {}

@@ -3,6 +3,20 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.9.3
+
+### Fixed
+
+- Covers and thumbnails load again. Every public image CDN went through the
+  mirror's `/api/image-proxy`, and the mirror answers the asset proxy's
+  fetches with a Cloudflare challenge, so each cover came back as a 403 and
+  the library, browse and detail screens showed blank art. Steam, IGDB,
+  SteamGridDB and Discord images are now fetched by the local `uc-asset`
+  proxy directly, which downscales and caches them without the extra hop.
+  Art on the app's own CDN keeps the mirror route: it sits behind the same
+  Cloudflare gate and only the mirror can stream it without a clearance
+  cookie.
+
 ## 3.9.2
 
 ### Fixed
