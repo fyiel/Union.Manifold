@@ -3,6 +3,23 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.9.4
+
+### Fixed
+
+- Gated file hosts are only offered as an in-app download when the resolver
+  in use actually has the recipe for them. `fileq` and `fileditch` were
+  mapped to recipes no Slipgate release ships, so The Blood of Dawnwalker's
+  fileq and fileditch parts showed a download button, spent a resolve
+  attempt and failed. Those mirrors now report as browser-only with the wall
+  named, and the missing recipe is named with it.
+
+- Fileditch is a browser-gated host now. The site hands every browser a
+  WebAssembly proof-of-work page and answers plain HTTP clients with a 520,
+  so the native solver (written for the old `challenge`/`signature` fields)
+  could never pass it. It is gone, and fileditch resolves through the
+  resolver recipe like the other gated hosts.
+
 ## 3.9.3
 
 ### Fixed

@@ -27,6 +27,18 @@ static TABLE: &[(&str, GateHost)] = &[
     ),
     ("mocha.my", gh("mocha", "browser-only page")),
     ("zerofs.link", gh("zerofs", "browser-only page")),
+    (
+        "fileditch.com",
+        gh("fileditch", "WebAssembly proof-of-work page"),
+    ),
+    (
+        "fileditchfiles.me",
+        gh("fileditch", "WebAssembly proof-of-work page"),
+    ),
+    (
+        "fileditchfiles.st",
+        gh("fileditch", "WebAssembly proof-of-work page"),
+    ),
 ];
 
 fn domain_match(host: &str, domain: &str) -> bool {
@@ -53,10 +65,31 @@ pub fn host_type(url: &str) -> Option<&'static str> {
     entry_for(url).map(|g| g.recipe)
 }
 
+/// Whether the resolver in use can resolve this host. A browser is the only
+/// way past these walls and the recipe is what drives it, so a host whose
+/// recipe the instance does not offer stays browser-only: offering it as an
+/// in-app download only produces a failure after a pointless round trip.
+pub fn is_available(url: &str) -> bool {
+    match entry_for(url) {
+        Some(g) => slipgate::recipe_available(g.recipe).unwrap_or(true),
+        None => false,
+    }
+}
+
+fn no_recipe_reason(g: &GateHost) -> String {
+    format!(
+        "{} - the resolver has no '{}' recipe",
+        g.wall, g.recipe
+    )
+}
+
 pub async fn resolve(url: &str) -> ResolveResult {
     let Some(g) = entry_for(url) else {
         return not_resolvable(url, Some("not a Slipgate host"));
     };
+    if slipgate::recipe_available(g.recipe) == Some(false) {
+        return not_resolvable(url, Some(&no_recipe_reason(g)));
+    }
     let mut slipgate_error: Option<String> = None;
     if slipgate::cfg().is_some() {
         match slipgate::resolve_configured(g.recipe, url, json!({}), json!([])).await {
@@ -105,8 +138,27 @@ mod tests {
         assert_eq!(host_type("https://1fichier.com/?abc"), Some("1fichier"));
         assert_eq!(host_type("https://qiwi.gg/file/x"), Some("qiwi"));
         assert_eq!(host_type("https://fileq.net/abc.html"), Some("fileq"));
-        assert_eq!(host_type("https://fileditchfiles.me/a/b/x.zip"), None);
+        assert_eq!(
+            host_type("https://fileditchfiles.me/a/b/x.zip"),
+            Some("fileditch")
+        );
+        assert_eq!(
+            host_type("https://fileditchfiles.st/a/b/x.part1.rar"),
+            Some("fileditch")
+        );
+        assert_eq!(host_type("https://fileditch.com/a/b/x.zip"), Some("fileditch"));
         assert_eq!(host_type("https://filekeeper.net/abc/x.zip"), None);
+    }
+
+    #[test]
+    fn fileditch_is_browser_gated_now() {
+        // The site hands out a WebAssembly proof-of-work page, so the wall is
+        // named as such and the host is a gate host like the captcha ones.
+        let wall = entry_for("https://fileditchfiles.st/a/b/x.rar")
+            .expect("fileditch is a gate host")
+            .wall;
+        assert!(wall.contains("WebAssembly"), "wall was {wall}");
+        assert!(!is_available("https://filekeeper.net/abc/x.zip"));
     }
 
     #[test]

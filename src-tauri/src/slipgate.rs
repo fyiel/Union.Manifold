@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock, OnceLock};
 use std::time::Duration;
 
@@ -11,8 +11,49 @@ static SETTINGS: OnceLock<Arc<SettingsStore>> = OnceLock::new();
 static MANAGED: LazyLock<parking_lot::RwLock<Option<Cfg>>> =
     LazyLock::new(|| parking_lot::RwLock::new(None));
 
+/// Recipe list from the last `/health` answer, keyed by the instance that
+/// answered. Gated hosts ask for it before claiming an in-app download, so the
+/// answer must belong to the instance that would serve the resolve.
+type RecipeList = (String, HashSet<String>);
+
+static RECIPES: LazyLock<parking_lot::RwLock<Option<RecipeList>>> =
+    LazyLock::new(|| parking_lot::RwLock::new(None));
+
 pub fn init(settings: Arc<SettingsStore>) {
     SETTINGS.set(settings).ok();
+}
+
+fn base_key(base: &str) -> String {
+    base.trim().trim_end_matches('/').to_lowercase()
+}
+
+fn remember_recipes(base: &str, health: &Value) {
+    let Some(list) = health.get("recipes").and_then(Value::as_array) else {
+        return;
+    };
+    let recipes = list
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::to_lowercase)
+        .collect::<HashSet<String>>();
+    *RECIPES.write() = Some((base_key(base), recipes));
+}
+
+/// Whether the selected resolver offers `recipe`. `None` means the instance in
+/// use has not reported its list yet, which is not the same as not having the
+/// recipe: the caller should still attempt the resolve.
+pub fn recipe_available(recipe: &str) -> Option<bool> {
+    let selected = base_key(&cfg()?.base);
+    recipe_in(RECIPES.read().as_ref(), &selected, recipe)
+}
+
+fn recipe_in(
+    cached: Option<&RecipeList>,
+    selected_base: &str,
+    recipe: &str,
+) -> Option<bool> {
+    let (base, recipes) = cached?;
+    (*base == selected_base).then(|| recipes.contains(&recipe.to_lowercase()))
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -23,6 +64,9 @@ pub struct Cfg {
 
 pub fn set_managed(cfg: Option<Cfg>) {
     *MANAGED.write() = cfg;
+    // A different instance can offer a different recipe list, so drop what the
+    // previous one reported rather than judging a host by it.
+    *RECIPES.write() = None;
 }
 
 pub fn cfgs() -> Vec<Cfg> {
@@ -284,6 +328,7 @@ pub async fn health(base: &str, key: &str) -> Result<Value, String> {
     if !v.get("ok").and_then(Value::as_bool).unwrap_or(false) {
         return Err("unhealthy".to_string());
     }
+    remember_recipes(base, &v);
     Ok(json!({
         "ok": true,
         "version": v.get("version").and_then(|x| x.as_str()).unwrap_or(""),
@@ -298,4 +343,41 @@ pub fn fetch_usable(status: &Value) -> bool {
             .get("flaresolverrOk")
             .and_then(Value::as_bool)
             .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cached(base: &str, recipes: &[&str]) -> (String, HashSet<String>) {
+        (
+            base.to_string(),
+            recipes.iter().map(|r| r.to_string()).collect(),
+        )
+    }
+
+    #[test]
+    fn recipes_answer_only_for_the_selected_instance() {
+        let cache = cached("http://127.0.0.1:8189", &["datanodes", "vikingfile"]);
+        assert_eq!(
+            recipe_in(Some(&cache), "http://127.0.0.1:8189", "datanodes"),
+            Some(true)
+        );
+        assert_eq!(
+            recipe_in(Some(&cache), "http://127.0.0.1:8189", "fileq"),
+            Some(false)
+        );
+        // Another instance's list says nothing about this one.
+        assert_eq!(
+            recipe_in(Some(&cache), "http://127.0.0.1:9999", "datanodes"),
+            None
+        );
+        // Nothing reported yet: the caller still tries.
+        assert_eq!(recipe_in(None, "http://127.0.0.1:8189", "fileq"), None);
+    }
+
+    #[test]
+    fn base_key_ignores_case_and_trailing_slashes() {
+        assert_eq!(base_key(" HTTP://127.0.0.1:8189// "), "http://127.0.0.1:8189");
+    }
 }

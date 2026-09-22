@@ -1,7 +1,6 @@
 pub mod buzzheavier;
 pub mod datanodes;
 pub mod datavaults;
-pub mod fileditch;
 pub mod filekeeper;
 pub mod fuckingfast;
 pub mod gate;
@@ -36,9 +35,6 @@ fn slipgate_host(url: &str) -> Option<&'static str> {
     }
     if datavaults::matches(url) {
         return Some("datavaults");
-    }
-    if fileditch::matches(url) {
-        return Some("fileditch");
     }
     None
 }
@@ -111,9 +107,6 @@ pub fn detect_host_type(url: &str) -> String {
     if datavaults::matches(url) {
         return "datavaults".to_string();
     }
-    if fileditch::matches(url) {
-        return "fileditch".to_string();
-    }
     if numbered_st::matches(url) {
         return "numbered-st".to_string();
     }
@@ -142,10 +135,9 @@ pub fn is_resolvable(url: &str) -> bool {
         || mediafire::matches(url)
         || rootz::matches(url)
         || datavaults::matches(url)
-        || fileditch::matches(url)
         || filekeeper::matches(url)
         || numbered_st::matches(url)
-        || gate::matches(url)
+        || gate::is_available(url)
 }
 
 pub async fn link_is_dead(url: &str) -> bool {
@@ -205,9 +197,6 @@ async fn dispatch(_app: Option<&AppHandle>, option: &DownloadOption) -> ResolveR
     }
     if datavaults::matches(url) {
         result = Some(datavaults::resolve(url).await);
-    }
-    if fileditch::matches(url) {
-        result = Some(fileditch::resolve(url).await);
     }
     if numbered_st::matches(url) {
         return numbered_st::resolve(url).await;
