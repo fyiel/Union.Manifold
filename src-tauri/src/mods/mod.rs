@@ -953,7 +953,10 @@ fn is_game_dir(dir: &Path) -> bool {
             }
         }
     }
-    false
+    // Unreal Engine games keep the shipping binary in `<project>/Binaries/Win64`
+    // and their packages in `<project>/Content/Paks`, so a repack that nests
+    // the Steam folder one level deeper is still recognized.
+    is_unreal_project_dir(dir) || has_unreal_project_child(dir)
 }
 
 pub(crate) fn resolve_game_root(base: &Path) -> PathBuf {
@@ -1032,6 +1035,8 @@ pub(crate) enum ModLayout {
     Fluffy,
     ModsFolder,
     RimWorld,
+    Ue4ssLoader,
+    Ue4ssMod,
     WuchangEnabler,
     WuchangPackage,
 }
@@ -1208,6 +1213,11 @@ fn loader_compatibility(
         || target
             .and_then(|root| child_dir(root, "Project_Plague"))
             .is_some();
+    let unreal_binaries = target.and_then(unreal_binaries_prefix);
+    let ue4ss_installed = target
+        .zip(unreal_binaries.as_deref())
+        .map(|(root, prefix)| root.join(prefix).join("ue4ss").is_dir())
+        .unwrap_or(false);
 
     vec![
         LoaderCompatibility {
@@ -1248,6 +1258,18 @@ fn loader_compatibility(
                 "detected a supported RE Engine or MT Framework game layout".to_string()
             } else {
                 "no supported title or game layout was detected".to_string()
+            },
+        },
+        LoaderCompatibility {
+            name: "UE4SS",
+            compatible: unreal_binaries.is_some(),
+            reason: if unreal_binaries.is_none() {
+                "no Unreal Engine binary folder was detected in this install".to_string()
+            } else if ue4ss_installed {
+                "UE4SS is installed next to the game binary".to_string()
+            } else {
+                "the game ships an Unreal binary folder; install UE4SS to load script mods"
+                    .to_string()
             },
         },
         LoaderCompatibility {
@@ -1310,16 +1332,21 @@ fn classification_root(staged: &Path) -> PathBuf {
     let Some(dir) = single_payload_dir(staged) else {
         return staged.to_path_buf();
     };
-    let name = dir
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_lowercase();
-    if MEANINGFUL_DIRS.contains(&name.as_str()) {
+    if keeps_relative_position(&dir) {
         staged.to_path_buf()
     } else {
         dir
     }
+}
+
+/// Whether a staged folder must stay where the archive put it: a name the
+/// deploy planner already treats as game-relative, or an Unreal project
+/// folder, which only works from the game root.
+fn keeps_relative_position(dir: &Path) -> bool {
+    dir.file_name()
+        .map(|name| MEANINGFUL_DIRS.contains(&name.to_string_lossy().to_lowercase().as_str()))
+        .unwrap_or(false)
+        || is_unreal_project_dir(dir)
 }
 
 fn has_root_dir(root: &Path, names: &[&str]) -> bool {
@@ -1416,46 +1443,112 @@ fn is_bethesda_payload(root: &Path) -> bool {
     ) || has_extension(root, &["esp", "esm", "esl", "bsa"], 3)
 }
 
-fn unreal_paks_target(target: &Path) -> Option<String> {
-    let mut matches: Vec<String> = walkdir::WalkDir::new(target)
-        .min_depth(2)
-        .max_depth(4)
+/// Resolve `parts` below `base`, each one a directory that must exist.
+fn child_path(base: &Path, parts: &[&str]) -> Option<PathBuf> {
+    parts
+        .iter()
+        .try_fold(base.to_path_buf(), |dir, part| child_dir(&dir, part))
+}
+
+/// An Unreal project folder: the one holding `Content/Paks` or
+/// `Binaries/Win64`. `Engine` ships both and is never the project.
+fn is_unreal_project_dir(dir: &Path) -> bool {
+    child_path(dir, &["Content", "Paks"]).is_some()
+        || child_path(dir, &["Binaries", "Win64"]).is_some()
+}
+
+/// Folders that never hold a project, pruned so the walk stays shallow on a
+/// game tree: `Content` and `Binaries` cannot contain themselves, `Engine` and
+/// the redist folders ship unrelated copies, and `ue4ss` belongs to a loader.
+const UNREAL_WALK_SKIP: &[&str] = &[
+    "engine",
+    "content",
+    "binaries",
+    "paks",
+    "saved",
+    "movies",
+    "plugins",
+    "redist",
+    "_commonredist",
+    "ue4ss",
+];
+
+/// The Unreal project folder that holds `marker` (for example `Content/Paks`),
+/// as a path relative to `target`: empty when the game root holds the marker
+/// itself, and `None` when no folder below it does. The search descends a few
+/// levels so a repack that nests the game under extra folders still resolves.
+fn unreal_project_prefix(target: &Path, marker: &[&str]) -> Option<String> {
+    if child_path(target, marker).is_some() {
+        return Some(String::new());
+    }
+    walkdir::WalkDir::new(target)
+        .min_depth(1)
+        .max_depth(3)
+        .into_iter()
+        .filter_entry(|entry| {
+            !entry.file_type().is_dir()
+                || entry.depth() == 0
+                || !UNREAL_WALK_SKIP.iter().any(|skip| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .eq_ignore_ascii_case(skip)
+                })
+        })
+        .flatten()
+        .find(|entry| entry.file_type().is_dir() && child_path(entry.path(), marker).is_some())
+        .and_then(|entry| rel_string(target, entry.path()))
+}
+
+fn join_prefix(prefix: &str, tail: &str) -> String {
+    if prefix.is_empty() {
+        tail.to_string()
+    } else {
+        format!("{prefix}/{tail}")
+    }
+}
+
+/// Where unsigned Unreal packages load from: `<project>/Content/Paks/~mods`.
+fn unreal_paks_mods_prefix(target: &Path) -> Option<String> {
+    unreal_project_prefix(target, &["Content", "Paks"])
+        .map(|prefix| join_prefix(&prefix, "Content/Paks/~mods"))
+}
+
+/// Where the Unreal shipping binary lives, which is also where UE4SS installs
+/// its loader and its script mods.
+fn unreal_binaries_prefix(target: &Path) -> Option<String> {
+    unreal_project_prefix(target, &["Binaries", "Win64"])
+        .map(|prefix| join_prefix(&prefix, "Binaries/Win64"))
+}
+
+/// A UE4SS install: the `ue4ss` folder and its loader DLLs, which sit next to
+/// the game binary. A script mod packaged as a partial `ue4ss` tree lands in
+/// the same place, so both share this layout.
+fn is_ue4ss_loader_payload(root: &Path) -> bool {
+    child_dir(root, "ue4ss").is_some()
+}
+
+/// A UE4SS script mod: the `Scripts` folder UE4SS loads from a mod folder
+/// under `ue4ss/Mods`.
+fn is_ue4ss_script_mod(root: &Path) -> bool {
+    child_dir(root, "Scripts")
+        .map(|scripts| has_extension(&scripts, &["lua"], 2))
+        .unwrap_or(false)
+}
+
+/// Whether the staged tree is the game's own project folder, which a wrapper
+/// strip must leave in place.
+fn has_unreal_project_child(root: &Path) -> bool {
+    std::fs::read_dir(root)
+        .ok()
         .into_iter()
         .flatten()
-        .filter(|entry| {
-            entry.file_type().is_dir()
-                && entry
-                    .file_name()
-                    .to_string_lossy()
-                    .eq_ignore_ascii_case("Paks")
-        })
-        .filter_map(|entry| {
-            let parent = entry.path().parent()?;
-            if !parent
-                .file_name()?
-                .to_string_lossy()
-                .eq_ignore_ascii_case("Content")
-            {
-                return None;
-            }
-            let rel = rel_string(target, entry.path())?;
-            if rel
-                .split('/')
-                .any(|part| part.eq_ignore_ascii_case("Engine"))
-            {
-                return None;
-            }
-            Some(format!("{rel}/~mods"))
-        })
-        .collect();
-    matches.sort_by_key(|path| path.matches('/').count());
-    matches.into_iter().next()
+        .flatten()
+        .any(|entry| entry.path().is_dir() && is_unreal_project_dir(&entry.path()))
 }
 
 fn has_content_paks(root: &Path) -> bool {
-    child_dir(root, "Content")
-        .and_then(|content| child_dir(&content, "Paks"))
-        .is_some()
+    child_path(root, &["Content", "Paks"]).is_some()
 }
 
 fn wuchang_project_plague_root(root: &Path) -> Option<PathBuf> {
@@ -1652,6 +1745,22 @@ fn infer_deployment_plan(target: &Path, staged: &Path, steam_appid: Option<u64>)
             "high",
         );
     }
+    // A tree rooted at the project's own folders mirrors `<project>`, not the
+    // game root: Unreal keeps its packages under `<project>/Content` and its
+    // shipping binary under `<project>/Binaries`.
+    if has_root_dir(&root, &["Content", "Binaries"]) {
+        if let Some(prefix) = unreal_project_prefix(target, &["Content", "Paks"]) {
+            if !prefix.is_empty() {
+                return deployment_plan(
+                    ModLayout::Raw,
+                    &prefix,
+                    "the archive mirrors the Unreal project folder, not the game root",
+                    "high",
+                );
+            }
+        }
+    }
+
     if has_root_dir(
         &root,
         &[
@@ -1659,18 +1768,39 @@ fn infer_deployment_plan(target: &Path, staged: &Path, steam_appid: Option<u64>)
             "Mods",
             "MelonLoader",
             "Content",
+            "Binaries",
             "reframework",
             "natives",
             "pak_mods",
             "nativePC",
         ],
-    ) {
+    ) || has_unreal_project_child(&root)
+    {
         return deployment_plan(
             ModLayout::Raw,
             "",
             "the archive already contains a game-relative folder tree",
             "high",
         );
+    }
+
+    if let Some(binaries) = unreal_binaries_prefix(target) {
+        if is_ue4ss_loader_payload(&root) {
+            return deployment_plan(
+                ModLayout::Ue4ssLoader,
+                &binaries,
+                "the archive is a UE4SS install and the game loads it from its binary folder",
+                "high",
+            );
+        }
+        if is_ue4ss_script_mod(&root) {
+            return deployment_plan(
+                ModLayout::Ue4ssMod,
+                &binaries,
+                "the archive is a UE4SS script mod, which loads from a folder under ue4ss/Mods",
+                "high",
+            );
+        }
     }
 
     let uses_reframework = steam_appid == Some(RESIDENT_EVIL_REQUIEM_STEAM_APPID)
@@ -1725,7 +1855,7 @@ fn infer_deployment_plan(target: &Path, staged: &Path, steam_appid: Option<u64>)
         );
     }
     if has_extension(&root, &["pak", "utoc", "ucas"], 3) {
-        if let Some(prefix) = unreal_paks_target(target) {
+        if let Some(prefix) = unreal_paks_mods_prefix(target) {
             return deployment_plan(
                 ModLayout::Raw,
                 &prefix,
@@ -1781,7 +1911,7 @@ fn apply_rimworld_layout(staged: &Path, fallback_name: &str) -> Result<(), Strin
 
 fn wrap_in_named_mods_folder(
     staged: &Path,
-    dir_name: &str,
+    rel_dir: &str,
     fallback_name: &str,
 ) -> Result<(), String> {
     let entries: Vec<PathBuf> = std::fs::read_dir(staged)
@@ -1789,16 +1919,17 @@ fn wrap_in_named_mods_folder(
         .flatten()
         .map(|e| e.path())
         .collect();
+    let leaf = rel_dir.rsplit_once('/').map_or(rel_dir, |(_, leaf)| leaf);
     let has_mods_dir = entries.iter().any(|p| {
         p.is_dir()
             && p.file_name()
-                .map(|n| n.eq_ignore_ascii_case("mods"))
+                .map(|n| n.to_string_lossy().eq_ignore_ascii_case(leaf))
                 .unwrap_or(false)
     });
     if entries.is_empty() || has_mods_dir {
         return Ok(());
     }
-    let mods_dir = staged.join(dir_name);
+    let mods_dir = staged.join(rel_dir);
     std::fs::create_dir_all(&mods_dir).map_err(|e| format!("mods wrap: {e}"))?;
     if entries.len() == 1 && entries[0].is_dir() {
         let name = entries[0].file_name().unwrap().to_os_string();
@@ -2019,6 +2150,7 @@ pub(crate) fn apply_bepinex_layout(src: &Path, dst: &Path, full_name: &str) -> R
 
 const MEANINGFUL_DIRS: &[&str] = &[
     "bepinex",
+    "binaries",
     "data",
     "lml",
     "mod",
@@ -2035,6 +2167,7 @@ const MEANINGFUL_DIRS: &[&str] = &[
     "scripts",
     "stream",
     "content",
+    "ue4ss",
     "userlibs",
     "userdata",
 ];
@@ -2049,12 +2182,7 @@ pub(crate) fn strip_wrapper_dir(staged: &Path) -> Result<(), String> {
         return Ok(());
     }
     let wrapper = &entries[0];
-    let name = wrapper
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_lowercase();
-    if MEANINGFUL_DIRS.contains(&name.as_str()) {
+    if keeps_relative_position(wrapper) {
         return Ok(());
     }
     let inner: Vec<PathBuf> = std::fs::read_dir(wrapper)
@@ -2093,6 +2221,51 @@ fn move_tree(src: &Path, dst: &Path, context: &str) -> Result<(), String> {
     } else {
         std::fs::copy(src, dst).map_err(|e| format!("{context}: {e}"))?;
         std::fs::remove_file(src).ok();
+    }
+    Ok(())
+}
+
+/// Windows archives can carry entry names with `\` separators, which extract as
+/// literal characters on Linux: `ue4ss\Mods\X\Scripts\main.lua` arrives as one
+/// flat file name that the game never looks for. Rebuild the directory tree the
+/// archive described, deepest names first so a move never invalidates a path
+/// still queued behind it.
+fn normalize_windows_entry_names(root: &Path) -> Result<(), String> {
+    let mut paths: Vec<PathBuf> = walkdir::WalkDir::new(root)
+        .min_depth(1)
+        .into_iter()
+        .flatten()
+        .filter(|entry| entry.file_name().to_string_lossy().contains('\\'))
+        .map(|entry| entry.into_path())
+        .collect();
+    paths.sort_by_key(|path| std::cmp::Reverse(path.components().count()));
+    for path in paths {
+        if !path.try_exists().unwrap_or(false) {
+            // A parent entry already carried this path into place.
+            continue;
+        }
+        let Ok(rel) = path.strip_prefix(root) else {
+            continue;
+        };
+        let parts: Vec<String> = rel
+            .to_string_lossy()
+            .split('\\')
+            .filter(|part| !part.is_empty() && *part != ".")
+            .map(str::to_string)
+            .collect();
+        if parts.is_empty() || parts.iter().any(|part| part == "..") {
+            // A name that escapes the stage, or collapses to nothing, stays
+            // where it is: the game never looks for it there either way.
+            continue;
+        }
+        let mut target = root.to_path_buf();
+        for part in &parts {
+            target.push(part);
+        }
+        if target == path {
+            continue;
+        }
+        move_tree(&path, &target, "windows path entry")?;
     }
     Ok(())
 }
@@ -2318,6 +2491,8 @@ fn apply_staging_layout(
         ModLayout::Fluffy => apply_fluffy_layout(staged),
         ModLayout::ModsFolder => wrap_in_mods_folder(staged, fallback_name),
         ModLayout::RimWorld => apply_rimworld_layout(staged, fallback_name),
+        ModLayout::Ue4ssLoader => strip_wrapper_dir(staged),
+        ModLayout::Ue4ssMod => wrap_in_named_mods_folder(staged, "ue4ss/Mods", fallback_name),
         ModLayout::WuchangEnabler => apply_wuchang_enabler_layout(staged),
         ModLayout::WuchangPackage => apply_wuchang_package_layout(staged),
         ModLayout::BepInEx | ModLayout::RequiresInstaller => {
@@ -2411,6 +2586,7 @@ fn finalize_install_blocking(
     }
     let selected_src = versioned_archive_root(staged_src, &spec.version);
     let staged_src = selected_src.as_deref().unwrap_or(staged_src);
+    normalize_windows_entry_names(staged_src)?;
     let mut cfg = load_config(&state.paths, &spec.appid);
     let steam_appid = steam_appid.or(cfg.steam_appid);
     if cfg.steam_appid.is_none() {
@@ -2606,7 +2782,7 @@ async fn flatten_tar(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-const DEPLOYMENT_PLAN_VERSION: u32 = 8;
+const DEPLOYMENT_PLAN_VERSION: u32 = 9;
 
 fn refresh_deployment_plans(state: &AppState, appid: &str, cfg: &mut GameMods) -> bool {
     let Ok(target) = deploy_target_dir(state, appid, cfg) else {
@@ -2621,6 +2797,19 @@ fn refresh_deployment_plans(state: &AppState, appid: &str, cfg: &mut GameMods) -
         let staged = staging.join(&installed.id);
         if !staged.is_dir() {
             continue;
+        }
+        if migrating {
+            if let Err(error) = normalize_windows_entry_names(&staged) {
+                crate::logging::write_line(
+                    "warn",
+                    &format!(
+                        "windows path migration failed for {appid}/{}: {error}",
+                        installed.id
+                    ),
+                );
+                migration_failed = true;
+                continue;
+            }
         }
         if migrating && cfg.steam_appid == Some(MEWGENICS_STEAM_APPID) {
             match normalize_mewgenics_localization_append(&staged) {
@@ -2653,6 +2842,8 @@ fn refresh_deployment_plans(state: &AppState, appid: &str, cfg: &mut GameMods) -
                     | ModLayout::Lenny
                     | ModLayout::Fluffy
                     | ModLayout::RimWorld
+                    | ModLayout::Ue4ssLoader
+                    | ModLayout::Ue4ssMod
                     | ModLayout::WuchangEnabler
                     | ModLayout::WuchangPackage
             )
@@ -3879,6 +4070,238 @@ mod tests {
         assert_eq!(plan.confidence, "high");
     }
 
+    /// A UE game root, with the shipping binary and packages the planner reads.
+    fn unreal_game_dir(root: &Path) -> PathBuf {
+        let game = root.join("The Blood of Dawnwalker");
+        let project = game.join("Dawnwalker");
+        write_file(&project.join("Binaries/Win64/Dawnwalker.exe"), "mz");
+        std::fs::create_dir_all(project.join("Content/Paks")).unwrap();
+        std::fs::create_dir_all(game.join("Engine/Content/Paks")).unwrap();
+        game
+    }
+
+    /// Mirror of the install path: plan the staged tree, apply its layout, then
+    /// hand the entry to the deployer exactly as the install command does.
+    fn install_into(game_dir: &Path, target: &Path, entry: &mut ModEntry) {
+        let staged = game_dir.join("staging").join(&entry.id);
+        let plan = infer_deployment_plan(target, &staged, None);
+        apply_staging_layout(&staged, plan.layout, &entry.name, &entry.id).unwrap();
+        entry.deploy_prefix = plan.deploy_prefix.clone();
+        entry.deploy_confidence = plan.confidence.to_string();
+    }
+
+    #[test]
+    fn unreal_paks_ignore_engine_and_use_the_project_folder() {
+        let tmp = tempdir().unwrap();
+        let target = unreal_game_dir(tmp.path());
+        let staged = tmp.path().join("archive");
+        write_file(&staged.join("ExampleMod.pak"), "x");
+
+        let plan = infer_deployment_plan(&target, &staged, None);
+
+        assert_eq!(plan.deploy_prefix, "Dawnwalker/Content/Paks/~mods");
+        assert_eq!(plan.confidence, "high");
+    }
+
+    #[test]
+    fn resolve_game_root_finds_an_unreal_game_folder() {
+        let tmp = tempdir().unwrap();
+        let base = tmp.path().join("The Blood of Dawnwalker");
+        write_file(&base.join("installed.json"), "{}");
+        std::fs::create_dir_all(base.join("_CommonRedist")).unwrap();
+        let game = unreal_game_dir(&base);
+
+        assert_eq!(resolve_game_root(&base), game);
+    }
+
+    #[test]
+    fn deploys_ue4ss_loader_and_script_mods_beside_the_binary() {
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path().join("m");
+        let target = unreal_game_dir(tmp.path());
+        let mut loader = mk_mod(
+            &dir,
+            "nexus-18",
+            0,
+            &[("dwmapi.dll", "dll"), ("ue4ss/UE4SS.dll", "ue4ss")],
+        );
+        let mut script = mk_mod(
+            &dir,
+            "nexus-205",
+            1,
+            &[("enabled.txt", ""), ("Scripts/main.lua", "lua")],
+        );
+
+        install_into(&dir, &target, &mut loader);
+        install_into(&dir, &target, &mut script);
+        assert_eq!(loader.deploy_prefix, "Dawnwalker/Binaries/Win64");
+        assert_eq!(script.deploy_prefix, "Dawnwalker/Binaries/Win64");
+        assert_eq!(loader.deploy_confidence, "high");
+        assert_eq!(script.deploy_confidence, "high");
+
+        let cfg = GameMods {
+            mods: vec![loader, script],
+            ..Default::default()
+        };
+        deploy_to(&dir, &target, &cfg).unwrap();
+
+        let binaries = target.join("Dawnwalker/Binaries/Win64");
+        assert_eq!(read(&binaries.join("dwmapi.dll")), "dll");
+        assert_eq!(read(&binaries.join("ue4ss/UE4SS.dll")), "ue4ss");
+        assert_eq!(
+            read(&binaries.join("ue4ss/Mods/nexus-205/Scripts/main.lua")),
+            "lua"
+        );
+        assert!(binaries.join("ue4ss/Mods/nexus-205/enabled.txt").is_file());
+    }
+
+    #[test]
+    fn ue4ss_loader_keeps_a_partial_mods_tree_in_place() {
+        let tmp = tempdir().unwrap();
+        let target = unreal_game_dir(tmp.path());
+        let staged = tmp.path().join("archive");
+        write_file(
+            &staged.join("ue4ss/Mods/DawnwalkerCutsceneAnimationFix/Scripts/main.lua"),
+            "lua",
+        );
+        write_file(&staged.join("version.dll"), "dll");
+        write_file(&staged.join("DawnwalkerCutsceneFPS.ini"), "ini");
+
+        let plan = infer_deployment_plan(&target, &staged, None);
+
+        assert_eq!(plan.layout, ModLayout::Ue4ssLoader);
+        assert_eq!(plan.deploy_prefix, "Dawnwalker/Binaries/Win64");
+        assert_eq!(plan.confidence, "high");
+    }
+
+    #[test]
+    fn ue4ss_script_mod_wraps_a_bare_payload_in_its_own_folder() {
+        let tmp = tempdir().unwrap();
+        let staged = tmp.path().join("stage");
+        write_file(&staged.join("Scripts/main.lua"), "lua");
+        write_file(&staged.join("enabled.txt"), "");
+
+        apply_staging_layout(&staged, ModLayout::Ue4ssMod, "Auto Gathering", "nexus-205").unwrap();
+
+        assert!(staged.join("ue4ss/Mods/Auto Gathering/Scripts/main.lua").is_file());
+        assert!(staged.join("ue4ss/Mods/Auto Gathering/enabled.txt").is_file());
+        assert!(!staged.join("Scripts").exists());
+    }
+
+    #[test]
+    fn ue4ss_script_mod_keeps_an_authors_folder_name() {
+        let tmp = tempdir().unwrap();
+        let staged = tmp.path().join("stage");
+        write_file(&staged.join("DawnwalkerModMenu/Scripts/main.lua"), "lua");
+
+        apply_staging_layout(&staged, ModLayout::Ue4ssMod, "Mod Setting Menu", "nexus-271")
+            .unwrap();
+
+        assert!(staged
+            .join("ue4ss/Mods/DawnwalkerModMenu/Scripts/main.lua")
+            .is_file());
+        assert!(!staged.join("DawnwalkerModMenu").exists());
+    }
+
+    #[test]
+    fn deploys_project_relative_trees_under_the_project_folder() {
+        let tmp = tempdir().unwrap();
+        let target = unreal_game_dir(tmp.path());
+
+        // Both roots mirror the project folder, not the game root: the game
+        // loads `Dawnwalker/Binaries/...` and `Dawnwalker/Content/...`.
+        let binaries = tmp.path().join("binaries-archive");
+        write_file(
+            &binaries.join("Binaries/Win64/ue4ss/Mods/DawnwalkerModMenu/Scripts/main.lua"),
+            "lua",
+        );
+        let plan = infer_deployment_plan(&target, &binaries, None);
+        assert_eq!(plan.layout, ModLayout::Raw);
+        assert_eq!(plan.deploy_prefix, "Dawnwalker");
+        assert_eq!(plan.confidence, "high");
+
+        let content = tmp.path().join("content-archive");
+        write_file(&content.join("Content/Paks/~mods/Example.pak"), "x");
+        let plan = infer_deployment_plan(&target, &content, None);
+        assert_eq!(plan.layout, ModLayout::Raw);
+        assert_eq!(plan.deploy_prefix, "Dawnwalker");
+        assert_eq!(plan.confidence, "high");
+    }
+
+    #[test]
+    fn keeps_project_wrapped_package_trees_where_they_are() {
+        let tmp = tempdir().unwrap();
+        let target = unreal_game_dir(tmp.path());
+        let staged = tmp.path().join("archive");
+        write_file(&staged.join("Dawnwalker/Content/Paks/~mods/Example.pak"), "x");
+
+        let plan = infer_deployment_plan(&target, &staged, None);
+
+        assert_eq!(plan.layout, ModLayout::Raw);
+        assert_eq!(plan.deploy_prefix, "");
+        assert_eq!(plan.confidence, "high");
+
+        apply_staging_layout(&staged, plan.layout, "", "nexus-77").unwrap();
+        assert!(staged.join("Dawnwalker/Content/Paks/~mods/Example.pak").is_file());
+    }
+
+    #[test]
+    fn normalizes_windows_style_entry_names_into_directories() {
+        let tmp = tempdir().unwrap();
+        let staged = tmp.path().join("stage");
+        write_file(
+            &staged.join("ue4ss\\Mods\\DawnwalkerCutsceneAnimationFix\\Scripts\\main.lua"),
+            "lua",
+        );
+        write_file(
+            &staged.join("ue4ss\\Mods\\DawnwalkerCutsceneAnimationFix\\enabled.txt"),
+            "",
+        );
+        write_file(&staged.join("version.dll"), "dll");
+
+        normalize_windows_entry_names(&staged).unwrap();
+
+        assert!(staged
+            .join("ue4ss/Mods/DawnwalkerCutsceneAnimationFix/Scripts/main.lua")
+            .is_file());
+        assert!(staged
+            .join("ue4ss/Mods/DawnwalkerCutsceneAnimationFix/enabled.txt")
+            .is_file());
+        assert_eq!(read(&staged.join("version.dll")), "dll");
+    }
+
+    #[test]
+    fn windows_style_entries_never_escape_the_stage() {
+        let tmp = tempdir().unwrap();
+        let staged = tmp.path().join("stage");
+        write_file(&staged.join("..\\evil.txt"), "x");
+
+        normalize_windows_entry_names(&staged).unwrap();
+
+        assert!(!tmp.path().join("evil.txt").exists());
+        assert!(staged.join("..\\evil.txt").is_file());
+    }
+
+    #[test]
+    fn loader_compatibility_reports_ue4ss() {
+        let tmp = tempdir().unwrap();
+        let target = unreal_game_dir(tmp.path());
+
+        let loaders = loader_compatibility(Some(&target), None);
+        let ue4ss = loaders.iter().find(|l| l.name == "UE4SS").unwrap();
+        assert!(ue4ss.compatible);
+        assert!(ue4ss.reason.contains("install UE4SS"), "{}", ue4ss.reason);
+
+        std::fs::create_dir_all(target.join("Dawnwalker/Binaries/Win64/ue4ss")).unwrap();
+        let loaders = loader_compatibility(Some(&target), None);
+        let ue4ss = loaders.iter().find(|l| l.name == "UE4SS").unwrap();
+        assert!(ue4ss.reason.contains("installed"), "{}", ue4ss.reason);
+
+        let loaders = loader_compatibility(None, None);
+        let ue4ss = loaders.iter().find(|l| l.name == "UE4SS").unwrap();
+        assert!(!ue4ss.compatible);
+    }
+
     #[test]
     fn unknown_archive_falls_back_to_game_root_with_low_confidence() {
         let tmp = tempdir().unwrap();
@@ -3944,3 +4367,4 @@ mod tests {
         assert!(!tmp.path().join("outside/file.txt").exists());
     }
 }
+

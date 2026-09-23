@@ -3,6 +3,33 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.9.7
+
+### Added
+
+- Unreal Engine mods deploy by structure instead of by title. The planner finds
+  the game's project folder, the one holding `Content/Paks` or
+  `Binaries/Win64` and never `Engine`, wherever a repack nests it, then reads
+  the destination from the archive: packages go to
+  `<project>/Content/Paks/~mods`, a UE4SS install goes next to the shipping
+  binary, a bare UE4SS script mod gets its own folder under
+  `<project>/Binaries/Win64/ue4ss/Mods`, and trees rooted at the project's own
+  `Content` or `Binaries` are placed under the project folder rather than the
+  game root. Archives that already mirror the game root, or the project folder
+  itself, are kept exactly as they are, so a wrapper strip can no longer drop
+  the `Dawnwalker` folder a mod shipped. The Mods page lists UE4SS as a loader
+  and its reason says whether the loader is already installed. Installs planned
+  by an older build re-plan and redeploy on upgrade.
+
+### Fixed
+
+- Windows archives whose entries use `\` separators (`ue4ss\Mods\...`) extract
+  as flat file names on Linux, so nothing the game looked for existed. Staging
+  now rebuilds the directory tree those names describe, and names that would
+  escape the staging folder are left where they are. The same repair runs
+  during plan migration, so mods installed by an older build are fixed without
+  reinstalling them.
+
 ## 3.9.6
 
 ### Fixed
