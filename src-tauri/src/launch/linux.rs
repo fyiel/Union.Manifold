@@ -125,6 +125,11 @@ fn proton_compat_prefix(compat_data: &str) -> String {
 
 fn proxy_dll_overrides(exe_path: &str) -> Option<String> {
     let dir = std::path::Path::new(exe_path).parent()?;
+    // Loader proxy names. Wine prefers its own builtin for these DLLs, so the
+    // copy the loader dropped beside the game executable is ignored and the
+    // loader never injects until the name is overridden to native first.
+    // `dwmapi` is UE4SS's default proxy, the name its packages ship, and
+    // `xinput1_3` is the other proxy UE4SS supports.
     const PROXIES: &[&str] = &[
         "winhttp",
         "winmm",
@@ -133,6 +138,7 @@ fn proxy_dll_overrides(exe_path: &str) -> Option<String> {
         "dsound",
         "dbghelp",
         "wininet",
+        "dwmapi",
         "xinput1_3",
     ];
     let entries: HashSet<String> = std::fs::read_dir(dir)
@@ -1173,6 +1179,24 @@ mod tests {
         assert!(
             ov.split(';').any(|e| e == "winmm=n,b"),
             "winmm missing: {ov}"
+        );
+    }
+
+    #[test]
+    fn ue4ss_install_forces_its_dwmapi_proxy_native() {
+        let tmp = tempfile::tempdir().unwrap();
+        touch(tmp.path(), "Dawnwalker.exe");
+        touch(tmp.path(), "dwmapi.dll");
+        touch(tmp.path(), "version.dll");
+        let exe = tmp.path().join("Dawnwalker.exe");
+        let ov = proxy_dll_overrides(exe.to_str().unwrap()).expect("expected overrides");
+        assert!(
+            ov.split(';').any(|e| e == "dwmapi=n,b"),
+            "dwmapi missing: {ov}"
+        );
+        assert!(
+            ov.split(';').any(|e| e == "version=n,b"),
+            "version missing: {ov}"
         );
     }
 

@@ -23,6 +23,25 @@ All notable changes to Union.Manifold. This project is a fork of
 
 ### Fixed
 
+- UE4SS never injected under Proton, so a game with its loader deployed did
+  nothing at all. UE4SS loads through a `dwmapi.dll` proxy dropped beside the
+  game executable, and Wine prefers its own builtin `dwmapi` unless the launch
+  asks for the native one, which the proxy override list did not. `dwmapi` is
+  now overridden to native like the other loader proxies, so UE4SS and the
+  script mods under `ue4ss/Mods` load.
+- UE4SS packages ship with the loader's debug console on, so a black window
+  that prints the loader log followed the game around. The staged
+  `UE4SS-settings.ini` now turns `ConsoleEnabled`, `GuiConsoleEnabled` and
+  `GuiConsoleVisible` off, leaving the rest of the file, comments, sections and
+  line endings exactly as the package wrote them. Existing installs pick it up
+  with the deployment plan version, which is now 10.
+- The built-in resolver could never start again after a browser was left
+  behind: `undetected_chromedriver` keeps one driver at a fixed path and copies
+  over it on every start, and a driver still running holds that file open, so
+  FlareSolverr died in its browser check with `Text file busy` and Nexus
+  downloads failed until the process was killed by hand. Resolver start now
+  reaps orphaned resolver browsers and drivers first, and never touches one
+  whose parent is still alive.
 - Windows archives whose entries use `\` separators (`ue4ss\Mods\...`) extract
   as flat file names on Linux, so nothing the game looked for existed. Staging
   now rebuilds the directory tree those names describe, and names that would

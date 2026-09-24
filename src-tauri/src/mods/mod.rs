@@ -1536,6 +1536,58 @@ fn is_ue4ss_script_mod(root: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// UE4SS packages ship with its debug windows on, and the text console is a
+/// window of its own that follows the game around. Turn those keys off in the
+/// staged `UE4SS-settings.ini`. Every other line, comment and section stays as
+/// the package wrote it, and the line endings stay as they are.
+fn disable_ue4ss_debug_windows(staged: &Path) -> Result<(), String> {
+    const KEYS: &[&str] = &["ConsoleEnabled", "GuiConsoleEnabled", "GuiConsoleVisible"];
+    for entry in walkdir::WalkDir::new(staged)
+        .max_depth(3)
+        .into_iter()
+        .flatten()
+    {
+        if !entry.file_type().is_file()
+            || !entry
+                .file_name()
+                .to_string_lossy()
+                .eq_ignore_ascii_case("UE4SS-settings.ini")
+        {
+            continue;
+        }
+        let path = entry.path();
+        let text =
+            std::fs::read_to_string(path).map_err(|e| format!("UE4SS settings read: {e}"))?;
+        let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
+        let mut section = String::new();
+        let mut changed = false;
+        let mut out = String::with_capacity(text.len());
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with('[') && trimmed.ends_with(']') {
+                section = trimmed.to_ascii_lowercase();
+            } else if section == "[debug]" && !trimmed.starts_with([';', '#']) {
+                if let Some((key, value)) = trimmed.split_once('=') {
+                    let key = key.trim();
+                    if KEYS.iter().any(|want| key.eq_ignore_ascii_case(want))
+                        && value.trim() != "0"
+                    {
+                        out.push_str(&format!("{key} = 0{eol}"));
+                        changed = true;
+                        continue;
+                    }
+                }
+            }
+            out.push_str(line);
+            out.push_str(eol);
+        }
+        if changed {
+            std::fs::write(path, out).map_err(|e| format!("UE4SS settings write: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
 /// Whether the staged tree is the game's own project folder, which a wrapper
 /// strip must leave in place.
 fn has_unreal_project_child(root: &Path) -> bool {
@@ -2491,7 +2543,10 @@ fn apply_staging_layout(
         ModLayout::Fluffy => apply_fluffy_layout(staged),
         ModLayout::ModsFolder => wrap_in_mods_folder(staged, fallback_name),
         ModLayout::RimWorld => apply_rimworld_layout(staged, fallback_name),
-        ModLayout::Ue4ssLoader => strip_wrapper_dir(staged),
+        ModLayout::Ue4ssLoader => {
+            strip_wrapper_dir(staged)?;
+            disable_ue4ss_debug_windows(staged)
+        }
         ModLayout::Ue4ssMod => wrap_in_named_mods_folder(staged, "ue4ss/Mods", fallback_name),
         ModLayout::WuchangEnabler => apply_wuchang_enabler_layout(staged),
         ModLayout::WuchangPackage => apply_wuchang_package_layout(staged),
@@ -2782,7 +2837,7 @@ async fn flatten_tar(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-const DEPLOYMENT_PLAN_VERSION: u32 = 9;
+const DEPLOYMENT_PLAN_VERSION: u32 = 10;
 
 fn refresh_deployment_plans(state: &AppState, appid: &str, cfg: &mut GameMods) -> bool {
     let Ok(target) = deploy_target_dir(state, appid, cfg) else {
@@ -4153,6 +4208,55 @@ mod tests {
             "lua"
         );
         assert!(binaries.join("ue4ss/Mods/nexus-205/enabled.txt").is_file());
+    }
+
+    #[test]
+    fn ue4ss_loader_turns_its_debug_windows_off() {
+        let tmp = tempdir().unwrap();
+        let dir = tmp.path().join("m");
+        let target = unreal_game_dir(tmp.path());
+        let mut loader = mk_mod(
+            &dir,
+            "nexus-18",
+            0,
+            &[
+                ("dwmapi.dll", "dll"),
+                ("ue4ss/UE4SS.dll", "ue4ss"),
+                (
+                    "ue4ss/UE4SS-settings.ini",
+                    "[General]\r\n; keep this comment\r\nUseCache = 1\r\n\r\n[Debug]\r\nConsoleEnabled = 1\r\nGuiConsoleEnabled = 1\r\nGuiConsoleVisible = 0\r\n",
+                ),
+            ],
+        );
+
+        install_into(&dir, &target, &mut loader);
+        let cfg = GameMods {
+            mods: vec![loader],
+            ..Default::default()
+        };
+        deploy_to(&dir, &target, &cfg).unwrap();
+
+        let ini = read(&target.join("Dawnwalker/Binaries/Win64/ue4ss/UE4SS-settings.ini"));
+        assert!(ini.contains("ConsoleEnabled = 0"), "{ini}");
+        assert!(ini.contains("GuiConsoleEnabled = 0"), "{ini}");
+        assert!(ini.contains("GuiConsoleVisible = 0"), "{ini}");
+        assert!(ini.contains("UseCache = 1"), "{ini}");
+        assert!(ini.contains("; keep this comment"), "{ini}");
+        assert!(ini.contains("\r\n"), "line endings were rewritten: {ini}");
+        assert_eq!(ini.matches("\r\nConsoleEnabled").count(), 1, "{ini}");
+
+        // The migration pass re-applies the layout, so a second run has to
+        // leave the file exactly as the first one did.
+        let staged = dir.join("staging/nexus-18/ue4ss/UE4SS-settings.ini");
+        let first = read(&staged);
+        apply_staging_layout(
+            &dir.join("staging/nexus-18"),
+            ModLayout::Ue4ssLoader,
+            "UE4SS for Dawnwalker",
+            "nexus-18",
+        )
+        .unwrap();
+        assert_eq!(read(&staged), first);
     }
 
     #[test]

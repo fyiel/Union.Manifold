@@ -463,6 +463,92 @@ fn drain_logs(name: &'static str, pipe: impl tokio::io::AsyncRead + Unpin + Send
     });
 }
 
+/// The resolver's browser and its driver outlive a FlareSolverr that died
+/// without its process group: Chrome puts its own processes in a new session,
+/// and a driver left running keeps the shared `chromedriver` file open, which
+/// makes the next FlareSolverr start fail its browser check with `Text file
+/// busy`. Reap both kinds of orphan before starting. A process whose parent is
+/// gone has no client left to serve.
+#[cfg(unix)]
+fn reap_orphaned_browser_processes(runtime_root: &Path) {
+    let chrome_dir = runtime_root.join("flaresolverr/_internal/chrome");
+    let driver = dirs::data_dir().map(|dir| dir.join("undetected_chromedriver/chromedriver"));
+    // One pass frees the driver file, and the next two collect the children
+    // that only become orphans once their own parent is gone.
+    for _ in 0..3 {
+        let mut reaped = false;
+        for pid in process_pids() {
+            let (Some(parent), Some(exe)) = (process_parent(pid), process_exe(pid)) else {
+                continue;
+            };
+            if !is_orphaned_browser_process(parent, &exe, &chrome_dir, driver.as_deref()) {
+                continue;
+            }
+            reaped = true;
+            kill_pid(pid);
+        }
+        if !reaped {
+            break;
+        }
+    }
+}
+
+#[cfg(unix)]
+fn process_pids() -> Vec<u32> {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| entry.file_name().to_string_lossy().parse::<u32>().ok())
+        .collect()
+}
+
+#[cfg(unix)]
+fn process_parent(pid: u32) -> Option<u32> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // The second field is the command name in parentheses, so the parent pid
+    // is the second field after the last closing parenthesis.
+    stat.rsplit_once(')')?
+        .1
+        .split_whitespace()
+        .nth(1)?
+        .parse()
+        .ok()
+}
+
+#[cfg(unix)]
+fn process_exe(pid: u32) -> Option<String> {
+    let exe = std::fs::read_link(format!("/proc/{pid}/exe")).ok()?;
+    Some(exe.to_string_lossy().to_string())
+}
+
+#[cfg(unix)]
+fn is_orphaned_browser_process(
+    parent: u32,
+    exe: &str,
+    chrome_dir: &Path,
+    driver: Option<&Path>,
+) -> bool {
+    if parent != 1 {
+        return false;
+    }
+    let exe = exe.strip_suffix(" (deleted)").unwrap_or(exe);
+    let exe = Path::new(exe);
+    exe.starts_with(chrome_dir) || driver.is_some_and(|driver| exe == driver)
+}
+
+#[cfg(unix)]
+fn kill_pid(pid: u32) {
+    // std, not tokio: this runs during resolver start and must not depend on
+    // a reactor, and nothing waits for the kill.
+    let _ = std::process::Command::new("kill")
+        .args(["-KILL", "--", &pid.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+}
+
 fn spawn_service(
     executable: &Path,
     current_dir: &Path,
@@ -648,6 +734,8 @@ async fn start_runtime(
     config.key = random_key();
     config.enabled = true;
     let flaresolverr_dir = flaresolverr_bin.parent().unwrap_or(&root);
+    #[cfg(unix)]
+    reap_orphaned_browser_processes(&root);
     drop(flaresolverr_reservation);
     let mut flaresolverr = spawn_service(
         &flaresolverr_bin,
@@ -1099,6 +1187,57 @@ mod tests {
         );
         unsafe_version.version = "../outside".to_string();
         assert!(validate_manifest(&unsafe_version).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reaps_only_orphaned_resolver_browsers() {
+        let chrome = Path::new("/opt/um/slipgate/runtime/1/flaresolverr/_internal/chrome");
+        let driver = Path::new("/home/u/.local/share/undetected_chromedriver/chromedriver");
+        let driver = Some(driver);
+        let chrome_exe = "/opt/um/slipgate/runtime/1/flaresolverr/_internal/chrome/chrome";
+
+        assert!(is_orphaned_browser_process(1, chrome_exe, chrome, driver));
+        assert!(is_orphaned_browser_process(
+            1,
+            "/opt/um/slipgate/runtime/1/flaresolverr/_internal/chrome/chrome_crashpad_handler",
+            chrome,
+            driver
+        ));
+        assert!(is_orphaned_browser_process(
+            1,
+            "/home/u/.local/share/undetected_chromedriver/chromedriver",
+            chrome,
+            driver
+        ));
+        // A runtime updated underneath the orphan leaves the marker on the path.
+        assert!(is_orphaned_browser_process(
+            1,
+            "/opt/um/slipgate/runtime/1/flaresolverr/_internal/chrome/chrome (deleted)",
+            chrome,
+            driver
+        ));
+        // A browser that still has its parent is the running resolver.
+        assert!(!is_orphaned_browser_process(4242, chrome_exe, chrome, driver));
+        assert!(!is_orphaned_browser_process(
+            4242,
+            "/home/u/.local/share/undetected_chromedriver/chromedriver",
+            chrome,
+            driver
+        ));
+        // Another tool's browser and driver are not this resolver's to kill.
+        assert!(!is_orphaned_browser_process(
+            1,
+            "/usr/lib/chromium/chrome",
+            chrome,
+            driver
+        ));
+        assert!(!is_orphaned_browser_process(
+            1,
+            "/home/u/.cache/selenium/chromedriver",
+            chrome,
+            driver
+        ));
     }
 
     #[test]
