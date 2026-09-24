@@ -4374,6 +4374,10 @@ mod tests {
         assert_eq!(read(&staged.join("version.dll")), "dll");
     }
 
+    // A Windows file name cannot hold a backslash, so on Windows the fixture
+    // below is a path that leaves the stage and the test would prove nothing.
+    // The repair it covers only ever sees those names on Linux.
+    #[cfg(not(windows))]
     #[test]
     fn windows_style_entries_never_escape_the_stage() {
         let tmp = tempdir().unwrap();
