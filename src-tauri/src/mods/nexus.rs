@@ -478,30 +478,10 @@ async fn native_free_download(
         h
     };
 
-    let page = {
-        let resp = http::fetch(
-            &referer,
-            &http::FetchOpts {
-                headers: with_ua(
-                    HashMap::from([("Accept".to_string(), "text/html".to_string())]),
-                    effective_ua.as_ref(),
-                ),
-                jar: Some(jar.clone()),
-                ..Default::default()
-            },
-        )
-        .await
-        .map_err(|e| format!("nexus session probe: {e}"))?;
-        let status = resp.status().as_u16();
-        let body = resp.text().await.unwrap_or_default();
-        (status, body)
-    };
-    if is_cloudflare_challenge(page.0, &page.1) {
-        return Ok(FreeDownload::NeedsBrowser(Some(
-            CLOUDFLARE_HINT.to_string(),
-        )));
-    }
-
+    // The generator answers with a working link while a plain page request for
+    // the same mod is still behind a Cloudflare challenge, so the page is never
+    // probed here: it used to gate this whole path and made a live session look
+    // blocked. The generator's own answer decides instead.
     let mut headers = HashMap::new();
     headers.insert(
         "Content-Type".to_string(),
@@ -532,7 +512,20 @@ async fn native_free_download(
     };
     let status = generate.0;
     let body = generate.1;
-    if is_cloudflare_challenge(status, &body) {
+    let Some(url) = parse_generate_response(&body) else {
+        return generate_failure(status, &body);
+    };
+
+    let spec = fetch_spec(key, appid, domain, mod_id, Some(file_id)).await?;
+    tauri::async_runtime::spawn(run_archive_install(app.clone(), spec, url, HashMap::new()));
+    Ok(FreeDownload::Started)
+}
+
+/// Why the download generator answered without a link, in the terms the caller
+/// acts on: a challenge means a browser can still get through, a rejected or
+/// logged out session means the pasted cookie has to be replaced.
+fn generate_failure(status: u16, body: &str) -> Result<FreeDownload, String> {
+    if is_cloudflare_challenge(status, body) {
         return Ok(FreeDownload::NeedsBrowser(Some(
             CLOUDFLARE_HINT.to_string(),
         )));
@@ -545,26 +538,20 @@ async fn native_free_download(
     if !(200..300).contains(&status) {
         return Err(format!("nexus download generator: HTTP {status}"));
     }
-    let Some(url) = parse_generate_response(&body) else {
-        return Ok(if generate_is_logged_out(&body) {
-            FreeDownload::NeedsSession(Some(
-                "NexusMods answered with no download link: the session cookie is logged \
-                 out. Paste a fresh nexusmods_session under Settings > Mods, or use \
-                 \"Mod Manager Download\" on the mod page"
-                    .to_string(),
-            ))
-        } else {
-            FreeDownload::NeedsBrowser(Some(
-                "the download generator answered without a link; the resolver's browser \
-                 can try it"
-                    .to_string(),
-            ))
-        });
-    };
-
-    let spec = fetch_spec(key, appid, domain, mod_id, Some(file_id)).await?;
-    tauri::async_runtime::spawn(run_archive_install(app.clone(), spec, url, HashMap::new()));
-    Ok(FreeDownload::Started)
+    Ok(if generate_is_logged_out(body) {
+        FreeDownload::NeedsSession(Some(
+            "NexusMods answered with no download link: the session cookie is logged \
+             out. Paste a fresh nexusmods_session under Settings > Mods, or use \
+             \"Mod Manager Download\" on the mod page"
+                .to_string(),
+        ))
+    } else {
+        FreeDownload::NeedsBrowser(Some(
+            "the download generator answered without a link; the resolver's browser \
+             can try it"
+                .to_string(),
+        ))
+    })
 }
 
 async fn premium_user(key: &str) -> Result<bool, String> {
@@ -1002,6 +989,32 @@ mod tests {
         assert!(!generate_is_logged_out(r#"[{"URI":"https://cdn.nexus.com/x"}]"#));
         assert!(!generate_is_logged_out(r#"{"error":"nope"}"#));
         assert!(!generate_is_logged_out("<html>Just a moment</html>"));
+    }
+
+    #[test]
+    fn reads_a_generate_answer_that_carries_no_link() {
+        let challenge = "<html><title>Just a moment...</title></html>";
+        assert!(matches!(
+            generate_failure(403, challenge),
+            Ok(FreeDownload::NeedsBrowser(Some(reason))) if reason.contains("cf_clearance")
+        ));
+        assert!(matches!(
+            generate_failure(401, r#"{"error":"unauthorized"}"#),
+            Ok(FreeDownload::NeedsSession(_))
+        ));
+        assert!(matches!(
+            generate_failure(403, r#"{"error":"forbidden"}"#),
+            Ok(FreeDownload::NeedsSession(_))
+        ));
+        assert!(matches!(
+            generate_failure(200, "[]"),
+            Ok(FreeDownload::NeedsSession(Some(reason))) if reason.contains("logged out")
+        ));
+        assert!(matches!(
+            generate_failure(200, r#"{"error":"nope"}"#),
+            Ok(FreeDownload::NeedsBrowser(_))
+        ));
+        assert!(generate_failure(500, "boom").is_err());
     }
 
     #[test]

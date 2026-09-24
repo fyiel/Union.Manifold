@@ -3,6 +3,18 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.9.8
+
+### Fixed
+
+- Nexus downloads stopped before they started. The free path probed the mod page
+  first, Nexus answers that page with a Cloudflare challenge, and the probe's
+  403 made a live session look blocked, so the click was handed to the resolver
+  and then reported as unresolvable. The download generator answers with a
+  working link while the page is still challenged, so the page is no longer
+  probed and the generator's own answer decides whether a browser or a fresh
+  cookie is needed.
+
 ## 3.9.7
 
 ### Added
