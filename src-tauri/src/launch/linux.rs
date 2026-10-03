@@ -637,7 +637,12 @@ fn retarget_auxiliary(
             .push(("UMU_CONTAINER_NSENTER".to_string(), "1".to_string()));
         return Ok(plan);
     }
-    Err("Wand on Linux requires this game to use Proton or umu".to_string())
+    if Path::new(&plan.command).file_name().is_some_and(|name| name == "wine" || name == "wine64") {
+        plan.args = vec![auxiliary_exe.to_string()];
+        plan.args.extend_from_slice(auxiliary_args);
+        return Ok(plan);
+    }
+    Err("Windows tools on Linux require this game to use Wine, Proton or umu".to_string())
 }
 
 #[cfg(all(test, target_os = "linux"))]

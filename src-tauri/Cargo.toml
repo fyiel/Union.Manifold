@@ -1,6 +1,6 @@
 [package]
 name = "union-manifold"
-version = "3.9.9"
+version = "3.9.10"
 description = "Union.Manifold, a multi source game launcher"
 authors = ["fyiel"]
 license = "MIT"
@@ -48,6 +48,7 @@ fs4 = "0.12"
 minisign-verify = "0.2.5"
 tauri-plugin-autostart = "2.5.1"
 tauri-plugin-notification = "2.3.3"
+object = { version = "0.36", default-features = false, features = ["read_core", "pe", "std"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

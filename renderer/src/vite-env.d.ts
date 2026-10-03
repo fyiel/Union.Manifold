@@ -235,7 +235,8 @@ declare global {
 
   type ModEntry = {
     id: string
-    provider: "nexus" | "workshop" | "thunderstore"
+    provider: "nexus" | "workshop" | "thunderstore" | "loader"
+    remoteId: string
     fileId: number | null
     name: string
     version: string
@@ -251,6 +252,8 @@ declare global {
     deployReason: string
     deployConfidence: "high" | "medium" | "low" | "manual" | string
     deployBlocked: boolean
+    deployAction?: "" | "tool" | "patcher" | "archive-path" | "installer" | "asi-loader"
+    toolExecutables?: string[]
   }
 
   type ModLoaderCompatibility = {
@@ -598,6 +601,9 @@ declare global {
       deploy?: (appid: string) => Promise<{ ok: boolean; fileCount?: number; error?: string }>
       undeploy?: (appid: string) => Promise<{ ok: boolean; error?: string }>
       openFolder?: (appid: string) => Promise<{ ok: boolean; error?: string }>
+      installAsiLoader?: (appid: string, proxy?: string) => Promise<{ ok: boolean; error?: string }>
+      launchTool?: (appid: string, modId: string, executable: string) => Promise<{ ok: boolean; error?: string }>
+      openPackage?: (appid: string, modId?: string) => Promise<{ ok: boolean; error?: string }>
       nexusValidate?: () => Promise<{ ok: boolean; user?: { name: string; premium: boolean; profileUrl?: string }; error?: string }>
       nexusSearch?: (domain: string, query: string, page: number) => Promise<{ ok: boolean; mods?: BrowseMod[]; hasMore?: boolean; error?: string }>
       nexusBrowse?: (domain: string, sort: string, order: string, period: string, offset: number) => Promise<{ ok: boolean; mods?: BrowseMod[]; hasMore?: boolean; total?: number; offset?: number; error?: string }>

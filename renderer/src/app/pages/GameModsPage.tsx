@@ -423,6 +423,18 @@ export function GameModsPage() {
     } catch (err) { toast(String(err), "error"); void reload() }
   }
 
+  const [packageBusy, setPackageBusy] = useState(false)
+  const [asiProxy, setAsiProxy] = useState("")
+  const packageAction = async (action: () => Promise<{ ok: boolean; error?: string } | undefined>) => {
+    setPackageBusy(true)
+    try {
+      const result = await action()
+      if (!result?.ok) toast(result?.error || "package action failed", "error", 8000)
+      await reload()
+    } catch (err) { toast(String(err), "error", 8000) }
+    finally { setPackageBusy(false) }
+  }
+
   const moveMod = async (index: number, dir: -1 | 1) => {
     const ids = mods.map((m) => m.id)
     const j = index + dir
@@ -846,7 +858,7 @@ const nexusDomain = gs?.nexusDomain || null
               <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", marginBottom: 14, borderRadius: 9, border: "1px solid color-mix(in srgb, var(--mf-danger) 35%, transparent)", background: "color-mix(in srgb, var(--mf-danger) 6%, transparent)", color: "var(--mf-t3)" }}>
                 <Puzzle size={14} strokeWidth={1.7} style={{ color: "var(--mf-danger)", flexShrink: 0 }} />
                 <span style={{ fontFamily: MONO, fontSize: 10.5, lineHeight: 1.5 }}>
-                  {blockedMods.length} {blockedMods.length === 1 ? "mod requires" : "mods require"} an interactive installer and cannot be deployed safely. Install through a FOMOD-capable manager.
+                  {blockedMods.length} {blockedMods.length === 1 ? "package needs" : "packages need"} another step before use. Follow the action shown on each package.
                 </span>
               </div>
             ) : null}
@@ -880,12 +892,31 @@ const nexusDomain = gs?.nexusDomain || null
                         <span title={m.name} style={{ fontSize: 13, fontWeight: 600, color: m.enabled ? "var(--mf-t1)" : "var(--mf-t4)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m.name}</span>
                         <span style={{ padding: "2px 8px", borderRadius: 999, border: "1px solid var(--mf-line-2)", fontFamily: MONO, fontSize: 9, textTransform: "uppercase", letterSpacing: "0.09em", color: "var(--mf-t3)", flexShrink: 0 }}>{m.provider}</span>
                         <span title={m.deployReason || "No automatic deployment decision recorded"} style={{ padding: "2px 8px", borderRadius: 999, border: `1px solid ${m.deployConfidence === "low" || m.deployBlocked ? "color-mix(in srgb, var(--mf-danger) 45%, transparent)" : "var(--mf-line-2)"}`, fontFamily: MONO, fontSize: 9, letterSpacing: "0.04em", color: m.deployConfidence === "low" || m.deployBlocked ? "var(--mf-danger)" : "var(--mf-t4)", flexShrink: 0 }}>
-                          {m.deployBlocked ? "installer required" : m.deployConfidence === "low" ? "check target" : launchManaged ? "auto: launch path" : `${m.deployConfidence === "manual" ? "manual" : "auto"}: ${m.deployPrefix || "game root"}`}
+                          {m.deployAction === "tool" ? "external tool" : m.deployAction === "asi-loader" ? "ASI loader required" : m.deployAction === "archive-path" ? "archive path required" : m.deployAction === "patcher" ? "apply with patch tool" : m.deployBlocked ? "installer required" : m.deployConfidence === "low" ? "check target" : launchManaged ? "auto: launch path" : `${m.deployConfidence === "manual" ? "manual" : "auto"}: ${m.deployPrefix || "game root"}`}
                         </span>
                       </div>
                       <div style={{ marginTop: 3, fontFamily: MONO, fontSize: 10, color: "var(--mf-t5)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                         {[m.version ? `v${m.version}` : "", m.author, fmtBytes(m.sizeBytes), fmtDate(m.installedAt)].filter(Boolean).join(" · ")}
                       </div>
+                      {m.deployAction && (
+                        <div style={{ marginTop: 8 }}>
+                          <div style={{ fontSize: 11, color: "var(--mf-t3)", marginBottom: 7 }}>{m.deployReason}</div>
+                          <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
+                            {m.deployAction === "asi-loader" && <>
+                              <select aria-label="ASI loader DLL" style={SELECT_BASE} value={asiProxy} onChange={(event) => setAsiProxy(event.target.value)}>
+                                <option value="">Auto (game imports or Wine settings)</option>
+                                {["winmm.dll", "dinput8.dll", "version.dll", "dsound.dll", "winhttp.dll", "dwmapi.dll", "xinput1_3.dll", "wininet.dll"].map((name) => <option key={name} value={name}>{name}</option>)}
+                              </select>
+                              <button style={GHOST_BTN} disabled={packageBusy} onClick={() => void packageAction(() => window.ucMods?.installAsiLoader?.(appid, asiProxy) ?? Promise.resolve(undefined))}>{packageBusy ? "Working…" : "Install ASI loader"}</button>
+                            </>}
+                            {m.deployAction === "tool" && (m.toolExecutables || []).map((exe) => <button key={exe} style={GHOST_BTN} disabled={packageBusy} onClick={() => void packageAction(() => window.ucMods?.launchTool?.(appid, m.id, exe) ?? Promise.resolve(undefined))}>Run {exe.split(/[\\/]/).pop()}</button>)}
+                            {m.deployAction === "archive-path" && m.provider === "nexus" && m.fileId && <button style={GHOST_BTN} disabled={installingFileId !== null} onClick={() => void installNexus({ remoteId: m.remoteId, name: m.name }, m.fileId!)}>Reinstall original archive</button>}
+                            <button style={GHOST_BTN} disabled={packageBusy} onClick={() => void packageAction(() => window.ucMods?.openPackage?.(appid, m.id) ?? Promise.resolve(undefined))}>Open package files</button>
+                            {m.deployAction === "tool" && <button style={GHOST_BTN} onClick={() => void packageAction(() => window.ucMods?.openPackage?.(appid) ?? Promise.resolve(undefined))}>Open game folder</button>}
+                          </div>
+                          {m.deployAction === "tool" && <div style={{ marginTop: 6, fontSize: 11, color: "var(--mf-t4)" }}>Select the game folder in the tool, then import and apply your patches there. Manage those patches in that tool.</div>}
+                        </div>
+                      )}
                     </div>
                     <button type="button" title={`Uninstall ${m.name}`} onClick={() => setConfirmRm(m)} className="mf-ghost" style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: 8, border: "1px solid var(--mf-line-2)", background: "transparent", color: "var(--mf-t4)", cursor: "pointer", flexShrink: 0 }}>
                       <Trash2 size={13} strokeWidth={1.7} />
