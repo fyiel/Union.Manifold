@@ -3,6 +3,17 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## Unreleased
+
+### Fixed
+
+- Windows setup now checks that `7z.dll` is writable before uninstalling or
+  replacing Manifold. An extractor left running during a game installation
+  could lock this DLL, leaving setup unable to finish after the old executable
+  had been removed. In-app updates now refuse to install while games, mods,
+  repairs or runtime downloads are being extracted, including extractions that
+  start while an update downloads. Retry the update after extraction finishes.
+
 ## 3.9.8
 
 ### Fixed

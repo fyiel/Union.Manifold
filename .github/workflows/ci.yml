@@ -49,6 +49,14 @@ jobs:
       - name: Fetch sidecars
         run: bun run fetch-sidecars ${{ matrix.sidecars }}
 
+      - name: Test Windows installer file locks
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install nsis --version=3.11 -y --no-progress
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./src-tauri/windows/test-hooks.ps1
+
       - name: Build trainer host
         if: matrix.os == 'ubuntu-22.04'
         run: bun run build:trainer-host

@@ -1,5 +1,36 @@
 ; NSIS installer hooks, wired via bundle > windows > nsis > installerHooks.
 ;
+; A surviving 7-Zip child can keep 7z.dll mapped after Manifold exits. Check
+; before the reinstall page can run an OLD uninstaller (which deletes the EXE
+; first), as well as before copying files and in newly generated uninstallers.
+; Opening an existing DLL for writing detects both mapped images and sharing
+; locks without changing its contents or terminating a game installation.
+!macro ManifoldRequireIdleExtractor directory
+  Push $0
+  ${If} ${FileExists} "${directory}\7z.dll"
+    System::Call 'kernel32::CreateFileW(w "${directory}\7z.dll", i 0x40000000, i 7, p 0, i 3, i 0x80, p 0) p.r0'
+    ${If} $0 = -1
+      MessageBox MB_OK|MB_ICONEXCLAMATION "Union.Manifold's extractor is still in use, or 7z.dll is not writable. Wait for game and mod installations to finish, close Manifold, then run setup again. If Manifold has already closed, wait for its extractor to finish or restart Windows." /SD IDOK
+      SetErrorLevel 2
+      Quit
+    ${EndIf}
+    System::Call 'kernel32::CloseHandle(p r0)'
+  ${EndIf}
+  Pop $0
+!macroend
+
+; GUI init precedes Tauri's reinstall page, including in passive mode. This
+; protects upgrades from versions whose uninstaller has no guard. Silent mode
+; skips GUI init (and the reinstall page), so PREINSTALL repeats the check.
+!define MUI_CUSTOMFUNCTION_GUIINIT ManifoldCheckExtraction
+Function ManifoldCheckExtraction
+  !insertmacro ManifoldRequireIdleExtractor "$INSTDIR"
+FunctionEnd
+
+!macro NSIS_HOOK_PREUNINSTALL
+  !insertmacro ManifoldRequireIdleExtractor "$INSTDIR"
+!macroend
+
 ; One-time migration away from the legacy per-machine install.
 ;
 ; Releases up to v2.10.0 shipped with installMode "perMachine": the app lived in
@@ -24,6 +55,7 @@ Var LegacyHadDesktopLnk
 Var LegacyHadRunEntry
 
 !macro NSIS_HOOK_PREINSTALL
+  !insertmacro ManifoldRequireIdleExtractor "$INSTDIR"
   StrCpy $LegacyPerMachineDir ""
   StrCpy $LegacyHadStartMenuLnk 0
   StrCpy $LegacyHadDesktopLnk 0
@@ -37,6 +69,7 @@ Var LegacyHadRunEntry
   ${If} $R8 != ""
   ${AndIf} $R9 != ""
   ${AndIf} ${FileExists} "$R9\uninstall.exe"
+    !insertmacro ManifoldRequireIdleExtractor "$R9"
     ; Record which machine-wide shortcuts pointed at the old copy before the
     ; uninstaller deletes them, so the post-install hook can restore per-user
     ; equivalents instead of blindly recreating shortcuts the user had removed.

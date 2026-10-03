@@ -248,6 +248,11 @@ async fn install_via_pacman(app: &AppHandle, new_version: &str) -> Result<(), St
 
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Value {
+    // Reject before downloading, then acquire again immediately before install
+    // in case a game/mod extraction started while the update was downloading.
+    if let Err(error) = crate::install::lock_for_update() {
+        return json!({ "ok": false, "error": error.to_string() });
+    }
     let updater = match app.updater() {
         Ok(u) => u,
         Err(e) => return json!({ "ok": false, "error": e.to_string() }),
@@ -260,6 +265,10 @@ pub async fn install_update(app: AppHandle) -> Value {
 
     #[cfg(target_os = "linux")]
     if is_pacman_install() {
+        let _update = match crate::install::lock_for_update() {
+            Ok(guard) => guard,
+            Err(error) => return json!({ "ok": false, "error": error.to_string() }),
+        };
         return match install_via_pacman(&app, &update.version).await {
             Ok(()) => {
                 app.restart();
@@ -271,9 +280,8 @@ pub async fn install_update(app: AppHandle) -> Value {
     let progress_app = app.clone();
     let mut received: u64 = 0;
     let mut last_emit: u64 = 0;
-    let install_app = app.clone();
-    match update
-        .download_and_install(
+    let bytes = match update
+        .download(
             move |chunk, total| {
                 received += chunk as u64;
                 if received - last_emit >= 512 * 1024 {
@@ -281,12 +289,21 @@ pub async fn install_update(app: AppHandle) -> Value {
                     emit_progress(&progress_app, "downloading", received, total);
                 }
             },
-            move || {
-                emit_progress(&install_app, "installing", 0, None);
-            },
+            || {},
         )
         .await
     {
+        Ok(bytes) => bytes,
+        Err(error) => return json!({ "ok": false, "error": error.to_string() }),
+    };
+    let _update = match crate::install::lock_for_update() {
+        Ok(guard) => guard,
+        Err(error) => return json!({ "ok": false, "error": error.to_string() }),
+    };
+    emit_progress(&app, "installing", 0, None);
+    // On Windows this starts NSIS and exits the process without running Drop
+    // or Tauri's exit handlers. No extractor may be alive at this point.
+    match update.install(bytes) {
         Ok(_) => {
             app.restart();
         }
