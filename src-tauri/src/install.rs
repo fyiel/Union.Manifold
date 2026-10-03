@@ -11,6 +11,18 @@ const ARCHIVE_EXTS: &[&str] = &[
     ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".001", ".r00",
 ];
 
+// Every 7-Zip caller (games, mods, repairs and runtimes) shares this gate.
+// Windows cannot replace 7z.dll while a child extractor has it loaded.
+static EXTRACTION_GATE: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+
+pub(crate) fn lock_for_update() -> Result<tokio::sync::RwLockWriteGuard<'static, ()>> {
+    EXTRACTION_GATE.try_write().map_err(|_| {
+        crate::error::AppError::msg(
+            "An installation or another update is in progress. Wait for it to finish before updating Manifold.",
+        )
+    })
+}
+
 fn has_part_marker(name: &str) -> bool {
     name.contains(".part1.") || name.contains(".part01.")
 }
@@ -315,6 +327,13 @@ pub(crate) async fn run_7z_pw(
     on_progress: impl Fn(u8),
 ) -> Result<()> {
     use tokio::io::AsyncReadExt;
+    // Hold through child.wait(), including the libarchive fallback. Checking a
+    // counter before updating leaves a race with a new extraction starting.
+    let _extraction = EXTRACTION_GATE.try_read().map_err(|_| {
+        crate::error::AppError::msg(
+            "Manifold is updating. Retry installation after it restarts.",
+        )
+    })?;
     let bin = sidecar_7z()?;
     std::fs::create_dir_all(out_dir).ok();
     let mut cmd = tokio::process::Command::new(&bin);
@@ -893,6 +912,38 @@ pub fn delete_archive_files(state: State<'_, AppState>, payload: Value) -> Value
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn update_prevents_starting_an_extractor() {
+        let temp = tempfile::tempdir().unwrap();
+        let update = lock_for_update().unwrap();
+        let out = temp.path().join("out");
+        let error = run_7z(&temp.path().join("game.zip"), &out, |_| {})
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "Manifold is updating. Retry installation after it restarts."
+        );
+        assert!(
+            !out.exists(),
+            "an update must prevent extraction from starting"
+        );
+        assert!(lock_for_update().is_err(), "a second update must be rejected");
+        drop(update);
+        assert!(
+            lock_for_update().is_ok(),
+            "a failed update must release the gate"
+        );
+
+        let first = EXTRACTION_GATE.try_read().unwrap();
+        let second = EXTRACTION_GATE.try_read().unwrap();
+        assert!(lock_for_update().is_err());
+        drop(first);
+        assert!(lock_for_update().is_err(), "all extractors must finish first");
+        drop(second);
+        assert!(lock_for_update().is_ok());
+    }
 
     #[test]
     fn staged_update_replaces_files_and_merges_latest_installed_metadata() {
