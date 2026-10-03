@@ -2651,6 +2651,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "object"
+version = "0.36.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62948e14d923ea95ea2c7c86c71013138b66525b86bdc08d2dcc262bdb497b87"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5006,7 +5015,7 @@ checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
 
 [[package]]
 name = "union-manifold"
-version = "3.9.9"
+version = "3.9.10"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -5016,6 +5025,7 @@ dependencies = [
  "hex",
  "image",
  "minisign-verify",
+ "object",
  "parking_lot",
  "percent-encoding",
  "rand 0.8.6",

@@ -3,6 +3,22 @@
 All notable changes to Union.Manifold. This project is a fork of
 [UnionCrax.Direct](https://github.com/UnionCrax-Team/UnionCrax.Direct) v2.7.3.
 
+## 3.9.10
+
+### Fixed
+
+- Preserve numbered PAZ/PAMT archive folders and recognize their game root,
+  instead of placing archive replacements beside the executable. Older
+  deployments are cleaned up with their backups restored; packages that lost
+  their archive paths offer a reinstall action.
+- Detect ASI plugins from their files, check their loader dependency, and offer
+  an architecture-matched, hash-verified Ultimate ASI Loader installation.
+  Disabling a managed loader also prevents its dependent plugins from deploying.
+- Treat standalone executable packages as tools with a Run action. On Linux,
+  tools use the game's Wine/Proton prefix. Archive patch instructions now direct
+  users to import and apply them in a compatible tool instead of appearing enabled.
+  These rules use package contents and game layout, without mod names or IDs.
+
 ## 3.9.9
 
 ### Fixed

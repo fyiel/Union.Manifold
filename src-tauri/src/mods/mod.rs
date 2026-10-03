@@ -17,6 +17,7 @@ pub mod nexus;
 pub mod steamcmd;
 pub mod thunderstore;
 pub mod workshop;
+pub mod packages;
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -39,6 +40,8 @@ pub struct ModEntry {
     pub deploy_reason: String,
     pub deploy_confidence: String,
     pub deploy_blocked: bool,
+    pub deploy_action: String,
+    pub tool_executables: Vec<String>,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -68,6 +71,8 @@ struct JournalEntry {
 
 #[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
 struct Journal {
+    #[serde(default)]
+    target: Option<PathBuf>,
     #[serde(default)]
     files: BTreeMap<String, JournalEntry>,
 }
@@ -612,6 +617,13 @@ fn enabled_mewgenics_mod_paths(game_dir: &Path, cfg: &GameMods) -> Vec<PathBuf> 
 }
 
 pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Result<usize, String> {
+    let previous = load_journal(game_dir);
+    if let Some(old) = previous.target.filter(|old| old != target) {
+        undeploy_from(game_dir, &old)?;
+    }
+    let mut effective = cfg.clone();
+    packages::refresh_asi_dependencies(game_dir, target, &mut effective);
+    let cfg = &effective;
     let staging_root = staging_root(game_dir);
     let backup_root = backup_root(game_dir);
     let mewgenics_paths = enabled_mewgenics_mod_paths(game_dir, cfg);
@@ -648,6 +660,7 @@ pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Resul
 
     let mut journal = load_journal(game_dir);
     let old_journal = journal.clone();
+    journal.target = Some(target.to_path_buf());
 
     let stale: Vec<String> = journal
         .files
@@ -899,6 +912,8 @@ pub(crate) fn deploy_to(game_dir: &Path, target: &Path, cfg: &GameMods) -> Resul
 }
 
 pub(crate) fn undeploy_from(game_dir: &Path, target: &Path) -> Result<(), String> {
+    let recorded = load_journal(game_dir).target;
+    let target = recorded.as_deref().unwrap_or(target);
     let backup_root = backup_root(game_dir);
     let journal = load_journal(game_dir);
     for (rel, entry) in &journal.files {
@@ -929,6 +944,13 @@ pub(crate) fn undeploy_from(game_dir: &Path, target: &Path) -> Result<(), String
 }
 
 fn is_game_dir(dir: &Path) -> bool {
+    if is_archive_game_root(dir) {
+        return true;
+    }
+    is_executable_game_dir(dir)
+}
+
+fn is_executable_game_dir(dir: &Path) -> bool {
     let Ok(rd) = std::fs::read_dir(dir) else {
         return false;
     };
@@ -960,7 +982,11 @@ fn is_game_dir(dir: &Path) -> bool {
 }
 
 pub(crate) fn resolve_game_root(base: &Path) -> PathBuf {
-    if is_game_dir(base) {
+    resolve_game_root_with(base, is_game_dir)
+}
+
+fn resolve_game_root_with(base: &Path, is_root: fn(&Path) -> bool) -> PathBuf {
+    if is_root(base) {
         return base.to_path_buf();
     }
     let mut cur = base.to_path_buf();
@@ -973,7 +999,7 @@ pub(crate) fn resolve_game_root(base: &Path) -> PathBuf {
             .map(|e| e.path())
             .filter(|p| p.is_dir())
             .collect();
-        if let Some(hit) = subdirs.iter().find(|d| is_game_dir(d)) {
+        if let Some(hit) = subdirs.iter().find(|d| is_root(d)) {
             return hit.clone();
         }
         if subdirs.len() == 1 {
@@ -983,6 +1009,22 @@ pub(crate) fn resolve_game_root(base: &Path) -> PathBuf {
         break;
     }
     base.to_path_buf()
+}
+
+fn numbered_archive_dir(dir: &Path) -> bool {
+    dir.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| !name.is_empty() && name.bytes().all(|c| c.is_ascii_digit()))
+        .unwrap_or(false)
+        && has_extension(dir, &["paz", "pamt"], 1)
+}
+
+fn is_archive_game_root(dir: &Path) -> bool {
+    child_dir(dir, "meta")
+        .map(|meta| has_extension(&meta, &["papgt"], 1))
+        .unwrap_or(false)
+        && std::fs::read_dir(dir).ok().into_iter().flatten().flatten()
+            .any(|entry| entry.path().is_dir() && numbered_archive_dir(&entry.path()))
 }
 
 fn deploy_target_dir(state: &AppState, appid: &str, cfg: &GameMods) -> Result<PathBuf, String> {
@@ -997,9 +1039,28 @@ fn deploy_target_dir(state: &AppState, appid: &str, cfg: &GameMods) -> Result<Pa
 }
 
 fn redeploy(state: &AppState, appid: &str, cfg: &GameMods) -> Result<usize, String> {
+    migrate_archive_target(state, appid, cfg)?;
     let dir = game_mods_dir(&state.paths, appid);
     let target = deploy_target_dir(state, appid, cfg)?;
     deploy_to(&dir, &target, cfg)
+}
+
+// Older journals did not record their destination. Resolve it with the old
+// executable-based rule before changing roots, so backups are restored there.
+fn migrate_archive_target(state: &AppState, appid: &str, cfg: &GameMods) -> Result<(), String> {
+    if cfg.deployment_plan_version >= 11 || !cfg.deploy_target.is_empty() { return Ok(()); }
+    let dir = game_mods_dir(&state.paths, appid);
+    let journal = load_journal(&dir);
+    if journal.target.is_some() || journal.files.is_empty() { return Ok(()); }
+    let base = library::game_files_dir(&library::scan_roots(state), appid)
+        .ok_or_else(|| format!("game {appid} not found in library"))?;
+    restore_legacy_archive_target(&dir, &base)
+}
+
+fn restore_legacy_archive_target(dir: &Path, base: &Path) -> Result<(), String> {
+    let old = resolve_game_root_with(base, is_executable_game_dir);
+    if old != resolve_game_root(base) { undeploy_from(dir, &old)?; }
+    Ok(())
 }
 
 pub(crate) fn active_mod_engine_profile(state: &AppState, appid: &str) -> Option<PathBuf> {
@@ -1028,6 +1089,10 @@ pub(crate) fn active_mewgenics_mod_paths(state: &AppState, appid: &str) -> Vec<P
 pub(crate) enum ModLayout {
     Raw,
     RequiresInstaller,
+    ExternalTool,
+    RequiresPatcher,
+    RequiresArchivePath,
+    Asi,
     BepInEx,
     ModEngine3,
     Lenny,
@@ -1039,6 +1104,19 @@ pub(crate) enum ModLayout {
     Ue4ssMod,
     WuchangEnabler,
     WuchangPackage,
+}
+
+impl DeploymentPlan {
+    fn action(&self) -> &'static str {
+        match self.layout {
+            ModLayout::ExternalTool => "tool",
+            ModLayout::RequiresPatcher => "patcher",
+            ModLayout::RequiresArchivePath => "archive-path",
+            ModLayout::RequiresInstaller => "installer",
+            ModLayout::Asi if self.confidence == "low" => "asi-loader",
+            _ => "",
+        }
+    }
 }
 
 fn game_layout(steam_appid: Option<u64>) -> Option<ModLayout> {
@@ -1221,6 +1299,17 @@ fn loader_compatibility(
 
     vec![
         LoaderCompatibility {
+            name: "Ultimate ASI Loader",
+            compatible: target.and_then(packages::binary_prefix).is_some(),
+            reason: target.and_then(|root| packages::binary_prefix(root).map(|prefix| {
+                if packages::has_asi_loader(&root.join(prefix)) {
+                    "an ASI loader is installed beside the game executable".to_string()
+                } else {
+                    "ASI plugins need a loader beside the Windows game executable".to_string()
+                }
+            })).unwrap_or_else(|| "no Windows game executable folder was detected".to_string()),
+        },
+        LoaderCompatibility {
             name: "Mod Engine 3",
             compatible: me3.is_some(),
             reason: me3
@@ -1347,6 +1436,7 @@ fn keeps_relative_position(dir: &Path) -> bool {
         .map(|name| MEANINGFUL_DIRS.contains(&name.to_string_lossy().to_lowercase().as_str()))
         .unwrap_or(false)
         || is_unreal_project_dir(dir)
+        || numbered_archive_dir(dir)
 }
 
 fn has_root_dir(root: &Path, names: &[&str]) -> bool {
@@ -1715,12 +1805,29 @@ fn infer_deployment_plan_for_entry(
 fn infer_deployment_plan(target: &Path, staged: &Path, steam_appid: Option<u64>) -> DeploymentPlan {
     let root = classification_root(staged);
     if contains_fomod(&root) {
+        return deployment_plan(ModLayout::RequiresInstaller, "",
+            "the archive uses an interactive FOMOD installer", "low");
+    }
+    if is_archive_game_root(target) && has_extension(&root, &["paz", "pamt", "papgt"], 4) {
+        let missing_paths = root_has_file_matching(&root, |name| packages::archive_file(Path::new(name)));
+        let paths_known = walkdir::WalkDir::new(&root).into_iter().flatten()
+            .filter(|entry| entry.file_type().is_file() && packages::archive_file(entry.path()))
+            .all(|entry| entry.path().strip_prefix(&root).ok()
+                .map(|rel| rel.components().count() > 1 && target.join(rel).is_file())
+                .unwrap_or(false));
         return deployment_plan(
-            ModLayout::RequiresInstaller,
-            "",
-            "the archive uses an interactive FOMOD installer",
-            "low",
+            if paths_known { ModLayout::Raw } else if missing_paths { ModLayout::RequiresArchivePath } else { ModLayout::RequiresPatcher }, "",
+            if paths_known { "the package replaces existing game-relative archive paths" }
+            else { "archive paths are missing or require index registration; reinstall the original archive or apply it with its patch tool" },
+            if paths_known { "high" } else { "low" },
         );
+    }
+    if is_archive_game_root(target) && packages::contains_patch_json(&root) {
+        return deployment_plan(ModLayout::RequiresPatcher, "",
+            "this package contains archive patch instructions; open a compatible patch tool, import this package and apply it", "high");
+    }
+    if let Some(plan) = packages::asi_plan(target, &root) {
+        return plan;
     }
     if steam_appid == Some(MEWGENICS_STEAM_APPID) {
         return deployment_plan(
@@ -1945,6 +2052,10 @@ fn infer_deployment_plan(target: &Path, staged: &Path, steam_appid: Option<u64>)
         );
     }
 
+    if !packages::tool_executables(&root, target).is_empty() {
+        return deployment_plan(ModLayout::ExternalTool, "",
+            "this package contains a standalone executable; open the tool to configure and apply its changes", "high");
+    }
     deployment_plan(
         ModLayout::Raw,
         "",
@@ -2201,6 +2312,7 @@ pub(crate) fn apply_bepinex_layout(src: &Path, dst: &Path, full_name: &str) -> R
 }
 
 const MEANINGFUL_DIRS: &[&str] = &[
+    "bin64",
     "bepinex",
     "binaries",
     "data",
@@ -2536,7 +2648,8 @@ fn apply_staging_layout(
     mod_id: &str,
 ) -> Result<(), String> {
     match layout {
-        ModLayout::Raw => strip_wrapper_dir(staged),
+        ModLayout::Raw | ModLayout::Asi | ModLayout::ExternalTool
+        | ModLayout::RequiresPatcher | ModLayout::RequiresArchivePath => strip_wrapper_dir(staged),
         ModLayout::ModEngine3 => apply_mod_engine_layout(staged, mod_id),
         ModLayout::Lenny => apply_lenny_layout(staged, fallback_name),
         ModLayout::MelonLoader => Ok(()),
@@ -2586,7 +2699,9 @@ fn upsert_mod(cfg: &mut GameMods, spec: &InstallSpec, size: u64, plan: &Deployme
         deploy_prefix: plan.deploy_prefix.clone(),
         deploy_reason: plan.reason.clone(),
         deploy_confidence: plan.confidence.to_string(),
-        deploy_blocked: false,
+        deploy_blocked: !plan.action().is_empty(),
+        deploy_action: plan.action().to_string(),
+        tool_executables: Vec::new(),
     };
     if let Some(m) = cfg.mods.iter_mut().find(|m| m.id == entry.id) {
         entry.enabled = m.enabled;
@@ -2682,12 +2797,18 @@ fn finalize_install_blocking(
 
     let size = crate::install::dir_size(&final_dir);
     upsert_mod(&mut cfg, spec, size, &plan);
-    cfg.deployment_plan_version = DEPLOYMENT_PLAN_VERSION;
+    if let Some(entry) = cfg.mods.iter_mut().find(|entry| entry.id == mod_id) {
+        if plan.layout == ModLayout::ExternalTool {
+            entry.tool_executables = packages::tool_executables(&final_dir, &target);
+        }
+    }
+    refresh_deployment_plans(state, &spec.appid, &mut cfg);
     // Deploy before persisting: a failed install must not show up as
     // installed with nothing on disk. The failed deploy_to has already
     // reconciled the journal with the game directory, and the staging
     // folder is replaced on the next attempt.
     let n = redeploy(state, &spec.appid, &cfg)?;
+    cfg.deployment_plan_version = DEPLOYMENT_PLAN_VERSION;
     save_config(&state.paths, &spec.appid, &cfg);
     emit_changed(app, &spec.appid);
     Ok(n)
@@ -2805,11 +2926,12 @@ async fn archive_install_inner(
 
 
 fn apply_manual_target(plan: &mut DeploymentPlan, target: &str) {
+    let requires_action = !plan.action().is_empty();
     if !matches!(plan.layout, ModLayout::ModEngine3 | ModLayout::Lenny) {
         plan.deploy_prefix.clear();
     }
     plan.reason = format!("using the manual deploy target {}; {}", target, plan.reason);
-    plan.confidence = "manual";
+    if !requires_action { plan.confidence = "manual"; }
 }
 
 async fn flatten_tar(dir: &Path) -> Result<(), String> {
@@ -2837,9 +2959,13 @@ async fn flatten_tar(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-const DEPLOYMENT_PLAN_VERSION: u32 = 10;
+const DEPLOYMENT_PLAN_VERSION: u32 = 11;
 
 fn refresh_deployment_plans(state: &AppState, appid: &str, cfg: &mut GameMods) -> bool {
+    if let Err(error) = migrate_archive_target(state, appid, cfg) {
+        crate::logging::write_line("warn", &format!("mod target migration failed: {error}"));
+        return false;
+    }
     let Ok(target) = deploy_target_dir(state, appid, cfg) else {
         return false;
     };
@@ -2920,23 +3046,32 @@ fn refresh_deployment_plans(state: &AppState, appid: &str, cfg: &mut GameMods) -
         if !manual_target.is_empty() {
             apply_manual_target(&mut plan, &manual_target);
         }
-        let blocked = plan.layout == ModLayout::RequiresInstaller;
+        let action = plan.action().to_string();
+        let blocked = !action.is_empty();
+        let executables = if plan.layout == ModLayout::ExternalTool {
+            packages::tool_executables(&staged, &target)
+        } else { Vec::new() };
         let confidence = plan.confidence.to_string();
         if installed.deploy_prefix != plan.deploy_prefix
             || installed.deploy_reason != plan.reason
             || installed.deploy_confidence != confidence
             || installed.deploy_blocked != blocked
+            || installed.deploy_action != action
+            || installed.tool_executables != executables
         {
             installed.deploy_prefix = plan.deploy_prefix;
             installed.deploy_reason = plan.reason;
             installed.deploy_confidence = confidence;
             installed.deploy_blocked = blocked;
+            installed.deploy_action = action;
+            installed.tool_executables = executables;
             changed = true;
         }
     }
     if migration_failed {
         return true;
     }
+    changed |= packages::refresh_asi_dependencies(&game_mods_dir(&state.paths, appid), &target, cfg);
     cfg.deployment_plan_version = DEPLOYMENT_PLAN_VERSION;
     changed
 }
@@ -3005,29 +3140,32 @@ fn load_local_game_state(state: &AppState, appid: &str) -> (Value, Option<Discov
             steam_changed = true;
         }
     }
-    let plan_dirty = if steam_changed
+    let mut plan_dirty = if steam_changed
         || cfg.deployment_plan_version < DEPLOYMENT_PLAN_VERSION
         || cfg
             .mods
             .iter()
-            .any(|installed| installed.deploy_reason.is_empty())
+            .any(|installed| installed.deploy_reason.is_empty() || installed.deploy_action == "asi-loader")
     {
         refresh_deployment_plans(state, appid, &mut cfg)
     } else {
         false
     };
-    dirty |= plan_dirty;
-
-    if dirty || !existed {
-        save_config(&state.paths, appid, &cfg);
+    if let Ok(target) = deploy_target_dir(state, appid, &cfg) {
+        plan_dirty |= packages::refresh_asi_dependencies(&game_mods_dir(&state.paths, appid), &target, &mut cfg);
     }
+    dirty |= plan_dirty;
     if plan_dirty {
         if let Err(error) = redeploy(state, appid, &cfg) {
             crate::logging::write_line(
                 "warn",
                 &format!("mod deployment plan migration failed for {appid}: {error}"),
             );
+            return (json!({"ok": false, "error": error}), None);
         }
+    }
+    if dirty || !existed {
+        save_config(&state.paths, appid, &cfg);
     }
     let discovery = discovery_needed_for(&cfg, nexus_key.is_some()).then(|| DiscoverySeed {
         initial: cfg.clone(),
@@ -4143,6 +4281,115 @@ mod tests {
         apply_staging_layout(&staged, plan.layout, &entry.name, &entry.id).unwrap();
         entry.deploy_prefix = plan.deploy_prefix.clone();
         entry.deploy_confidence = plan.confidence.to_string();
+        entry.deploy_blocked = !plan.action().is_empty();
+        entry.deploy_action = plan.action().to_string();
+    }
+
+    #[test]
+    fn numbered_archive_packages_keep_their_paths_and_restore_originals() {
+        let tmp = tempdir().unwrap();
+        let base = tmp.path().join("install");
+        let game = base.join("Any archive game");
+        write_file(&game.join("bin64/Adventure.exe"), "mz");
+        write_file(&game.join("meta/0.papgt"), "index");
+        write_file(&game.join("0042/0.paz"), "original");
+        let target = resolve_game_root(&base);
+        assert_eq!(target, game);
+        let dir = tmp.path().join("mods");
+        let mut entry = mk_mod(&dir, "arbitrary-package", 0, &[("0042/0.paz", "replacement")]);
+        install_into(&dir, &target, &mut entry);
+        let cfg = GameMods { mods: vec![entry], ..Default::default() };
+        deploy_to(&dir, &target, &cfg).unwrap();
+        assert_eq!(read(&game.join("0042/0.paz")), "replacement");
+        assert!(!game.join("bin64/0.paz").exists());
+        assert!(!game.join("0.paz").exists());
+        undeploy_from(&dir, &target).unwrap();
+        assert_eq!(read(&game.join("0042/0.paz")), "original");
+    }
+
+    #[test]
+    fn flattened_archives_and_external_tools_are_not_deployed_as_mods() {
+        let tmp = tempdir().unwrap();
+        let target = tmp.path().join("game");
+        write_file(&target.join("bin64/Adventure.exe"), "mz");
+        write_file(&target.join("meta/0.papgt"), "index");
+        write_file(&target.join("0042/0.paz"), "original");
+        let dir = tmp.path().join("mods");
+        for (id, file) in [("loose-archive", "0.paz"), ("external-tool", "Editor.exe")] {
+            let mut entry = mk_mod(&dir, id, 0, &[(file, "payload")]);
+            install_into(&dir, &target, &mut entry);
+            assert!(entry.deploy_blocked, "{id} must require an action");
+            let cfg = GameMods { mods: vec![entry], ..Default::default() };
+            deploy_to(&dir, &target, &cfg).unwrap();
+            assert!(!target.join(file).exists());
+            assert_eq!(read(&target.join("0042/0.paz")), "original");
+        }
+    }
+
+    #[test]
+    fn asi_plugins_follow_the_enabled_loader_and_keep_binary_paths() {
+        let tmp = tempdir().unwrap();
+        let game = tmp.path().join("game");
+        write_file(&game.join("bin64/Adventure.exe"), "mz");
+        let dir = tmp.path().join("mods");
+        let mut plugin = mk_mod(&dir, "any-plugin", 0, &[("bin64/Example.asi", "plugin"), ("bin64/Example.ini", "settings")]);
+        install_into(&dir, &game, &mut plugin);
+        assert_eq!(plugin.deploy_action, "asi-loader");
+        let mut cfg = GameMods { mods: vec![plugin], ..Default::default() };
+        deploy_to(&dir, &game, &cfg).unwrap();
+        assert!(!game.join("bin64/Example.asi").exists());
+        let mut loader = mk_mod(&dir, "some-loader", 1, &[("winmm.dll", "placeholder")]);
+        std::fs::write(dir.join("staging/some-loader/winmm.dll"), packages::pe_fixture(true, true)).unwrap();
+        install_into(&dir, &game, &mut loader);
+        cfg.mods.push(loader);
+        deploy_to(&dir, &game, &cfg).unwrap();
+        assert_eq!(read(&game.join("bin64/Example.asi")), "plugin");
+        assert!(game.join("bin64/winmm.dll").is_file());
+        cfg.mods[1].enabled = false;
+        deploy_to(&dir, &game, &cfg).unwrap();
+        assert!(!game.join("bin64/Example.asi").exists());
+        assert!(!game.join("bin64/winmm.dll").exists());
+        cfg.mods[1].enabled = true;
+        deploy_to(&dir, &game, &cfg).unwrap();
+        assert_eq!(read(&game.join("bin64/Example.ini")), "settings");
+    }
+
+    #[test]
+    fn legacy_archive_migration_cleans_the_old_binary_target_and_restores_backups() {
+        let tmp = tempdir().unwrap();
+        let base = tmp.path().join("install");
+        let game = base.join("Any Game");
+        write_file(&game.join("bin64/Adventure.exe"), "mz");
+        write_file(&game.join("meta/0.papgt"), "index");
+        write_file(&game.join("0042/0.paz"), "archive original");
+        write_file(&game.join("bin64/config.ini"), "config original");
+        let dir = tmp.path().join("mods");
+        let entry = mk_mod(&dir, "old-package", 0, &[("0.paz", "wrong place"), ("config.ini", "changed")]);
+        let cfg = GameMods { mods: vec![entry], ..Default::default() };
+        deploy_to(&dir, &game.join("bin64"), &cfg).unwrap();
+        let mut journal = load_journal(&dir);
+        journal.target = None;
+        save_journal(&dir, &journal).unwrap();
+        restore_legacy_archive_target(&dir, &base).unwrap();
+        assert!(!game.join("bin64/0.paz").exists());
+        assert_eq!(read(&game.join("bin64/config.ini")), "config original");
+        assert_eq!(read(&game.join("0042/0.paz")), "archive original");
+        assert!(load_journal(&dir).files.is_empty());
+    }
+
+    #[test]
+    fn archive_patch_instructions_require_a_tool_even_with_a_manual_target() {
+        let tmp = tempdir().unwrap();
+        let game = tmp.path().join("game");
+        write_file(&game.join("bin64/Adventure.exe"), "mz");
+        write_file(&game.join("meta/0.papgt"), "index");
+        write_file(&game.join("0042/0.paz"), "original");
+        let stage = tmp.path().join("package");
+        write_file(&stage.join("changes.json"), r#"{"patches":[{"offset":12,"value":42}]}"#);
+        let mut plan = infer_deployment_plan(&game, &stage, None);
+        apply_manual_target(&mut plan, "Any Game");
+        assert_eq!(plan.action(), "patcher");
+        assert!(!plan.reason.is_empty());
     }
 
     #[test]
@@ -4475,4 +4722,3 @@ mod tests {
         assert!(!tmp.path().join("outside/file.txt").exists());
     }
 }
-
